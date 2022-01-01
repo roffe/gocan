@@ -3,8 +3,10 @@ package canusb
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,17 +18,22 @@ import (
 )
 
 const (
-	SaabIBUSRate = "scb9a"
-	SaabPBUSRate = "S6"
+	//CR = "\r"
+	CR           = 0x0d
+	SaabIBUSRate = 47.619
+	SaabPBUSRate = 500
 )
 
 type Canusb struct {
-	c    context.CancelFunc
-	port serial.Port
-	recv chan []byte
-	send chan []byte
-	sync.Mutex
+	//debug                bool
+	canrate    string
+	c          context.CancelFunc
+	port       serial.Port
+	recv, send chan *Frame
+	//send                 chan []byte
 	recvBytes, sentBytes uint64
+	errors               uint64
+	sync.Mutex
 }
 
 type Config struct {
@@ -45,49 +52,34 @@ type CanConfig struct {
 
 type B []byte
 
-type Frame struct {
-	Identifier string
-	Data       interface{}
-}
-
-func New(cfg *Config) (*Canusb, error) {
-	mode := &serial.Mode{
-		BaudRate: 921600,
-		Parity:   serial.NoParity,
-		DataBits: 8,
-		StopBits: serial.OneStopBit,
-	}
-	p, err := serial.Open(cfg.Com.Port, mode)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open com port %q : %v", cfg.Com.Port, err)
-	}
-
-	recv := make(chan []byte, 1000)
-	send := make(chan []byte, 1000)
-
+func New(opts ...Opts) (*Canusb, error) {
+	//c := new(Canusb)
 	c := &Canusb{
-		port: p,
-		recv: recv,
-		send: send,
+		recv: make(chan *Frame, 1000),
+		send: make(chan *Frame, 100),
 	}
-
-	go c.run(cfg.Can.Rate)
+	for _, opt := range opts {
+		if err := opt(c); err != nil {
+			return nil, err
+		}
+	}
+	go c.run()
 	return c, nil
 }
 
-func (c *Canusb) run(canrate string) {
+func (c *Canusb) run() {
 	ctx, cancel := context.WithCancel(context.Background())
 	c.c = cancel
 	go func() {
 		defer cancel()
 		defer close(c.recv)
-		out := bytes.NewBuffer([]byte{})
-		buff := make([]byte, 1)
+		frame := bytes.NewBuffer([]byte{})
+		readBuffer := make([]byte, 1)
 		for {
 			if ctx.Err() != nil {
 				break
 			}
-			n, err := c.port.Read(buff)
+			n, err := c.port.Read(readBuffer)
 			if err != nil {
 				log.Println(err)
 				break
@@ -97,26 +89,45 @@ func (c *Canusb) run(canrate string) {
 				break
 			}
 			atomic.AddUint64(&c.recvBytes, uint64(n))
-			out.Write(buff)
-			if buff[n-1] == 0x0D {
-				if out.Len() == 1 {
-					out.Reset()
+			frame.Write(readBuffer)
+			if readBuffer[n-1] == 0x0D {
+				if frame.Len() == 1 {
+					frame.Reset()
 					continue
 				}
-				c.recv <- B(strings.ReplaceAll(out.String(), "\r", ""))
-				out.Reset()
+				b := frame.Bytes()
+				switch b[0] {
+				case 'F':
+					if err := checkStatus(b); err != nil {
+						log.Fatal("can status error", err)
+					}
+				case 't':
+					f := parseFrame(frame)
+					c.recv <- f
+				case 'z':
+					// previous command was ok
+				case 0x07:
+					atomic.AddUint64(&c.errors, 1)
+					log.Println("received error response")
+				default:
+					log.Printf("COM>> %q || %X\n", string(b), b)
+				}
+
+				frame.Reset()
 			}
 		}
 	}()
 	go func() {
 		rl := ratelimit.New(50)
 		defer cancel()
-		for o := range c.send {
+		for f := range c.send {
 			if ctx.Err() != nil {
 				break
 			}
 			rl.Take()
-			n, err := c.writeCom(o)
+			out := fmt.Sprintf("t%s%d%x", f.Identifier, f.Len, f.Data)
+			LogOut(f)
+			n, err := c.writeCom(B(out))
 			if err != nil {
 				log.Fatal(err)
 			}
@@ -128,17 +139,71 @@ func (c *Canusb) run(canrate string) {
 	go func() {
 		for {
 			time.Sleep(1 * time.Second)
-			c.Send(B("F\r")) // Read Status Flags
+			c.writeCom(B("F\r")) // Read Status Flags
 		}
 	}()
 
-	c.Send(B("\r\r\r")) // Empty buffer
+	c.initCom()
+}
 
-	c.Send(B("V\r"))          // Get Version number of both CANUSB hardware and software
-	c.Send(B("N\r"))          // Get Serial number of the CANUSB
-	c.Send(B(canrate + "\r")) // Setup CAN bit-rates
-	c.Send(B("O\r"))          // Open the CAN channel
+func LogOut(f *Frame) {
+	var out strings.Builder
+	out.WriteString(strings.ToUpper(f.Identifier) + "h [")
+	for i, b := range f.Data {
+		out.WriteString(fmt.Sprintf("%02X", b))
+		if i != len(f.Data)-1 {
+			out.WriteString(" ")
 
+		}
+	}
+	out.WriteString("]")
+	log.Println(out.String())
+	//log.Printf("%sh %d %X\n", strings.ToUpper(f.Identifier), f.Len, f.Data)
+}
+
+func (c *Canusb) initCom() {
+	var init = []B{
+		{CR, CR, CR},        // Empty buffer
+		{'V', CR},           // Get Version number of both CANUSB hardware and software
+		{'N', CR},           // Get Serial number of the CANUSB
+		B(c.canrate + "\r"), // Setup CAN bit-rates
+		//B("M" + "\r"),
+		{'O', CR}, // Open the CAN channel
+	}
+
+	for _, i := range init {
+		if _, err := c.writeCom(i); err != nil {
+			log.Fatal(err)
+		}
+	}
+}
+
+func parseFrame(buff *bytes.Buffer) *Frame {
+	p := strings.ReplaceAll(buff.String(), "\r", "")
+
+	addr := string(p[1:4])
+
+	len, err := strconv.ParseUint(string(p[4:5]), 0, 8)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	data, err := hex.DecodeString(p[5:])
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	return &Frame{
+		Identifier: addr,
+		Len:        len,
+		Data:       data,
+	}
+
+}
+
+func checkBitSet(n, k int) bool {
+	v := n & (1 << (k - 1))
+	return v == 1
 }
 
 func (c *Canusb) Stop() error {
@@ -148,20 +213,27 @@ func (c *Canusb) Stop() error {
 	return c.port.Close()
 }
 
-func (c *Canusb) Chan() <-chan []byte {
+func (c *Canusb) Chan() <-chan *Frame {
 	return c.recv
 }
 
-func (c *Canusb) Send(b []byte) {
-	c.send <- b
+func (c *Canusb) Send(f *Frame) error {
+	select {
+	case c.send <- f:
+		return nil
+	default:
+		return fmt.Errorf("send channel full")
+	}
 }
 
 type Stats struct {
-	RecvBytes, SentBytes uint64
+	RecvBytes uint64
+	SentBytes uint64
+	Errors    uint64
 }
 
 func (c *Canusb) Stats() Stats {
-	return Stats{c.recvBytes, c.sentBytes}
+	return Stats{c.recvBytes, c.sentBytes, c.errors}
 }
 
 func (c *Canusb) writeCom(data []byte) (int, error) {
@@ -172,20 +244,22 @@ func (c *Canusb) writeCom(data []byte) (int, error) {
 	return n, nil
 }
 
-func portInfo() {
+func portInfo(portName string) {
 	ports, err := enumerator.GetDetailedPortsList()
 	if err != nil {
 		log.Fatal(err)
 	}
 	if len(ports) == 0 {
-		fmt.Println("No serial ports found!")
+		log.Fatal("No serial ports found!")
 		return
 	}
 	for _, port := range ports {
-		fmt.Printf("Found port: %s\n", port.Name)
-		if port.IsUSB {
-			fmt.Printf("   USB ID     %s:%s\n", port.VID, port.PID)
-			fmt.Printf("   USB serial %s\n", port.SerialNumber)
+		if port.Name == portName {
+			log.Printf("Using port: %s\n", port.Name)
+			if port.IsUSB {
+				log.Printf("   USB ID     %s:%s\n", port.VID, port.PID)
+				log.Printf("   USB serial %s\n", port.SerialNumber)
+			}
 		}
 	}
 }
