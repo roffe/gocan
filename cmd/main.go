@@ -68,19 +68,21 @@ func main() {
 			log.Println(err)
 			return
 		}
-		log.Println("VIN:", c.GetHeader(0x90))
-		log.Println("Box HW part number:", c.GetHeader(0x91))
-		log.Println("Box SW part number:", c.GetHeader(0x94))
-		log.Println("ECU Software version:", c.GetHeader(0x95))
-		log.Println("Engine type:", c.GetHeader(0x97))
-		log.Println("Hardware serial nr:", c.GetHeader(0x92))
-		log.Println("Tester info:", c.GetHeader(0x98))
-		log.Println("Software date:", c.GetHeader(0x99))
+
 		ok := c.Tjong(0)
 		if !ok {
 			c.Tjong(1)
 		}
 
+		log.Println("VIN:", c.GetHeader(0x90))
+		log.Println("Box HW part number:", c.GetHeader(0x91))
+		log.Println("Immo Code:", c.GetHeader(0x92))
+		log.Println("Software Saab part number:", c.GetHeader(0x94))
+		log.Println("ECU Software version:", c.GetHeader(0x95))
+		log.Println("Engine type:", c.GetHeader(0x97))
+		log.Println("Tester info:", c.GetHeader(0x98))
+		log.Println("Software date:", c.GetHeader(0x99))
+		sig <- os.Interrupt
 	}()
 
 outer:
@@ -90,8 +92,8 @@ outer:
 			switch f.Identifier {
 			//case 0x238: //  Trionic data initialization reply
 			//case 0x258: // 258h - Trionic data query reply
-			case 0x258:
-				//canusb.LogOut(f)
+			//case 0x258:
+			//canusb.LogOut(f)
 			default:
 				//canusb.LogOut(f)
 			}
@@ -106,24 +108,6 @@ outer:
 			break outer
 		}
 	}
-
-	/*
-			//Or if you prefer go routines
-			// Start our custom frame decoder
-			go func() {
-				for f := range c.Chan() {
-					decodeSaabFrame(f)
-				}
-				log.Println("CAN consumer exited")
-			}()
-		 	//Print some usage stats every 10 seconds
-			go func() {
-				for {
-					time.Sleep(10 * time.Second)
-
-				}
-			}()
-	*/
 }
 
 func decodeSaabFrame(f *canusb.Frame) {
