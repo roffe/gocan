@@ -51,6 +51,8 @@ func OptRate(kbit float64) Opts {
 			c.canrate = "S5"
 		case 500:
 			c.canrate = "S6"
+		case 615:
+			c.canrate = "s4037"
 		case 800:
 			c.canrate = "S7"
 		case 1000:

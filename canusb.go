@@ -3,6 +3,7 @@ package canusb
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"log"
@@ -22,6 +23,7 @@ const (
 	CR           = 0x0d
 	SaabIBUSRate = 47.619
 	SaabPBUSRate = 500
+	Trionic5     = 615
 )
 
 type Canusb struct {
@@ -33,7 +35,13 @@ type Canusb struct {
 	//send                 chan []byte
 	recvBytes, sentBytes uint64
 	errors               uint64
+	waiters              []*waiter
 	sync.Mutex
+}
+
+type waiter struct {
+	identifier int
+	callback   chan *Frame
 }
 
 type Config struct {
@@ -89,8 +97,9 @@ func (c *Canusb) run() {
 				break
 			}
 			atomic.AddUint64(&c.recvBytes, uint64(n))
+
 			frame.Write(readBuffer)
-			if readBuffer[n-1] == 0x0D {
+			if readBuffer[0] == 0x0D {
 				if frame.Len() == 1 {
 					frame.Reset()
 					continue
@@ -104,6 +113,17 @@ func (c *Canusb) run() {
 				case 't':
 					f := parseFrame(frame)
 					c.recv <- f
+					c.Lock()
+					for _, w := range c.waiters {
+						if w.identifier == int(f.Identifier) {
+							select {
+							case w.callback <- f:
+							default:
+								continue
+							}
+						}
+					}
+					c.Unlock()
 				case 'z':
 					// previous command was ok
 				case 0x07:
@@ -112,7 +132,6 @@ func (c *Canusb) run() {
 				default:
 					log.Printf("COM>> %q || %X\n", string(b), b)
 				}
-
 				frame.Reset()
 			}
 		}
@@ -125,9 +144,9 @@ func (c *Canusb) run() {
 				break
 			}
 			rl.Take()
-			out := fmt.Sprintf("t%s%d%x", f.Identifier, f.Len, f.Data)
+			out := fmt.Sprintf("t%x%d%x", f.Identifier, f.Len, f.Data)
 			LogOut(f)
-			n, err := c.writeCom(B(out))
+			n, err := c.writeCom(B(out + "\r"))
 			if err != nil {
 				log.Fatal(err)
 			}
@@ -146,19 +165,33 @@ func (c *Canusb) run() {
 	c.initCom()
 }
 
+func (c *Canusb) WaitForFrame(identifier int, timeout time.Duration) (*Frame, error) {
+	callbackChan := make(chan *Frame)
+	c.Lock()
+	c.waiters = append(c.waiters, &waiter{
+		identifier: identifier,
+		callback:   callbackChan,
+	})
+	c.Unlock()
+	select {
+	case f := <-callbackChan:
+		return f, nil
+	case <-time.After(timeout):
+		return nil, fmt.Errorf("timeout waiting for frame 0x%04X", identifier)
+	}
+}
+
 func LogOut(f *Frame) {
 	var out strings.Builder
-	out.WriteString(strings.ToUpper(f.Identifier) + "h [")
+	out.WriteString(fmt.Sprintf("0x%x", f.Identifier) + " [")
 	for i, b := range f.Data {
 		out.WriteString(fmt.Sprintf("%02X", b))
 		if i != len(f.Data)-1 {
 			out.WriteString(" ")
-
 		}
 	}
 	out.WriteString("]")
 	log.Println(out.String())
-	//log.Printf("%sh %d %X\n", strings.ToUpper(f.Identifier), f.Len, f.Data)
 }
 
 func (c *Canusb) initCom() {
@@ -166,9 +199,9 @@ func (c *Canusb) initCom() {
 		{CR, CR, CR},        // Empty buffer
 		{'V', CR},           // Get Version number of both CANUSB hardware and software
 		{'N', CR},           // Get Serial number of the CANUSB
+		B("Z0\r"),           // Sets Time Stamp OFF for received frames
 		B(c.canrate + "\r"), // Setup CAN bit-rates
-		//B("M" + "\r"),
-		{'O', CR}, // Open the CAN channel
+		{'O', CR},           // Open the CAN channel
 	}
 
 	for _, i := range init {
@@ -180,8 +213,11 @@ func (c *Canusb) initCom() {
 
 func parseFrame(buff *bytes.Buffer) *Frame {
 	p := strings.ReplaceAll(buff.String(), "\r", "")
-
-	addr := string(p[1:4])
+	b, err := hex.DecodeString(fmt.Sprintf("%04s", p[1:4]))
+	if err != nil {
+		log.Fatal(err)
+	}
+	addr := binary.BigEndian.Uint16(b)
 
 	len, err := strconv.ParseUint(string(p[4:5]), 0, 8)
 	if err != nil {
@@ -195,7 +231,7 @@ func parseFrame(buff *bytes.Buffer) *Frame {
 
 	return &Frame{
 		Identifier: addr,
-		Len:        len,
+		Len:        uint8(len),
 		Data:       data,
 	}
 

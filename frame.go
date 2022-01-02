@@ -3,11 +3,11 @@ package canusb
 import "fmt"
 
 type Frame struct {
-	Identifier string
-	Len        uint64
+	Identifier uint16
+	Len        uint8
 	Data       []byte
 }
 
 func (f *Frame) String() string {
-	return fmt.Sprintf("%s %d %X", string(f.Identifier), f.Len, f.Data)
+	return fmt.Sprintf("0x%x %d %X", f.Identifier, f.Len, f.Data)
 }

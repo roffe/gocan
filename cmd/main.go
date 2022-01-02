@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"log"
 	"os"
 	"os/signal"
@@ -17,8 +18,9 @@ var (
 
 func init() {
 	log.SetFlags(log.Lshortfile | log.LstdFlags)
-	flag.StringVarP(&port, "port", "p", "COM1", "Comport, Windows COM#.. Linux/OSX: /dev/ttyUS#..")
+	flag.StringVarP(&port, "port", "p", "", "COM-port, Windows COM#\nLinux/OSX: /dev/ttyUSB#")
 	flag.IntVarP(&baudrate, "baudrate", "b", 115200, "Baudrate")
+
 	flag.Parse()
 }
 
@@ -42,53 +44,74 @@ func main() {
 	t := time.NewTicker(10 * time.Second)
 
 	go func() {
-		time.Sleep(3 * time.Second)
-		err := c.Send(&canusb.Frame{
-			Identifier: "220",
-			Len:        8,
-			Data:       canusb.B{0x3f, 0x81, 0x01, 0x33, 0x02, 0x40, 0x00, 0x00},
-		})
+		time.Sleep(1 * time.Second)
+		c.SendFrame(0x220, canusb.B{0x3F, 0x81, 0x00, 0x11, 0x02, 0x40, 0x00, 0x00}) //init:msg
+		f, err := c.WaitForFrame(0x238, 1*time.Second)
 		if err != nil {
-			log.Fatal(err)
+			log.Println(err)
+			return
 		}
+		canusb.LogOut(f)
+		c.SendFrame(0x240, canusb.B{0x40, 0xA1, 0x02, 0x1A, 0x90, 0x00, 0x00, 0x00})
+
+		korv := true
+		var answer []byte
+
+		var length int
+		for korv {
+			f2, err := c.WaitForFrame(0x258, 1*time.Second)
+			if err != nil {
+				log.Println(err)
+				return
+			}
+			canusb.LogOut(f2)
+			if f2.Data[0] == 0xC3 {
+				if int(f2.Data[2]) > 2 {
+					length = int(f2.Data[2]) - 2
+				}
+				for i := 5; i < 8; i++ {
+					if length > 0 {
+						answer = append(answer, f2.Data[i])
+					}
+					length--
+				}
+			} else {
+				for i := 0; i < 6; i++ {
+					if length == 0 {
+						break
+					}
+					answer = append(answer, f2.Data[2+i])
+					length--
+				}
+
+			}
+			c.SendFrame(0x266, canusb.B{0x40, 0xA1, 0x3F, f2.Data[0] & 0xBF, 0x00, 0x00, 0x00, 0x00})
+			if bytes.Equal(f2.Data[:1], canusb.B{0x80}) || bytes.Equal(f2.Data[:1], canusb.B{0xC0}) {
+				korv = false
+			}
+		}
+		log.Printf("%d: %q\n", len(answer), string(answer))
 	}()
 
-	tqRowPointer := 0x00
 outer:
 	for {
 		select {
 		case f := <-c.Chan():
 			switch f.Identifier {
-			case "238": //  Trionic data initialization reply
-				//decodeSaabFrame(f)
-				canusb.LogOut(f)
-				c.Send(&canusb.Frame{
-					Identifier: "240", // 240h - Trionic data query
-					Len:        8,
-					Data:       canusb.B{0x40, 0xA1, 0x02, 0x01, 0x0B, 0x00, 0x00, 0x00},
-				})
-			case "258": // 258h - Trionic data query reply
-				// Got a trionic data query response
-				//decodeSaabFrame(f)
-				canusb.LogOut(f)
-				tqRowPointer = int(f.Data[0])
-				_ = tqRowPointer
-				// Send ACK
-				c.Send(&canusb.Frame{
-					Identifier: "266",
-					Len:        8,
-					Data:       canusb.B{0x40, 0xA1, 0x3F, 0x81, 0x00, 0x00, 0x00, 0x00},
-				})
-
+			//case 0x238: //  Trionic data initialization reply
+			//	canusb.LogOut(f)
+			//case 0x258: // 258h - Trionic data query reply
+			//canusb.LogOut(f)
+			default:
+				//canusb.LogOut(f)
 			}
-
-			//decodeSaabFrame(f)
 		case <-t.C:
 			st := c.Stats()
 			log.Printf("recv: %d sent: %d errors: %d\n", st.RecvBytes, st.SentBytes, st.Errors)
 		case s := <-sig:
 			log.Printf("got %v, stopping CAN communication", s)
 			c.Stop()
+			time.Sleep(500 * time.Millisecond)
 			break outer
 		}
 	}
@@ -117,19 +140,19 @@ func decodeSaabFrame(f *canusb.Frame) {
 	var prefix string
 	var signfBit bool
 	switch f.Identifier {
-	case "238": // Trionic data initialization reply
+	case 0x238: // Trionic data initialization reply
 		prefix = "TDI"
-	case "240": //  Trionic data query
+	case 0x240: //  Trionic data query
 		prefix = "TDIR"
-	case "258": // Trionic data query reply
+	case 0x258: // Trionic data query reply
 		prefix = "TDQR"
-	case "266": // Trionic reply acknowledgement
+	case 0x266: // Trionic reply acknowledgement
 		prefix = "TRA"
-	case "370": // Mileage
+	case 0x370: // Mileage
 		prefix = "MLG"
-	case "3A0": // Vehicle speed (MIU?)
+	case 0x3A0: // Vehicle speed (MIU?)
 		prefix = "MIU"
-	case "1A0": // Engine information
+	case 0x1A0: // Engine information
 		signfBit = true
 		prefix = "ENG"
 	default:
@@ -137,10 +160,10 @@ func decodeSaabFrame(f *canusb.Frame) {
 	}
 
 	if signfBit {
-		log.Printf("%s> %s  %d  %08b  %X\n", prefix, f.Identifier, f.Len, f.Data[:1], f.Data[1:])
-		log.Printf("%s> %s  %d  %08b  %X\n", prefix, f.Identifier, f.Len, f.Data[:1], f.Data[1:])
+		log.Printf("%s> 0x%x  %d  %08b  %X\n", prefix, f.Identifier, f.Len, f.Data[:1], f.Data[1:])
+		//log.Printf("%s> 0x%x  %d  %08b  %X\n", prefix, f.Identifier, f.Len, f.Data[:1], f.Data[1:])
 		return
 	}
 
-	log.Printf("in> %s> %s  %d %X\n", prefix, f.Identifier, f.Len, f.Data)
+	log.Printf("in> %s> 0x%x  %d %X\n", prefix, f.Identifier, f.Len, f.Data)
 }
