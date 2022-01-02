@@ -159,6 +159,7 @@ func (c *Canusb) Read() <-chan *Frame {
 	return callbackChan
 }
 
+// Shortcommand to send a standard 11bit frame
 func (c *Canusb) SendFrame(identifier uint16, data []byte) {
 	waitChan := make(chan struct{})
 	err := c.Send(&Frame{
@@ -173,22 +174,22 @@ func (c *Canusb) SendFrame(identifier uint16, data []byte) {
 	<-waitChan
 }
 
+// SendString is used to bypass the frame parser and send raw commands to the CANUSB adapter
 func (c *Canusb) SendString(str string) {
 	waitChan := make(chan struct{})
-	select {
-	case c.send <- &rawCommand{
+	err := c.Send(&rawCommand{
 		data:      str,
 		processed: waitChan,
-	}:
-	default:
-		log.Fatal(fmt.Errorf("send channel full"))
+	})
+	if err != nil {
+		log.Fatal(err)
 	}
 	<-waitChan
 }
 
-func (c *Canusb) Send(f *Frame) error {
+func (c *Canusb) Send(msg Outgoing) error {
 	select {
-	case c.send <- f:
+	case c.send <- msg:
 		return nil
 	default:
 		return fmt.Errorf("send channel full")

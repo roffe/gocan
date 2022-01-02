@@ -44,7 +44,7 @@ func main() {
 	log.Println(st.String())
 }
 
-func run(c *canusb.Canusb, quitChat chan os.Signal) {
+func run(c *canusb.Canusb, quitChan chan os.Signal) {
 outer:
 	for {
 		select {
@@ -59,7 +59,7 @@ outer:
 			default:
 				log.Println(f.String())
 			}
-		case s := <-quitChat:
+		case s := <-quitChan:
 			log.Printf("got %v, stopping CAN communication", s)
 			break outer
 		}

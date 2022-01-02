@@ -49,17 +49,14 @@ func parseFrame(buff *bytes.Buffer) *Frame {
 		log.Fatal(err)
 	}
 	addr := binary.BigEndian.Uint16(b)
-
 	len, err := strconv.ParseUint(string(p[4:5]), 0, 8)
 	if err != nil {
 		log.Fatal(err)
 	}
-
 	data, err := hex.DecodeString(p[5:])
 	if err != nil {
 		log.Fatal(err)
 	}
-
 	return &Frame{
 		Identifier: addr,
 		Len:        uint8(len),
