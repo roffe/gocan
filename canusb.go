@@ -15,7 +15,6 @@ import (
 
 	"go.bug.st/serial"
 	"go.bug.st/serial/enumerator"
-	"go.uber.org/ratelimit"
 )
 
 const (
@@ -28,10 +27,11 @@ const (
 
 type Canusb struct {
 	//debug                bool
-	canrate    string
-	c          context.CancelFunc
-	port       serial.Port
-	recv, send chan *Frame
+	canrate string
+	c       context.CancelFunc
+	port    serial.Port
+	recv    chan *Frame
+	send    chan interface{}
 	//send                 chan []byte
 	recvBytes, sentBytes uint64
 	errors               uint64
@@ -44,18 +44,9 @@ type waiter struct {
 	callback   chan *Frame
 }
 
-type Config struct {
-	Com ComConfig
-	Can CanConfig
-}
-
-type ComConfig struct {
-	Port     string
-	BaudRate int
-}
-
-type CanConfig struct {
-	Rate string // S0..
+type rawCommand struct {
+	data      string
+	processed chan struct{}
 }
 
 type B []byte
@@ -64,18 +55,27 @@ func New(opts ...Opts) (*Canusb, error) {
 	//c := new(Canusb)
 	c := &Canusb{
 		recv: make(chan *Frame, 1000),
-		send: make(chan *Frame, 100),
+		send: make(chan interface{}, 100),
 	}
 	for _, opt := range opts {
 		if err := opt(c); err != nil {
 			return nil, err
 		}
 	}
-	go c.run()
+	rdy := make(chan struct{})
+	go c.run(rdy)
+	<-rdy
+	c.initCom()
+	go func() {
+		for {
+			time.Sleep(5 * time.Second)
+			c.SendString("F")
+		}
+	}()
 	return c, nil
 }
 
-func (c *Canusb) run() {
+func (c *Canusb) run(rdy chan struct{}) {
 	ctx, cancel := context.WithCancel(context.Background())
 	c.c = cancel
 	go func() {
@@ -112,61 +112,70 @@ func (c *Canusb) run() {
 					}
 				case 't':
 					f := parseFrame(frame)
-					c.recv <- f
 					c.Lock()
+					var newList []*waiter
 					for _, w := range c.waiters {
 						if w.identifier == int(f.Identifier) {
 							select {
 							case w.callback <- f:
 							default:
-								continue
 							}
+							continue
 						}
+						newList = append(newList, w)
 					}
+					c.waiters = newList
+					c.recv <- f
 					c.Unlock()
 				case 'z':
-					// previous command was ok
+					//fmt.Println("ok")
 				case 0x07:
 					atomic.AddUint64(&c.errors, 1)
 					log.Println("received error response")
 				default:
-					log.Printf("COM>> %q || %X\n", string(b), b)
+					log.Printf("COM>> %q\n", string(b))
 				}
 				frame.Reset()
 			}
 		}
 	}()
+
 	go func() {
-		rl := ratelimit.New(50)
 		defer cancel()
-		for f := range c.send {
+		for v := range c.send {
 			if ctx.Err() != nil {
 				break
 			}
-			rl.Take()
-			out := fmt.Sprintf("t%x%d%x", f.Identifier, f.Len, f.Data)
-			LogOut(f)
-			n, err := c.writeCom(B(out + "\r"))
-			if err != nil {
-				log.Fatal(err)
+			switch f := v.(type) {
+			case *Frame:
+				out := fmt.Sprintf("t%x%d%x", f.Identifier, f.Len, f.Data)
+				n, err := c.port.Write(B(out + "\r"))
+				close(f.processed)
+				if err != nil {
+					log.Fatal(err)
+				}
+				c.sentBytes += uint64(n)
+				atomic.AddUint64(&c.sentBytes, uint64(n))
+			case *rawCommand:
+				cmd := f.data + "\r"
+				n, err := c.port.Write(B(cmd))
+				close(f.processed)
+				if err != nil {
+					log.Fatal(err)
+				}
+				c.sentBytes += uint64(n)
+				atomic.AddUint64(&c.sentBytes, uint64(n))
 			}
-			c.sentBytes += uint64(n)
-			atomic.AddUint64(&c.sentBytes, uint64(n))
+
 		}
 	}()
 
-	go func() {
-		for {
-			time.Sleep(1 * time.Second)
-			c.writeCom(B("F\r")) // Read Status Flags
-		}
-	}()
+	close(rdy)
 
-	c.initCom()
 }
 
 func (c *Canusb) WaitForFrame(identifier int, timeout time.Duration) (*Frame, error) {
-	callbackChan := make(chan *Frame)
+	callbackChan := make(chan *Frame, 1)
 	c.Lock()
 	c.waiters = append(c.waiters, &waiter{
 		identifier: identifier,
@@ -177,7 +186,17 @@ func (c *Canusb) WaitForFrame(identifier int, timeout time.Duration) (*Frame, er
 	case f := <-callbackChan:
 		return f, nil
 	case <-time.After(timeout):
-		return nil, fmt.Errorf("timeout waiting for frame 0x%04X", identifier)
+		c.Lock()
+		var newList []*waiter
+		for _, w := range c.waiters {
+			if w.identifier == identifier {
+				continue
+			}
+			newList = append(newList, w)
+		}
+		c.waiters = newList
+		c.Unlock()
+		return nil, fmt.Errorf("timeout waiting for frame 0x%03X", identifier)
 	}
 }
 
@@ -196,12 +215,14 @@ func LogOut(f *Frame) {
 
 func (c *Canusb) initCom() {
 	var init = []B{
-		{CR, CR, CR},        // Empty buffer
+		{CR, CR},            // Empty buffer
 		{'V', CR},           // Get Version number of both CANUSB hardware and software
 		{'N', CR},           // Get Serial number of the CANUSB
 		B("Z0\r"),           // Sets Time Stamp OFF for received frames
 		B(c.canrate + "\r"), // Setup CAN bit-rates
-		{'O', CR},           // Open the CAN channel
+		//B("M00004000\r"),
+		//B("m00000FF0\r"),
+		{'O', CR}, // Open the CAN channel
 	}
 
 	for _, i := range init {
@@ -209,6 +230,14 @@ func (c *Canusb) initCom() {
 			log.Fatal(err)
 		}
 	}
+}
+
+func (c *Canusb) writeCom(data []byte) (int, error) {
+	n, err := c.port.Write(data)
+	if err != nil {
+		return 0, fmt.Errorf("error writing to port: %v", err)
+	}
+	return n, nil
 }
 
 func parseFrame(buff *bytes.Buffer) *Frame {
@@ -253,6 +282,33 @@ func (c *Canusb) Chan() <-chan *Frame {
 	return c.recv
 }
 
+func (c *Canusb) SendFrame(identifier uint16, data []byte) {
+	waitChan := make(chan struct{})
+	err := c.Send(&Frame{
+		Identifier: identifier,
+		Len:        uint8(len(data)),
+		Data:       data,
+		processed:  waitChan,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	<-waitChan
+}
+
+func (c *Canusb) SendString(str string) {
+	waitChan := make(chan struct{})
+	select {
+	case c.send <- &rawCommand{
+		data:      str,
+		processed: waitChan,
+	}:
+	default:
+		log.Fatal(fmt.Errorf("send channel full"))
+	}
+	<-waitChan
+}
+
 func (c *Canusb) Send(f *Frame) error {
 	select {
 	case c.send <- f:
@@ -270,14 +326,6 @@ type Stats struct {
 
 func (c *Canusb) Stats() Stats {
 	return Stats{c.recvBytes, c.sentBytes, c.errors}
-}
-
-func (c *Canusb) writeCom(data []byte) (int, error) {
-	n, err := c.port.Write(data)
-	if err != nil {
-		return 0, fmt.Errorf("error writing to port: %v", err)
-	}
-	return n, nil
 }
 
 func portInfo(portName string) {

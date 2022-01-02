@@ -1,12 +1,13 @@
 package main
 
 import (
-	"bytes"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
 	"time"
 
+	"github.com/avast/retry-go"
 	"github.com/roffe/canusb"
 	flag "github.com/spf13/pflag"
 )
@@ -44,53 +45,42 @@ func main() {
 	t := time.NewTicker(10 * time.Second)
 
 	go func() {
-		time.Sleep(1 * time.Second)
-		c.SendFrame(0x220, canusb.B{0x3F, 0x81, 0x00, 0x11, 0x02, 0x40, 0x00, 0x00}) //init:msg
-		f, err := c.WaitForFrame(0x238, 1*time.Second)
+		err := retry.Do(
+			func() error {
+				go func() {
+					time.Sleep(10 * time.Millisecond)
+					c.SendFrame(0x220, canusb.B{0x3F, 0x81, 0x00, 0x11, 0x02, 0x40, 0x00, 0x00}) //init:msg
+				}()
+				_, err := c.WaitForFrame(0x238, 1200*time.Millisecond)
+				if err != nil {
+					return fmt.Errorf("%v", err)
+				}
+				return nil
+
+			},
+			retry.Attempts(20),
+			retry.Delay(200*time.Millisecond),
+			retry.OnRetry(func(n uint, err error) {
+				log.Printf("#%d: %s\n", n, err.Error())
+			}),
+		)
 		if err != nil {
 			log.Println(err)
 			return
 		}
-		canusb.LogOut(f)
-		c.SendFrame(0x240, canusb.B{0x40, 0xA1, 0x02, 0x1A, 0x90, 0x00, 0x00, 0x00})
-
-		korv := true
-		var answer []byte
-
-		var length int
-		for korv {
-			f2, err := c.WaitForFrame(0x258, 1*time.Second)
-			if err != nil {
-				log.Println(err)
-				return
-			}
-			canusb.LogOut(f2)
-			if f2.Data[0] == 0xC3 {
-				if int(f2.Data[2]) > 2 {
-					length = int(f2.Data[2]) - 2
-				}
-				for i := 5; i < 8; i++ {
-					if length > 0 {
-						answer = append(answer, f2.Data[i])
-					}
-					length--
-				}
-			} else {
-				for i := 0; i < 6; i++ {
-					if length == 0 {
-						break
-					}
-					answer = append(answer, f2.Data[2+i])
-					length--
-				}
-
-			}
-			c.SendFrame(0x266, canusb.B{0x40, 0xA1, 0x3F, f2.Data[0] & 0xBF, 0x00, 0x00, 0x00, 0x00})
-			if bytes.Equal(f2.Data[:1], canusb.B{0x80}) || bytes.Equal(f2.Data[:1], canusb.B{0xC0}) {
-				korv = false
-			}
+		log.Println("VIN:", c.GetHeader(0x90))
+		log.Println("Box HW part number:", c.GetHeader(0x91))
+		log.Println("Box SW part number:", c.GetHeader(0x94))
+		log.Println("ECU Software version:", c.GetHeader(0x95))
+		log.Println("Engine type:", c.GetHeader(0x97))
+		log.Println("Hardware serial nr:", c.GetHeader(0x92))
+		log.Println("Tester info:", c.GetHeader(0x98))
+		log.Println("Software date:", c.GetHeader(0x99))
+		ok := c.Tjong(0)
+		if !ok {
+			c.Tjong(1)
 		}
-		log.Printf("%d: %q\n", len(answer), string(answer))
+
 	}()
 
 outer:
@@ -99,19 +89,20 @@ outer:
 		case f := <-c.Chan():
 			switch f.Identifier {
 			//case 0x238: //  Trionic data initialization reply
-			//	canusb.LogOut(f)
 			//case 0x258: // 258h - Trionic data query reply
-			//canusb.LogOut(f)
+			case 0x258:
+				//canusb.LogOut(f)
 			default:
 				//canusb.LogOut(f)
 			}
 		case <-t.C:
 			st := c.Stats()
-			log.Printf("recv: %d sent: %d errors: %d\n", st.RecvBytes, st.SentBytes, st.Errors)
+			_ = st
+			//log.Printf("recv: %d sent: %d errors: %d\n", st.RecvBytes, st.SentBytes, st.Errors)
 		case s := <-sig:
 			log.Printf("got %v, stopping CAN communication", s)
 			c.Stop()
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(200 * time.Millisecond)
 			break outer
 		}
 	}

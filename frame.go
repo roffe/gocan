@@ -6,6 +6,7 @@ type Frame struct {
 	Identifier uint16
 	Len        uint8
 	Data       []byte
+	processed  chan struct{}
 }
 
 func (f *Frame) String() string {
