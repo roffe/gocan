@@ -2,7 +2,7 @@
 
 Golang implementation of the [http://www.can232.com/docs/canusb_manual.pdf](Lawicel Ascii API) for CANUSB adapter running in VCP mode
 
-Thanks to [https://www.trionictuning.com/](TrionicTuning), [https://www.trionictuning.com/forum/memberlist.php?mode=viewprofile&u=3231](Chriva) and [https://pikkupossu.1g.fi/tomi/tomi.html](Tomi Liljemark)
+Thanks to [TrionicTuning](https://www.trionictuning.com/), [Chriva](https://www.trionictuning.com/forum/memberlist.php?mode=viewprofile&u=3231) and [Tomi Liljemark](https://pikkupossu.1g.fi/tomi/tomi.html)
 
 ```go
 $ go run cmd/main.go  -p com3 -b 921600
