@@ -2,6 +2,7 @@ package t7
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -46,30 +47,6 @@ func DecodeSaabFrame(f *canusb.Frame) {
 }
 
 func Dumperino(c *canusb.Canusb) {
-	err := retry.Do(
-		func() error {
-			go func() {
-				time.Sleep(100 * time.Millisecond)
-				c.SendFrame(0x220, canusb.B{0x3F, 0x81, 0x00, 0x11, 0x02, 0x40, 0x00, 0x00}) //init:msg
-			}()
-			_, err := c.Poll(0x238, 1200*time.Millisecond)
-			if err != nil {
-				return fmt.Errorf("%v", err)
-			}
-			return nil
-
-		},
-		retry.Attempts(5),
-		retry.Delay(100*time.Millisecond),
-		retry.OnRetry(func(n uint, err error) {
-			log.Printf("#%d: %s\n", n, err.Error())
-		}),
-	)
-	if err != nil {
-		log.Println(err)
-		return
-	}
-
 	var authed bool
 	for i := 0; i < 2; i++ {
 		if LetMeIn(c, i) {
@@ -93,16 +70,46 @@ func Dumperino(c *canusb.Canusb) {
 
 }
 
+func TrionicDataInitialization(c *canusb.Canusb) error {
+	err := retry.Do(
+		func() error {
+			go func() {
+				time.Sleep(100 * time.Millisecond)
+				c.SendFrame(0x220, canusb.B{0x3F, 0x81, 0x00, 0x11, 0x02, 0x40, 0x00, 0x00}) //init:msg
+			}()
+			_, err := c.Poll(0x238, 1200*time.Millisecond)
+			if err != nil {
+				return fmt.Errorf("%v", err)
+			}
+			return nil
+
+		},
+		retry.Attempts(5),
+		retry.Delay(100*time.Millisecond),
+		retry.OnRetry(func(n uint, err error) {
+			log.Printf("#%d: %s\n", n, err.Error())
+		}),
+	)
+	if err != nil {
+		return errors.New("trionic data initialization failed")
+	}
+	return nil
+}
+
 func GetHeader(c *canusb.Canusb, id byte) string {
 	var answer []byte
 	var length int
-	c.SendFrame(0x240, canusb.B{0x40, 0xA1, 0x02, 0x1A, id, 0x00, 0x00, 0x00})
-	for {
+	var fetch func()
+	count := 0
+	fetch = func() {
+		if count > 10 {
+			return
+		}
+		count++
 		f, err := c.Poll(0x258, 150*time.Millisecond)
 		if err != nil {
 			log.Println(err)
-			continue
-
+			fetch()
 		}
 		if f.Data[0]&0x40 == 0x40 {
 			if int(f.Data[2]) > 2 {
@@ -123,12 +130,15 @@ func GetHeader(c *canusb.Canusb, id byte) string {
 				length--
 			}
 		}
-
 		c.SendFrame(0x266, canusb.B{0x40, 0xA1, 0x3F, f.Data[0] & 0xBF, 0x00, 0x00, 0x00, 0x00})
 		if bytes.Equal(f.Data[:1], canusb.B{0x80}) || bytes.Equal(f.Data[:1], canusb.B{0xC0}) {
-			break
+			return
 		}
+		fetch()
 	}
+
+	c.SendFrame(0x240, canusb.B{0x40, 0xA1, 0x02, 0x1A, id, 0x00, 0x00, 0x00})
+	fetch()
 	return string(answer)
 }
 

@@ -37,7 +37,9 @@ func main() {
 		log.Fatal(err)
 	}
 	defer c.Stop()
-
+	if err := t7.TrionicDataInitialization(c); err != nil {
+		log.Fatal(err)
+	}
 	t7.Dumperino(c)
 	run(c, quitChan)
 	st := c.Stats()
