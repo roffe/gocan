@@ -1,6 +1,6 @@
 # CANUSB
 
-Golang implementation of the [http://www.can232.com/docs/canusb_manual.pdf](Lawicel Ascii API) for CANUSB adapter running in VCP mode
+Golang implementation of the [Lawicel Ascii API](http://www.can232.com/docs/canusb_manual.pdf) for [CANUSB](https://lawicel-shop.se/elektronik/kommunikation/can/lawicel-canusb-adapter-1m-usb-cable/) adapter running in VCP mode
 
 Thanks to [TrionicTuning](https://www.trionictuning.com/), [Chriva](https://www.trionictuning.com/forum/memberlist.php?mode=viewprofile&u=3231) and [Tomi Liljemark](https://pikkupossu.1g.fi/tomi/tomi.html)
 
