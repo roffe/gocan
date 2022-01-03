@@ -19,7 +19,7 @@ Bit 7 Bus Error (BEI), see SJA1000 datasheet **
 ** Bus Error generates a constant RED ligh
 */
 
-func checkStatus(b []byte) error {
+func decodeStatus(b []byte) error {
 	bs := int(bcd.ToUint16(b[1:]))
 	//	log.Printf("%08b\n", bs)
 	switch true {
@@ -42,4 +42,9 @@ func checkStatus(b []byte) error {
 
 	}
 	return nil
+}
+
+func checkBitSet(n, k int) bool {
+	v := n & (1 << (k - 1))
+	return v == 1
 }

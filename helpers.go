@@ -8,11 +8,6 @@ import (
 	"go.bug.st/serial/enumerator"
 )
 
-func checkBitSet(n, k int) bool {
-	v := n & (1 << (k - 1))
-	return v == 1
-}
-
 func portInfo(portName string) {
 	if runtime.GOOS == "windows" {
 		portName = strings.ToUpper(portName)

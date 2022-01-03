@@ -1,12 +1,14 @@
 package canusb
 
 import (
+	"context"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 )
 
-func (c *Canusb) Poll(identifier uint16, timeout time.Duration) (*Frame, error) {
+func (c *Canusb) Poll(ctx context.Context, identifier uint16, timeout time.Duration) (*Frame, error) {
 	p := &Poll{
 		identifier: identifier,
 		callback:   make(chan *Frame),
@@ -48,13 +50,16 @@ func newHub() *Hub {
 		pollers:    make(map[*Poll]bool),
 		register:   make(chan *Poll, 10),
 		unregister: make(chan *Poll, 10),
-		incoming:   make(chan *Frame, 10),
+		incoming:   make(chan *Frame, 16),
 	}
 }
 
-func (h *Hub) run() {
+func (h *Hub) run(ctx context.Context, wg *sync.WaitGroup) {
+	wg.Done()
 	for {
 		select {
+		case <-ctx.Done():
+			return
 		case poll := <-h.register:
 			h.pollers[poll] = true
 		case poll := <-h.unregister:
