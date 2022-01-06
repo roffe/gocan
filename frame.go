@@ -6,12 +6,13 @@ import (
 )
 
 type Frame struct {
-	Identifier uint16
+	Identifier uint32
 	Len        uint8
 	Data       []byte
 }
 
 func (f *Frame) Byte() []byte {
+	//fmt.Println(f.String())
 	return []byte(fmt.Sprintf("t%x%d%x\r", f.Identifier, f.Len, f.Data))
 }
 
@@ -24,6 +25,7 @@ func (f *Frame) String() string {
 			out.WriteString(" ")
 		}
 	}
-	out.WriteString("]")
+	out.WriteString("] || ")
+	out.WriteString(fmt.Sprintf("%q", f.Data))
 	return out.String()
 }

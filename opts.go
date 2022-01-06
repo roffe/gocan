@@ -1,34 +1,73 @@
 package canusb
 
 import (
+	"errors"
 	"fmt"
+	"log"
+	"runtime"
+	"strings"
 
 	"go.bug.st/serial"
+	"go.bug.st/serial/enumerator"
 )
 
 type Opts func(c *Canusb) error
 
 // Canusb runs
-// clock freq 16
+// clock freq 16Mhz
 // saab i-bus BTR0=CB and BTR1=9A
 // saab p-bus 500kbit
 
 func OptComPort(port string, baudrate int) Opts {
 	return func(c *Canusb) error {
-		portInfo(port)
+		portSelected, err := portInfo(port)
+		if err != nil {
+			return err
+		}
 		mode := &serial.Mode{
 			BaudRate: baudrate,
 			Parity:   serial.NoParity,
 			DataBits: 8,
 			StopBits: serial.OneStopBit,
 		}
-		p, err := serial.Open(port, mode)
+		p, err := serial.Open(portSelected, mode)
 		if err != nil {
 			return fmt.Errorf("failed to open com port %q : %v", port, err)
 		}
 		c.port = p
 		return nil
 	}
+}
+
+func portInfo(portName string) (string, error) {
+	if runtime.GOOS == "windows" {
+		portName = strings.ToUpper(portName)
+	}
+	ports, err := enumerator.GetDetailedPortsList()
+	if err != nil {
+		return "", err
+	}
+	if len(ports) == 0 {
+		return "", errors.New("no serial ports found")
+	}
+	if portName == "*" {
+		log.Println("discovered com ports:")
+	}
+
+	for _, port := range ports {
+		if port.Name == portName || portName == "*" {
+			log.Printf("port: %s\n", port.Name)
+			if port.IsUSB {
+				log.Printf("   USB ID      %s:%s\n", port.VID, port.PID)
+				log.Printf("   USB serial  %s\n", port.SerialNumber)
+			}
+			if portName == "*" {
+				continue
+			}
+			return portName, nil
+		}
+	}
+	return "", errors.New("no device selected")
 }
 
 func OptRate(kbit float64) Opts {
