@@ -42,7 +42,7 @@ func (t *Trionic) Erase(ctx context.Context) error {
 	i := 0
 	for data[3] != 0x71 && i < 10 {
 		t.c.SendFrame(0x240, eraseMsg)
-		f, err := t.c.Poll(ctx, 0x258, t.defaultTimeout)
+		f, err := t.c.Poll(ctx, t.defaultTimeout, 0x258)
 		if err != nil {
 			log.Println(err)
 		} else {
@@ -62,7 +62,7 @@ func (t *Trionic) Erase(ctx context.Context) error {
 	i = 0
 	for data[3] != 0x71 && i < 200 {
 		t.c.SendFrame(0x240, eraseMsg2)
-		f, err := t.c.Poll(ctx, 0x258, t.defaultTimeout)
+		f, err := t.c.Poll(ctx, t.defaultTimeout, 0x258)
 		if err != nil {
 			log.Println(err)
 		} else {
@@ -79,28 +79,28 @@ func (t *Trionic) Erase(ctx context.Context) error {
 	}
 
 	t.c.SendFrame(0x240, confirmMsg)
-	f, err := t.c.Poll(ctx, 0x258, t.defaultTimeout)
+	f, err := t.c.Poll(ctx, t.defaultTimeout, 0x258)
 	if err != nil {
 		bar.Finish()
-		fmt.Println()
+		log.Println()
 		return err
 	}
 
 	if f.Data[3] == 0x7E {
 		time.Sleep(100 * time.Millisecond)
 		t.c.SendFrame(0x240, confirmMsg)
-		f2, err := t.c.Poll(ctx, 0x258, t.defaultTimeout)
+		f2, err := t.c.Poll(ctx, t.defaultTimeout, 0x258)
 		if err != nil {
 			log.Println(err)
 		}
 		if f2.Data[3] == 0x7E {
 			bar.Finish()
-			fmt.Println()
+			log.Println()
 			return nil
 		}
 	} else {
 		bar.Finish()
-		fmt.Println()
+		log.Println()
 		return errors.New("erase failed")
 	}
 	return fmt.Errorf("unknown erase error %X", f.Data)

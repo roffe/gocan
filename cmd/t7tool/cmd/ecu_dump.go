@@ -17,11 +17,11 @@ var readCMD = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, cancel := context.WithTimeout(cmd.Context(), 900*time.Second)
 		defer cancel()
-
 		c, err := initCAN(ctx, 0x238, 0x258)
 		if err != nil {
 			return err
 		}
+		defer c.Close()
 
 		tr := t7.New(c)
 		log.Println("\nECU Info:")
@@ -29,17 +29,14 @@ var readCMD = &cobra.Command{
 			log.Println("/!\\", err)
 			return err
 		}
-
 		log.Println("Continue?")
 		confirm := yesNo()
-
 		if !confirm {
 			return nil
 		}
-		if err := tr.ReadBin(ctx, args[0]); err != nil {
+		if err := tr.ReadECU(ctx, args[0]); err != nil {
 			return err
 		}
-
 		return nil
 	},
 }

@@ -23,6 +23,7 @@ var flashCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		defer c.Close()
 
 		tr := t7.New(c)
 

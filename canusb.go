@@ -30,6 +30,8 @@ type Canusb struct {
 	dropped              uint64
 	hub                  *Hub
 	filter               []uint32
+	close                chan struct{}
+	closed               bool
 }
 
 type Port interface {
@@ -44,8 +46,9 @@ type CANFrame interface {
 
 func New(ctx context.Context, filters []uint32, opts ...Opts) (*Canusb, error) {
 	c := &Canusb{
-		send: make(chan CANFrame, 100),
-		hub:  newHub(),
+		send:  make(chan CANFrame, 100),
+		hub:   newHub(),
+		close: make(chan struct{}, 1),
 	}
 	for _, opt := range opts {
 		if err := opt(c); err != nil {
@@ -58,6 +61,13 @@ func New(ctx context.Context, filters []uint32, opts ...Opts) (*Canusb, error) {
 	ready.Wait()
 	c.initAdapter()
 	return c, nil
+}
+
+func (c *Canusb) Close() error {
+	c.closed = true
+	close(c.close)
+	time.Sleep(50 * time.Millisecond)
+	return nil
 }
 
 func (c *Canusb) run(ctx context.Context, ready *sync.WaitGroup) {
@@ -79,6 +89,9 @@ func (c *Canusb) recvManager(ctx context.Context, wg *sync.WaitGroup) {
 		}
 		n, err := c.port.Read(readBuffer)
 		if err != nil {
+			if (strings.Contains(err.Error(), "Port has been closed") && ctx.Err() != nil) || c.closed {
+				break
+			}
 			log.Fatalf("failed to read com port: %v", err)
 		}
 		if n == 0 {
@@ -160,8 +173,8 @@ func (*Canusb) decodeFrame(buff []byte) (*Frame, error) {
 
 func (c *Canusb) sendManager(ctx context.Context, wg *sync.WaitGroup) {
 	wg.Done()
-
 	f, _ := os.Create("canlog.log")
+outer:
 	for {
 		select {
 		case v := <-c.send:
@@ -173,20 +186,21 @@ func (c *Canusb) sendManager(ctx context.Context, wg *sync.WaitGroup) {
 			atomic.AddUint64(&c.sentBytes, uint64(n))
 			ff, ok := v.(*Frame)
 			if ok {
-
 				f.WriteString(ff.String())
 				f.WriteString("\n")
 			}
 		case <-ctx.Done():
-			c.port.Write(B("C\r"))
-			c.port.Write(B("\r\r\r"))
-			if err := c.port.Close(); err != nil {
-				log.Println("port close error: ", err)
-			}
+			break outer
+		case <-c.close:
+			break outer
 
 		}
 	}
-
+	c.port.Write(B("C\r"))
+	c.port.Write(B("\r\r\r"))
+	if err := c.port.Close(); err != nil {
+		log.Println("port close error: ", err)
+	}
 }
 
 func calcAcceptanceFilters(idList ...uint32) (string, string) {
@@ -234,30 +248,30 @@ func (c *Canusb) initAdapter() {
 	time.Sleep(100 * time.Millisecond)
 }
 
-func (c *Canusb) Monitor(ctx context.Context, identifiers ...uint32) {
-	for {
-		select {
-		case f := <-c.Read():
-			if len(identifiers) == 0 {
-				log.Println(f.String())
-			}
-			for _, id := range identifiers {
-				if f.Identifier == id || id == 0x00 {
-					log.Println(f.String())
-				}
-			}
-		case <-ctx.Done():
-			return
-		}
-	}
-}
+//func (c *Canusb) Monitor(ctx context.Context, identifiers ...uint32) {
+//	for {
+//		select {
+//		case f := <-c.Read():
+//			if len(identifiers) == 0 {
+//				log.Println(f.String())
+//			}
+//			for _, id := range identifiers {
+//				if f.Identifier == id || id == 0x00 {
+//					log.Println(f.String())
+//				}
+//			}
+//		case <-ctx.Done():
+//			return
+//		}
+//	}
+//}
 
 // Returns a channel subscribed to all identifiers
-func (c *Canusb) Read() <-chan *Frame {
-	callbackChan := make(chan *Frame, 1)
-	c.hub.register <- &Poll{identifier: 0, callback: callbackChan}
-	return callbackChan
-}
+//func (c *Canusb) Read() <-chan *Frame {
+//	callbackChan := make(chan *Frame, 1)
+//	c.hub.register <- &Poll{identifier: 0, callback: callbackChan}
+//	return callbackChan
+//}
 
 // Send a CAN Frame
 func (c *Canusb) Send(msg CANFrame) error {
@@ -274,7 +288,6 @@ func (c *Canusb) Send(msg CANFrame) error {
 func (c *Canusb) SendFrame(identifier uint32, data []byte) error {
 	var b = make([]byte, 8)
 	copy(b, data)
-
 	return c.Send(&Frame{
 		Identifier: identifier,
 		Len:        uint8(len(b)),

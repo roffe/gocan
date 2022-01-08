@@ -62,6 +62,7 @@ var offsets = []struct {
 	},
 }
 
+// Flash the ECU
 func (t *Trionic) Flash(ctx context.Context, bin []byte) error {
 	if bin[0] != 0xFF || bin[1] != 0xFF || bin[2] != 0xEF || bin[3] != 0xFC {
 		return fmt.Errorf("error: bin doesn't appear to be for a Trionic 7 ECU! (%02X%02X%02X%02X)",
@@ -90,7 +91,7 @@ func (t *Trionic) Flash(ctx context.Context, bin []byte) error {
 		binPos := o.binpos
 		err := retry.Do(
 			func() error {
-				return t.WriteJump(ctx, o.offset, o.end-binPos)
+				return t.writeJump(ctx, o.offset, o.end-binPos)
 			},
 			retry.Context(ctx),
 			retry.Attempts(5),
@@ -100,9 +101,8 @@ func (t *Trionic) Flash(ctx context.Context, bin []byte) error {
 			}),
 		)
 		if err != nil {
-			return fmt.Errorf("jump failed: %v", err)
+			return errors.New("write jump failed")
 		}
-
 		for binPos < o.end {
 			bar.Set(binPos)
 			left := o.end - binPos
@@ -112,20 +112,20 @@ func (t *Trionic) Flash(ctx context.Context, bin []byte) error {
 			} else {
 				readBytes = left
 			}
-			err := t.WriteRange(ctx, binPos, binPos+readBytes, bin)
+			err := t.writeRange(ctx, binPos, binPos+readBytes, bin)
 			if err != nil {
 				if retries < maxRetries {
-					fmt.Println()
+					log.Println()
 					log.Println(err)
 					time.Sleep(100 * time.Millisecond)
 					err := retry.Do(
 						func() error {
-							return t.WriteJump(ctx, binPos, o.end-binPos)
+							return t.writeJump(ctx, binPos, o.end-binPos)
 						},
 						retry.Context(ctx),
 						retry.Attempts(5),
 						retry.OnRetry(func(n uint, err error) {
-							fmt.Println()
+							log.Println()
 							log.Println(err)
 						}),
 					)
@@ -140,27 +140,23 @@ func (t *Trionic) Flash(ctx context.Context, bin []byte) error {
 			binPos += chunkSize
 			left -= chunkSize
 		}
-
 		bar.Set(binPos)
 	}
 
 	t.c.SendFrame(0x240, []byte{0x40, 0xA1, 0x01, 0x37, 0x00, 0x00, 0x00, 0x00}) // end data transfer mode
-	endData, err := t.c.Poll(ctx, 0x258, t.defaultTimeout)
+	end, err := t.c.Poll(ctx, t.defaultTimeout, 0x258)
 	if err != nil {
 		return fmt.Errorf("error waiting for data transfer exit reply: %v", err)
 	}
-
 	// Send acknowledgement
-	ack := []byte{0x40, 0xA1, 0x3F, 0x00, 0x00, 0x00, 0x00, 0x00} // 266h
-	ack[3] = endData.Data[0] & 0xBF
-	t.c.SendFrame(0x266, ack)
+	t.Ack(end.Data[0] & 0xBF)
 
-	if endData.Data[3] != 0x77 {
+	if end.Data[3] != 0x77 {
 		return errors.New("exit download mode failed")
 	}
 
 	bar.Finish()
-	fmt.Println()
+	log.Println()
 	log.Println("flash successfull ")
 	return nil
 }

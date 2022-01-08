@@ -11,34 +11,31 @@ import (
 )
 
 // send request "Download - tool to module" to Trionic"
-func (t *Trionic) WriteJump(ctx context.Context, offset, length int) error {
+func (t *Trionic) writeJump(ctx context.Context, offset, length int) error {
 	jumpMsg := []byte{0x41, 0xA1, 0x08, 0x34, 0x00, 0x00, 0x00, 0x00}
 	jumpMsg2 := []byte{0x00, 0xA1, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
 
-	b, err := hex.DecodeString(fmt.Sprintf("%06X", offset))
+	offsetBytes, err := hex.DecodeString(fmt.Sprintf("%06X", offset))
 	if err != nil {
 		return err
 	}
 
-	b2, err := hex.DecodeString(fmt.Sprintf("%06X", length))
+	lengthBytes, err := hex.DecodeString(fmt.Sprintf("%06X", length))
 	if err != nil {
 		return err
 	}
 
 	for k := 4; k < 7; k++ {
-		jumpMsg[k] = b[k-4]
+		jumpMsg[k] = offsetBytes[k-4]
 	}
 
 	for k := 2; k < 5; k++ {
-		jumpMsg2[k] = b2[k-2]
+		jumpMsg2[k] = lengthBytes[k-2]
 	}
-
-	//log.Printf("%X\n", jumpMsg)
-	//log.Printf("%X\n", jumpMsg2)
 
 	t.c.SendFrame(0x240, jumpMsg)
 	t.c.SendFrame(0x240, jumpMsg2)
-	f, err := t.c.Poll(ctx, 0x258, t.defaultTimeout)
+	f, err := t.c.Poll(ctx, t.defaultTimeout, 0x258)
 	if err != nil {
 		return fmt.Errorf("failed to enable request download")
 	}
@@ -51,7 +48,7 @@ func (t *Trionic) WriteJump(ctx context.Context, offset, length int) error {
 	return nil
 }
 
-func (t *Trionic) WriteRange(ctx context.Context, start, end int, bin []byte) error {
+func (t *Trionic) writeRange(ctx context.Context, start, end int, bin []byte) error {
 	length := end - start
 	binPos := start
 	rows := length / 6
@@ -103,7 +100,7 @@ func (t *Trionic) WriteRange(ctx context.Context, start, end int, bin []byte) er
 		t.c.SendFrame(0x240, data)
 	}
 
-	f2, err := t.c.Poll(ctx, 0x258, t.defaultTimeout)
+	f2, err := t.c.Poll(ctx, t.defaultTimeout, 0x258)
 	if err != nil {
 		return fmt.Errorf("error writing 0x%X - 0x%X was at pos 0x%X: %v", start, end, binPos, err)
 	}
@@ -158,7 +155,7 @@ func (t *Trionic) WriteDataBlock(ctx context.Context, headerId byte, d []byte) e
 	}
 
 	// Read response message
-	f, err := t.c.Poll(ctx, 0x258, t.defaultTimeout)
+	f, err := t.c.Poll(ctx, t.defaultTimeout, 0x258)
 	if err != nil {
 		return fmt.Errorf("failed to read response: %v", err)
 	}

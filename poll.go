@@ -9,10 +9,11 @@ import (
 	"time"
 )
 
-func (c *Canusb) SendAndPoll(ctx context.Context, frame *Frame, pollIdentifier uint32, timeout time.Duration) (*Frame, error) {
+func (c *Canusb) SendAndPoll(ctx context.Context, frame *Frame, timeout time.Duration, identifiers ...uint32) (*Frame, error) {
 	p := &Poll{
-		identifier: pollIdentifier,
-		callback:   make(chan *Frame),
+		identifiers: identifiers,
+		callback:    make(chan *Frame),
+		variant:     OneOff,
 	}
 
 	c.hub.register <- p
@@ -35,15 +36,31 @@ func (c *Canusb) SendAndPoll(ctx context.Context, frame *Frame, pollIdentifier u
 		}
 		return f, nil
 	case <-time.After(timeout):
-		return nil, fmt.Errorf("timeout waiting for frame 0x%03X", pollIdentifier)
+		return nil, fmt.Errorf("timeout waiting for frame 0x%03X", identifiers)
 
 	}
 }
 
-func (c *Canusb) Poll(ctx context.Context, identifier uint32, timeout time.Duration) (*Frame, error) {
+func (c *Canusb) Subscribe(ctx context.Context, identifiers ...uint32) chan *Frame {
 	p := &Poll{
-		identifier: identifier,
-		callback:   make(chan *Frame),
+		identifiers: identifiers,
+		callback:    make(chan *Frame, 100),
+		variant:     Subscription,
+	}
+	go func() {
+		<-ctx.Done()
+		close(p.callback)
+	}()
+
+	c.hub.register <- p
+	return p.callback
+}
+
+func (c *Canusb) Poll(ctx context.Context, timeout time.Duration, identifiers ...uint32) (*Frame, error) {
+	p := &Poll{
+		identifiers: identifiers,
+		callback:    make(chan *Frame, 1),
+		variant:     OneOff,
 	}
 	c.hub.register <- p
 	defer func() {
@@ -54,22 +71,26 @@ func (c *Canusb) Poll(ctx context.Context, identifier uint32, timeout time.Durat
 		return nil, ctx.Err()
 	case f := <-p.callback:
 		if f == nil {
-			log.Fatal("got nil frame from poller")
+			return nil, errors.New("got nil frame from poller")
 		}
 		return f, nil
 	case <-time.After(timeout):
-		return nil, fmt.Errorf("timeout waiting for frame 0x%03X", identifier)
+		return nil, fmt.Errorf("timeout waiting for frame 0x%03X", identifiers)
 	}
 }
 
-type Poll struct {
-	errcount   uint16
-	identifier uint32
-	callback   chan *Frame
-}
+type PollType int
 
-func (p *Poll) String() string {
-	return fmt.Sprintf("0x%03x %d", p.identifier, p)
+const (
+	OneOff PollType = iota
+	Subscription
+)
+
+type Poll struct {
+	errcount    uint16
+	identifiers []uint32
+	callback    chan *Frame
+	variant     PollType
 }
 
 type Hub struct {
@@ -107,20 +128,31 @@ func (h *Hub) run(ctx context.Context, wg *sync.WaitGroup) {
 				h.pollers[poll] = true
 			default:
 			}
-
+		poll:
 			for poll := range h.pollers {
-				if poll.identifier == frame.Identifier || poll.identifier == 0 {
-					select {
-					case poll.callback <- frame:
-					default:
-						poll.errcount++
-					}
-					if poll.errcount > 100 { // after 100 failed publishes you are gone
-						//log.Println("major slacker this one")
-						delete(h.pollers, poll)
+				if len(poll.identifiers) == 0 {
+					h.deliver(poll, frame)
+					continue
+				}
+				for _, id := range poll.identifiers {
+					if id == frame.Identifier {
+						h.deliver(poll, frame)
+						continue poll
 					}
 				}
 			}
 		}
+	}
+}
+
+func (h *Hub) deliver(poll *Poll, frame *Frame) {
+	select {
+	case poll.callback <- frame:
+	default:
+		poll.errcount++
+	}
+	if poll.errcount > 100 { // after 100 failed delieveries you are gone
+		//log.Println("major slacker this one")
+		delete(h.pollers, poll)
 	}
 }

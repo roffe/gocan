@@ -1,21 +1,24 @@
 package t7
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log"
 	"os"
 	"time"
 
+	"github.com/avast/retry-go"
+	"github.com/k0kubun/go-ansi"
 	"github.com/schollz/progressbar/v3"
 )
 
-func (t *Trionic) ReadBin(ctx context.Context, filename string) error {
+func (t *Trionic) ReadECU(ctx context.Context, filename string) error {
 	ok, err := t.KnockKnock(ctx)
 	if err != nil || !ok {
 		return fmt.Errorf("failed to authenticate: %v", err)
 	}
-	b, err := t.readTrionic(ctx, 0x00, 0x80000)
+	b, err := t.readECU(ctx, 0, 0x80000)
 	if err != nil {
 		return err
 	}
@@ -30,128 +33,154 @@ func (t *Trionic) ReadBin(ctx context.Context, filename string) error {
 	return nil
 }
 
-func (t *Trionic) readTrionic(ctx context.Context, addr, leng int) ([]byte, error) {
-	bin := make([]byte, leng)
-	var binPos int
-
-	jumpMsg1a := []byte{0x41, 0xA1, 0x08, 0x2C, 0xF0, 0x03, 0x00, 0xEF} // 0x000000 length=0xEF
-	jumpMsg1b := []byte{0x00, 0xA1, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
-	dataMsg := []byte{0x40, 0xA1, 0x02, 0x21, 0xF0, 0x00, 0x00, 0x00}
-	ack := []byte{0x40, 0xA1, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00}
-
-	rcvlen := 0
-	address := addr
+func (t *Trionic) readECU(ctx context.Context, addr, length int) ([]byte, error) {
 	start := time.Now()
-	log.Println("starting bin download")
-	bar := progressbar.DefaultBytes(int64(leng), "progress:")
-	retries := 0
-outer:
-	for rcvlen < leng {
-		if retries > 15 {
-			return nil, fmt.Errorf("to many retries downloading bin")
-		}
-		bytesThisRound := 0
+	var readPos int
+	out := bytes.NewBuffer([]byte{})
+
+	bar := progressbar.NewOptions(length,
+		progressbar.OptionSetWriter(ansi.NewAnsiStdout()),
+		progressbar.OptionEnableColorCodes(true),
+		progressbar.OptionShowBytes(true),
+		progressbar.OptionSetWidth(20),
+		progressbar.OptionSetDescription("[cyan][1/1][reset] dumping ECU"),
+		progressbar.OptionSetTheme(progressbar.Theme{
+			Saucer:        "[green]=[reset]",
+			SaucerHead:    "[green]>[reset]",
+			SaucerPadding: " ",
+			BarStart:      "[",
+			BarEnd:        "]",
+		}))
+
+	defer bar.Finish()
+
+	for readPos < length {
+		bar.Set(out.Len())
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		default:
-		}
-
-		if (leng - rcvlen) < 0xEF {
-			jumpMsg1a[7] = byte(leng - rcvlen)
-		} else {
-			jumpMsg1a[7] = 0xEF
-		}
-		t.c.SendFrame(0x240, jumpMsg1a)
-
-		jumpMsg1b[2] = byte((address >> 16) & 0xFF)
-		jumpMsg1b[3] = byte((address >> 8) & 0xFF)
-		jumpMsg1b[4] = byte(address & 0xFF)
-		t.c.SendFrame(0x240, jumpMsg1b)
-
-		f, err := t.c.Poll(ctx, 0x258, t.defaultTimeout)
-		if err != nil {
-			log.Println(err)
-			retries++
-			continue outer
-		}
-		ack[3] = f.Data[0] & 0xBF
-		t.c.SendFrame(0x266, ack)
-
-		t.c.SendFrame(0x240, dataMsg)
-		var length int
-		for {
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			default:
+			var readLength int
+			if length-readPos >= 0xF5 {
+				readLength = 0xF5
+			} else {
+				readLength = length - readPos
 			}
-			f2, err := t.c.Poll(ctx, 0x258, t.defaultTimeout)
+			err := retry.Do(func() error {
+				b, err := t.readMemoryByAddress(ctx, readPos, readLength)
+				if err != nil {
+					return err
+				}
+				out.Write(b)
+				return nil
+			},
+				retry.Context(ctx),
+				retry.OnRetry(func(n uint, err error) {
+					log.Printf("#%d %v\n", n, err)
+				}),
+				retry.Attempts(5),
+			)
 			if err != nil {
-				if retries > 10 {
-					return nil, fmt.Errorf("to many retries downloading bin")
-				}
-				log.Println(err)
-				rcvlen -= bytesThisRound
-				binPos -= bytesThisRound
-				length += bytesThisRound
-				retries++
-				continue outer
+				return nil, fmt.Errorf("failed to read memory by address, pos: 0x%X, length: 0x%X", readPos, readLength)
 			}
-			if f2.Data[0]&0x40 == 0x40 {
-				length = int(f2.Data[2]) - 2 // subtract two non-payload bytes
-				if length > 0 && rcvlen < leng {
-					bin[binPos] = f2.Data[5]
-					binPos++
-					rcvlen++
-					bytesThisRound++
-					length--
+			readPos += readLength
+		}
+	}
+	bar.Set(out.Len())
+	bar.Close()
+
+	if err := t.endDownloadMode(ctx); err != nil {
+		return nil, err
+	}
+
+	log.Println(" download done, took:", time.Since(start).Round(time.Second).String())
+
+	return out.Bytes(), nil
+}
+
+func (t *Trionic) readMemoryByAddress(ctx context.Context, address, length int) ([]byte, error) {
+	// Jump to read adress
+	t.c.SendFrame(0x240, []byte{0x41, 0xA1, 0x08, 0x2C, 0xF0, 0x03, 0x00, byte(length)})
+	t.c.SendFrame(0x240, []byte{0x00, 0xA1, byte((address >> 16) & 0xFF), byte((address >> 8) & 0xFF), byte(address & 0xFF), 0x00, 0x00, 0x00})
+
+	f, err := t.c.Poll(ctx, t.defaultTimeout, 0x258)
+	if err != nil {
+		return nil, err
+	}
+	t.Ack(f.Data[0] & 0xBF)
+
+	if f.Data[3] != 0x6C || f.Data[4] != 0xF0 {
+		return nil, fmt.Errorf("failed to jump to 0x%X got response: %s", address, f.String())
+	}
+
+	t.c.SendFrame(0x240, []byte{0x40, 0xA1, 0x02, 0x21, 0xF0, 0x00, 0x00, 0x00}) // start data transfer
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	b, err := t.recvData(ctx, length)
+	if err != nil {
+		return nil, err
+	}
+
+	return b, nil
+}
+
+func (t *Trionic) recvData(ctx context.Context, length int) ([]byte, error) {
+	var receivedBytes, payloadLeft int
+	out := bytes.NewBuffer([]byte{})
+outer:
+	for receivedBytes < length {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+			f, err := t.c.Poll(ctx, t.defaultTimeout, 0x258)
+			if err != nil {
+				return nil, err
+			}
+			if f.Data[0]&0x40 == 0x40 {
+				payloadLeft = int(f.Data[2]) - 2 // subtract two non-payload bytes
+				if payloadLeft > 0 && receivedBytes < length {
+					out.WriteByte(f.Data[5])
+					receivedBytes++
+					payloadLeft--
 				}
-				if length > 0 && rcvlen < leng {
-					bin[binPos] = f2.Data[6]
-					binPos++
-					rcvlen++
-					bytesThisRound++
-					length--
+				if payloadLeft > 0 && receivedBytes < length {
+					out.WriteByte(f.Data[6])
+					receivedBytes++
+					payloadLeft--
 				}
-				if length > 0 && rcvlen < leng {
-					bin[binPos] = f2.Data[7]
-					binPos++
-					rcvlen++
-					bytesThisRound++
-					length--
+				if payloadLeft > 0 && receivedBytes < length {
+					out.WriteByte(f.Data[7])
+					receivedBytes++
+					payloadLeft--
 				}
 			} else {
 				for i := 0; i < 6; i++ {
-					if rcvlen < leng {
-						bin[binPos] = f2.Data[2+i]
-						binPos++
-						rcvlen++
-						bytesThisRound++
-						length--
-						if length == 0 {
+					if receivedBytes < length {
+						out.WriteByte(f.Data[2+i])
+						receivedBytes++
+						payloadLeft--
+						if payloadLeft == 0 {
 							break
 						}
 					}
 				}
 			}
-			ack[3] = f2.Data[0] & 0xBF
-			t.c.SendFrame(0x266, ack)
-			if f2.Data[0] == 0x80 || f2.Data[0] == 0xC0 {
-				break
+			t.Ack(f.Data[0] & 0xBF)
+			if f.Data[0] == 0x80 || f.Data[0] == 0xC0 {
+				break outer
 			}
 		}
-		bar.Add(bytesThisRound)
-		address = addr + rcvlen
 	}
-	bar.Close()
+	return out.Bytes(), nil
+}
+
+func (t *Trionic) endDownloadMode(ctx context.Context) error {
 	t.c.SendFrame(0x240, []byte{0x40, 0xA1, 0x01, 0x82, 0x00, 0x00, 0x00, 0x00})
-	f3, err := t.c.Poll(ctx, 0x258, t.defaultTimeout)
+	f, err := t.c.Poll(ctx, t.defaultTimeout, 0x258)
 	if err != nil {
-		return nil, err
+		return fmt.Errorf("end download mode: %v", err)
 	}
-	ack[3] = f3.Data[0] & 0xBF
-	t.c.SendFrame(0x266, ack)
-	log.Println("download done, took:", time.Since(start).String())
-	return bin, nil
+	t.Ack(f.Data[0] & 0xBF)
+	return nil
 }

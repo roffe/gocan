@@ -25,7 +25,7 @@ type Trionic struct {
 func New(c *canusb.Canusb) *Trionic {
 	t := &Trionic{
 		c:              c,
-		defaultTimeout: 150 * time.Millisecond,
+		defaultTimeout: 250 * time.Millisecond,
 	}
 	return t
 }
@@ -62,7 +62,6 @@ func (t *Trionic) Info(ctx context.Context) error {
 		}
 		log.Println(d.name, h)
 	}
-	log.Println()
 	return nil
 }
 
@@ -70,7 +69,7 @@ func (t *Trionic) DataInitialization(ctx context.Context) error {
 	err := retry.Do(
 		func() error {
 			t.c.SendFrame(0x220, canusb.B{0x3F, 0x81, 0x00, 0x11, 0x02, 0x40, 0x00, 0x00}) //init:msg
-			_, err := t.c.Poll(ctx, 0x238, t.defaultTimeout)
+			_, err := t.c.Poll(ctx, t.defaultTimeout, 0x238)
 			if err != nil {
 				return fmt.Errorf("%v", err)
 			}
@@ -81,9 +80,10 @@ func (t *Trionic) DataInitialization(ctx context.Context) error {
 		retry.OnRetry(func(n uint, err error) {
 			log.Printf("#%d: %s\n", n, err.Error())
 		}),
+		retry.Delay(200*time.Millisecond),
 	)
 	if err != nil {
-		return fmt.Errorf("trionic data initialization failed: %v", err)
+		return errors.New("Trionic data initialization failed")
 	}
 	return nil
 }
@@ -109,7 +109,7 @@ func (t *Trionic) GetHeader(ctx context.Context, id byte) (string, error) {
 	var answer []byte
 	var length int
 	for i := 0; i < 10; i++ {
-		f, err := t.c.Poll(ctx, 0x258, t.defaultTimeout)
+		f, err := t.c.Poll(ctx, t.defaultTimeout, 0x258)
 		if err != nil {
 			log.Println(err)
 			continue
@@ -163,7 +163,7 @@ func (t *Trionic) letMeIn(ctx context.Context, method int) (bool, error) {
 
 	t.c.SendFrame(0x240, msg)
 
-	f, err := t.c.Poll(ctx, 0x258, t.defaultTimeout)
+	f, err := t.c.Poll(ctx, t.defaultTimeout, 0x258)
 	if err != nil {
 		return false, err
 
@@ -177,7 +177,7 @@ func (t *Trionic) letMeIn(ctx context.Context, method int) (bool, error) {
 	msgReply[6] = byte(k) & 0xFF
 
 	t.c.SendFrame(0x240, msgReply)
-	f2, err := t.c.Poll(ctx, 0x258, t.defaultTimeout)
+	f2, err := t.c.Poll(ctx, t.defaultTimeout, 0x258)
 	if err != nil {
 		return false, err
 
@@ -211,7 +211,7 @@ func (t *Trionic) LetMeTry(ctx context.Context, key1, key2 int) bool {
 
 	t.c.SendFrame(0x240, msg)
 
-	f, err := t.c.Poll(ctx, 0x258, t.defaultTimeout)
+	f, err := t.c.Poll(ctx, t.defaultTimeout, 0x258)
 	if err != nil {
 		log.Println(err)
 		return false
@@ -226,7 +226,7 @@ func (t *Trionic) LetMeTry(ctx context.Context, key1, key2 int) bool {
 	msgReply[6] = byte(k) & 0xFF
 
 	t.c.SendFrame(0x240, msgReply)
-	f2, err := t.c.Poll(ctx, 0x258, t.defaultTimeout)
+	f2, err := t.c.Poll(ctx, t.defaultTimeout, 0x258)
 	if err != nil {
 		log.Println(err)
 		return false

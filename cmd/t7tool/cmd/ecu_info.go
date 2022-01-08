@@ -13,6 +13,7 @@ var infoCmd = &cobra.Command{
 	Use:   "info",
 	Short: "print ECU info",
 	Long:  `Connect to the ECU over CAN and print the info from it`,
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, cancel := context.WithTimeout(cmd.Context(), 15*time.Second)
 		defer cancel()
@@ -21,6 +22,7 @@ var infoCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		defer c.Close()
 
 		tr := t7.New(c)
 
