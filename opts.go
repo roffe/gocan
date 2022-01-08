@@ -39,6 +39,13 @@ func OptComPort(port string, baudrate int) Opts {
 	}
 }
 
+func OptCabLogging(enabled bool) Opts {
+	return func(c *Canusb) error {
+		c.logging = enabled
+		return nil
+	}
+}
+
 func portInfo(portName string) (string, error) {
 	if runtime.GOOS == "windows" {
 		portName = strings.ToUpper(portName)

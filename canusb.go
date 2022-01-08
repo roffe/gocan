@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -32,6 +31,7 @@ type Canusb struct {
 	filter               []uint32
 	close                chan struct{}
 	closed               bool
+	logging              bool
 }
 
 type Port interface {
@@ -173,7 +173,7 @@ func (*Canusb) decodeFrame(buff []byte) (*Frame, error) {
 
 func (c *Canusb) sendManager(ctx context.Context, wg *sync.WaitGroup) {
 	wg.Done()
-	f, _ := os.Create("canlog.log")
+	//f, _ := os.Create("canlog.log")
 outer:
 	for {
 		select {
@@ -184,11 +184,11 @@ outer:
 				log.Printf("failed to write to com port: %q, %v\n", string(v.Byte()), err)
 			}
 			atomic.AddUint64(&c.sentBytes, uint64(n))
-			ff, ok := v.(*Frame)
-			if ok {
-				f.WriteString(ff.String())
-				f.WriteString("\n")
-			}
+			//ff, ok := v.(*Frame)
+			//if ok {
+			//	f.WriteString(ff.String())
+			//	f.WriteString("\n")
+			//}
 		case <-ctx.Done():
 			break outer
 		case <-c.close:

@@ -5,23 +5,26 @@ go 1.17
 require (
 	github.com/albenik/bcd v0.0.0-20170831201648-635201416bc7
 	github.com/avast/retry-go v3.0.0+incompatible
+	github.com/fatih/color v1.13.0
+	github.com/jroimartin/gocui v0.5.0
+	github.com/manifoldco/promptui v0.9.0
+	github.com/spf13/cobra v1.3.0
 	github.com/spf13/pflag v1.0.5
 	go.bug.st/serial v1.3.3
 )
 
 require (
 	github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e // indirect
-	github.com/fatih/color v1.13.0 // indirect
+	github.com/cpuguy83/go-md2man/v2 v2.0.1 // indirect
 	github.com/gizak/termui/v3 v3.1.0 // indirect
 	github.com/inconshreveable/mousetrap v1.0.0 // indirect
-	github.com/jroimartin/gocui v0.5.0 // indirect
 	github.com/k0kubun/pp/v3 v3.1.0 // indirect
-	github.com/manifoldco/promptui v0.9.0 // indirect
 	github.com/mattn/go-colorable v0.1.12 // indirect
 	github.com/mitchellh/go-wordwrap v0.0.0-20150314170334-ad45545899c7 // indirect
 	github.com/nsf/termbox-go v1.1.1 // indirect
-	github.com/spf13/cobra v1.3.0 // indirect
+	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	golang.org/x/text v0.3.7 // indirect
+	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
 
 require (
