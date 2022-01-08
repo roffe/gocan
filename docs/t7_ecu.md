@@ -24,6 +24,6 @@ commands related to erasing, writing and dumping flash memory
 
 * [t7](t7.md)	 - T7 swish army tool
 * [t7 ecu dump](t7_ecu_dump.md)	 - dump <filename>
-* [t7 ecu flash](t7_ecu_flash.md)	 - flash <filename>
+* [t7 ecu flash](t7_ecu_flash.md)	 - flash binary to ecu
 * [t7 ecu info](t7_ecu_info.md)	 - print ECU info
 

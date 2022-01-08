@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"time"
 
@@ -57,6 +58,9 @@ var offsets = []struct {
 
 // Flash the ECU
 func (t *Trionic) Flash(ctx context.Context, bin []byte) error {
+	if err := t.DataInitialization(ctx); err != nil {
+		return err
+	}
 	if bin[0] != 0xFF || bin[1] != 0xFF || bin[2] != 0xEF || bin[3] != 0xFC {
 		return fmt.Errorf("error: bin doesn't appear to be for a Trionic 7 ECU! (%02X%02X%02X%02X)",
 			bin[0], bin[1], bin[2], bin[3])
@@ -76,10 +80,9 @@ func (t *Trionic) Flash(ctx context.Context, bin []byte) error {
 			BarEnd:        "]",
 		}))
 
-	chunkSize := 240 // desired bulk size to process
 	maxRetries := 30
 	retries := 0
-
+	start := time.Now()
 	for _, o := range offsets {
 		binPos := o.binpos
 		err := retry.Do(
@@ -99,13 +102,13 @@ func (t *Trionic) Flash(ctx context.Context, bin []byte) error {
 		for binPos < o.end {
 			bar.Set(binPos)
 			left := o.end - binPos
-			var readBytes int
-			if left >= chunkSize {
-				readBytes = chunkSize
+			var writeBytes int
+			if left >= 0xF0 {
+				writeBytes = 0xF0
 			} else {
-				readBytes = left
+				writeBytes = left
 			}
-			err := t.writeRange(ctx, binPos, binPos+readBytes, bin)
+			err := t.writeRange(ctx, binPos, binPos+writeBytes, bin)
 			if err != nil {
 				if retries < maxRetries {
 					log.Println()
@@ -130,8 +133,8 @@ func (t *Trionic) Flash(ctx context.Context, bin []byte) error {
 				}
 				return err
 			}
-			binPos += chunkSize
-			left -= chunkSize
+			binPos += writeBytes
+			left -= writeBytes
 		}
 		bar.Set(binPos)
 	}
@@ -149,8 +152,7 @@ func (t *Trionic) Flash(ctx context.Context, bin []byte) error {
 	}
 
 	bar.Finish()
-	log.Println()
-	log.Println("flash successfull ")
+	log.Println(", flash successfull. took: ", time.Since(start).Round(time.Second))
 	return nil
 }
 
@@ -195,7 +197,8 @@ func (t *Trionic) writeJump(ctx context.Context, offset, length int) error {
 func (t *Trionic) writeRange(ctx context.Context, start, end int, bin []byte) error {
 	length := end - start
 	binPos := start
-	rows := length / 6
+	// length / 6
+	rows := int(math.Floor(float64((length + 3)) / 6.0))
 	first := true
 	for i := rows; i >= 0; i-- {
 		var data = make([]byte, 8)
@@ -221,6 +224,9 @@ func (t *Trionic) writeRange(ctx context.Context, start, end int, bin []byte) er
 			first = false
 		} else if i == 0 {
 			left := end - binPos
+			if left > 6 {
+				log.Fatal("sequence is fucked, tell roffe") // this should never happend
+			}
 			for i := 0; i < left; i++ {
 				data[2+i] = bin[binPos]
 				binPos++
@@ -230,9 +236,6 @@ func (t *Trionic) writeRange(ctx context.Context, start, end int, bin []byte) er
 				for i := left; i < fill; i++ {
 					data[left+2] = 0x00
 				}
-			}
-			if left > 6 {
-				log.Fatal("sequence is fucked, tell roffe") // this should never happend
 			}
 		} else {
 			for k := 2; k < 8; k++ {

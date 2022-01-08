@@ -65,7 +65,16 @@ func (t *Trionic) Info(ctx context.Context) error {
 	return nil
 }
 
+var lastDataInitialization time.Time
+
 func (t *Trionic) DataInitialization(ctx context.Context) error {
+	if !lastDataInitialization.IsZero() {
+		if time.Since(lastDataInitialization) < 10*time.Second {
+			return nil
+		}
+	}
+	lastDataInitialization = time.Now()
+
 	err := retry.Do(
 		func() error {
 			t.c.SendFrame(0x220, canusb.B{0x3F, 0x81, 0x00, 0x11, 0x02, 0x40, 0x00, 0x00}) //init:msg
@@ -143,6 +152,9 @@ func (t *Trionic) GetHeader(ctx context.Context, id byte) (string, error) {
 }
 
 func (t *Trionic) KnockKnock(ctx context.Context) (bool, error) {
+	if err := t.DataInitialization(ctx); err != nil {
+		return false, err
+	}
 	for i := 0; i < 2; i++ {
 		ok, err := t.letMeIn(ctx, i)
 		if err != nil {

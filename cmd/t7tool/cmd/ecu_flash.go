@@ -12,9 +12,8 @@ import (
 
 // ecuCmd represents the ecu command
 var flashCmd = &cobra.Command{
-	Use:   "flash",
-	Short: "flash <filename>",
-	Long:  `Flash binary to ECU`,
+	Use:   "flash <filename>",
+	Short: "flash binary to ecu",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, cancel := context.WithTimeout(cmd.Context(), 900*time.Second)

@@ -1,13 +1,9 @@
 ## t7 ecu flash
 
-flash <filename>
-
-### Synopsis
-
-Flash binary to ECU
+flash binary to ecu
 
 ```
-t7 ecu flash [flags]
+t7 ecu flash <filename> [flags]
 ```
 
 ### Options

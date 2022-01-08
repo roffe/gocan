@@ -12,7 +12,6 @@ import (
 )
 
 func (t *Trionic) Erase(ctx context.Context) error {
-
 	ok, err := t.KnockKnock(ctx)
 	if err != nil || !ok {
 		return fmt.Errorf("failed to autenticate: %v", err)

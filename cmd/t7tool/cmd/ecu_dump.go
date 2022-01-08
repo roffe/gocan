@@ -10,9 +10,8 @@ import (
 )
 
 var readCMD = &cobra.Command{
-	Use:   "dump",
-	Short: "dump <filename>",
-	Long:  `Dump binary from ECU`,
+	Use:   "dump <filename>",
+	Short: "dump binary from ECU",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, cancel := context.WithTimeout(cmd.Context(), 900*time.Second)
