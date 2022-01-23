@@ -12,6 +12,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"go.bug.st/serial"
 )
 
 const (
@@ -48,7 +50,7 @@ func New(ctx context.Context, filters []uint32, opts ...Opts) (*Canusb, error) {
 	c := &Canusb{
 		send:  make(chan CANFrame, 100),
 		hub:   newHub(),
-		close: make(chan struct{}, 1),
+		close: make(chan struct{}, 16),
 	}
 	for _, opt := range opts {
 		if err := opt(c); err != nil {
@@ -60,6 +62,12 @@ func New(ctx context.Context, filters []uint32, opts ...Opts) (*Canusb, error) {
 	go c.run(ctx, &ready)
 	ready.Wait()
 	c.initAdapter()
+	go func() {
+		for ctx.Err() == nil {
+			<-time.After(5 * time.Second)
+			c.Send(&RawCommand{Data: "F"})
+		}
+	}()
 	return c, nil
 }
 
@@ -79,8 +87,9 @@ func (c *Canusb) run(ctx context.Context, ready *sync.WaitGroup) {
 func (c *Canusb) recvManager(ctx context.Context, wg *sync.WaitGroup) {
 	wg.Done()
 	buff := bytes.NewBuffer(nil)
-	readBuffer := make([]byte, 16)
-	//c.port.SetReadTimeout(10 * time.Millisecond)
+	readBuffer := make([]byte, 8)
+	c.port.(serial.Port).SetReadTimeout(2 * time.Millisecond)
+	//x.SetReadTimeout(10 * time.Millisecond)
 	for ctx.Err() == nil {
 		select {
 		case <-ctx.Done():
@@ -95,7 +104,7 @@ func (c *Canusb) recvManager(ctx context.Context, wg *sync.WaitGroup) {
 			log.Fatalf("failed to read com port: %v", err)
 		}
 		if n == 0 {
-			log.Println("comport 0 byte read")
+			//log.Println("comport 0 byte read")
 			continue
 		}
 
@@ -122,7 +131,7 @@ func (c *Canusb) recvManager(ctx context.Context, wg *sync.WaitGroup) {
 				case 't':
 					f, err := c.decodeFrame(buff.Bytes())
 					if err != nil {
-						log.Printf("failed to decode frame: %q\n", buff.String())
+						log.Fatalf("failed to decode frame: %q\n", buff.String())
 						continue
 					}
 					select {
@@ -151,6 +160,7 @@ func (c *Canusb) recvManager(ctx context.Context, wg *sync.WaitGroup) {
 }
 
 func (*Canusb) decodeFrame(buff []byte) (*Frame, error) {
+	received := time.Now()
 	p := strings.ReplaceAll(string(buff), "\r", "")
 	idBytes, err := hex.DecodeString(fmt.Sprintf("%08s", p[1:4]))
 	if err != nil {
@@ -165,6 +175,7 @@ func (*Canusb) decodeFrame(buff []byte) (*Frame, error) {
 		return nil, fmt.Errorf("failed to decode frame body: %v", err)
 	}
 	return &Frame{
+		Time:       received,
 		Identifier: binary.BigEndian.Uint32(idBytes),
 		Len:        uint8(len),
 		Data:       data,
@@ -203,7 +214,7 @@ outer:
 	}
 }
 
-func calcAcceptanceFilters(idList ...uint32) (string, string) {
+func CalcAcceptanceFilters(idList ...uint32) (string, string) {
 	var code uint32 = ^uint32(0)
 	var mask uint32 = 0
 	if len(idList) == 0 {
@@ -228,24 +239,25 @@ func calcAcceptanceFilters(idList ...uint32) (string, string) {
 }
 
 func (c *Canusb) initAdapter() {
-	code, mask := calcAcceptanceFilters(c.filter...) //0x6b1, 0x3A0
+	code, mask := CalcAcceptanceFilters(c.filter...) //0x6b1, 0x3A0
 	//	log.Println(code, mask)
 	var cmds = []string{
-		"\r\r\r",         // Empty buffer
-		"V\r",            // Get Version number of both CANUSB hardware and software
-		"N\r",            // Get Serial number of the CANUSB
-		"Z0\r",           // Sets Time Stamp OFF for received frames
-		c.canrate + "\r", // Setup CAN bit-rates
-		code + "\r",
-		mask + "\r",
-		"O\r", // Open the CAN channel
+		"\r\r",    // Empty buffer
+		"V",       // Get Version number of both CANUSB hardware and software
+		"N",       // Get Serial number of the CANUSB
+		"Z0",      // Sets Time Stamp OFF for received frames
+		c.canrate, // Setup CAN bit-rates
+		code,
+		mask,
+		"O", // Open the CAN channel
 	}
+	log.Println(code, mask)
 	for _, cmd := range cmds {
-		c.Send(&rawCommand{
-			data: cmd,
+		c.Send(&RawCommand{
+			Data: cmd,
 		})
 	}
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(200 * time.Millisecond)
 }
 
 //func (c *Canusb) Monitor(ctx context.Context, identifiers ...uint32) {
@@ -297,5 +309,5 @@ func (c *Canusb) SendFrame(identifier uint32, data []byte) error {
 
 // SendString is used to bypass the frame parser and send raw commands to the CANUSB adapter
 func (c *Canusb) SendString(str string) error {
-	return c.Send(&rawCommand{data: str})
+	return c.Send(&RawCommand{Data: str})
 }

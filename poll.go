@@ -44,7 +44,7 @@ func (c *Canusb) SendAndPoll(ctx context.Context, frame *Frame, timeout time.Dur
 func (c *Canusb) Subscribe(ctx context.Context, identifiers ...uint32) chan *Frame {
 	p := &Poll{
 		identifiers: identifiers,
-		callback:    make(chan *Frame, 100),
+		callback:    make(chan *Frame, 10),
 		variant:     Subscription,
 	}
 	go func() {
@@ -146,6 +146,12 @@ func (h *Hub) run(ctx context.Context, wg *sync.WaitGroup) {
 }
 
 func (h *Hub) deliver(poll *Poll, frame *Frame) {
+	defer func() {
+		if err := recover(); err != nil {
+			log.Println("panic occurred:", err)
+			delete(h.pollers, poll)
+		}
+	}()
 	select {
 	case poll.callback <- frame:
 	default:

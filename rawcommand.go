@@ -1,9 +1,9 @@
 package canusb
 
-type rawCommand struct {
-	data string
+type RawCommand struct {
+	Data string
 }
 
-func (r *rawCommand) Byte() []byte {
-	return []byte(r.data + "\r")
+func (r *RawCommand) Byte() []byte {
+	return []byte(r.Data + "\r")
 }

@@ -41,6 +41,14 @@ func (t *Trionic) Info(ctx context.Context) error {
 	if err := t.DataInitialization(ctx); err != nil {
 		return err
 	}
+
+	asd, err := t.KnockKnock(ctx)
+	if err != nil {
+		log.Println(err)
+	}
+	if !asd {
+		return fmt.Errorf("not authed")
+	}
 	data := []struct {
 		name string
 		id   uint16
@@ -155,13 +163,14 @@ func (t *Trionic) KnockKnock(ctx context.Context) (bool, error) {
 	if err := t.DataInitialization(ctx); err != nil {
 		return false, err
 	}
-	for i := 0; i < 2; i++ {
+	for i := 0; i < 3; i++ {
 		ok, err := t.letMeIn(ctx, i)
 		if err != nil {
-			return false, fmt.Errorf("failed to auth: %v", err)
+			fmt.Printf("failed to auth %d: %v\n", i, err)
+			continue
 		}
 		if ok {
-			log.Println("authentication successfull 🥳🎉")
+			log.Println(i, "authentication successfull 🥳🎉")
 			return true, nil
 		}
 	}
@@ -212,6 +221,9 @@ func calcen(seed int, method int) int {
 	case 1:
 		key ^= 0x4081
 		key -= 0x1F6F
+	case 2:
+		key ^= 0x3DC
+		key -= 0x2356
 	}
 	key &= 0xFFFF
 	return key

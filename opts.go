@@ -84,6 +84,9 @@ func OptRate(kbit float64) Opts {
 			c.canrate = "S0"
 		case 20:
 			c.canrate = "S1"
+		case 33:
+			//c.canrate = "s8b2f"
+			c.canrate = "s0e1c"
 		case 47.619:
 			// BTR0 0xCB, BTR1 0x9A
 			c.canrate = "scb9a"

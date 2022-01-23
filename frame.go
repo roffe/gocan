@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/fatih/color"
 )
 
 type Frame struct {
+	Time       time.Time
 	Identifier uint32
 	Len        uint8
 	Data       []byte
@@ -20,33 +22,41 @@ func (f *Frame) Byte() []byte {
 }
 
 var (
-	yellow = color.New(color.FgYellow).SprintFunc()
-	red    = color.New(color.FgRed).SprintFunc()
+	yellow = color.New(color.FgHiBlue).SprintfFunc()
+	red    = color.New(color.FgRed).SprintfFunc()
 	green  = color.New(color.FgGreen).SprintfFunc()
-	blue   = color.New(color.FgHiBlue).SprintfFunc()
 )
 
 func (f *Frame) String() string {
 	var out strings.Builder
-	out.WriteString(green(fmt.Sprintf("0x%X", f.Identifier)) + " || ")
-	for i, b := range f.Data {
-		out.WriteString(blue(fmt.Sprintf("%02X", b)))
-		if i != len(f.Data)-1 {
-			out.WriteString(" ")
-		}
-	}
-	out.WriteString(" || ")
+	out.WriteString(green("0x%03X", f.Identifier) + " || ")
+
+	var hexView strings.Builder
 
 	for i, b := range f.Data {
-		out.WriteString(red(fmt.Sprintf("%08b", b)))
+		hexView.WriteString(fmt.Sprintf("%02X", b))
 		if i != len(f.Data)-1 {
-			out.WriteString(" ")
+			hexView.WriteString(" ")
 		}
 	}
+
+	out.WriteString(fmt.Sprintf("%-23s", hexView.String()))
+
 	out.WriteString(" || ")
 
-	out.WriteString(yellow(kex.ReplaceAllString(string(f.Data), ".")))
+	var binView strings.Builder
+	for i, b := range f.Data {
+		binView.WriteString(fmt.Sprintf("%08b", b))
+		if i != len(f.Data)-1 {
+			binView.WriteString(" ")
+		}
+	}
+
+	out.WriteString(red(fmt.Sprintf("%-72s", binView.String())))
+
+	out.WriteString(" || ")
+	out.WriteString(yellow("%8s", kex.ReplaceAllString(string(f.Data), ".")))
 	return out.String()
 }
 
-var kex = regexp.MustCompile("[^A-Za-z0-9]+")
+var kex = regexp.MustCompile("[^A-Za-z0-9.,!?]+")

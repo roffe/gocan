@@ -21,7 +21,7 @@ Bit 7 Bus Error (BEI), see SJA1000 datasheet **
 
 func decodeStatus(b []byte) error {
 	bs := int(bcd.ToUint16(b[1:]))
-	//	log.Printf("%08b\n", bs)
+	//log.Printf("%08b\n", bs)
 	switch true {
 	case checkBitSet(bs, 1):
 		return errors.New("CAN receive FIFO queue full")

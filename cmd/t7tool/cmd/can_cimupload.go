@@ -1,0 +1,232 @@
+package cmd
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"log"
+	"os"
+	"time"
+
+	"github.com/roffe/canusb"
+	"github.com/roffe/canusb/pkg/t7"
+	"github.com/spf13/cobra"
+)
+
+var bootloaderBytes = []byte{0xFD, 0x06, 0x18, 0x00, 0x04, 0xFB, 0x7D, 0xA7, 0xEB, 0x65, 0x75, 0xC4, 0x0E, 0x00, 0xB4, 0x72, 0x06, 0xFC, 0x0F, 0x18, 0x00, 0x04, 0x04, 0x04, 0x04}
+
+var canCIMUpload = &cobra.Command{
+	Use:   "cimupload",
+	Short: "cim upload",
+	//Long:  `Flash binary to CIM`,
+	Hidden: true,
+	Args:   cobra.RangeArgs(0, 5),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		log.SetFlags(log.Lshortfile | log.LstdFlags)
+		ctx, cancel := context.WithCancel(cmd.Context())
+		defer cancel()
+		c, err := canusb.New(
+			ctx,
+			// CAN identifiers for filtering
+			filters,
+			// Set com-port options
+			canusb.OptComPort(comPort, baudRate),
+			// Set CAN bit-rate
+			canusb.OptRate(t7.PBusRate),
+		)
+		if err != nil {
+			return err
+		}
+
+		defer c.Close()
+
+		go func() {
+			for {
+				c.SendFrame(0x101, []byte{0x01, 0x3e})
+				time.Sleep(500 * time.Millisecond)
+			}
+		}()
+
+		log.Println("Physically Requested TesterPresent (response required)")
+		c.SendFrame(0x245, []byte{0x01, 0x3e}) // Physically Requested TesterPresent (response required)
+		_, err = c.Poll(ctx, 150*time.Millisecond, 0x645)
+		if err != nil {
+			return err
+		}
+
+		log.Println("DisableNormalCommunication Request Message")
+		c.SendFrame(0x101, []byte{0xFE, 0x01, 0x28}) // DisableNormalCommunication Request Message
+		_, err = c.Poll(ctx, 150*time.Millisecond, 0x645)
+		if err != nil {
+			return err
+		}
+
+		var secLvl byte = 0x0b
+		log.Println("SecurityAccess(requestSeed)")
+		c.SendFrame(0x245, []byte{0x02, 0x27, secLvl})
+		f, err := c.Poll(ctx, 100*time.Millisecond, 0x645)
+		if err != nil {
+			log.Println(err)
+			return err
+		}
+		time.Sleep(3 * time.Millisecond)
+
+		resp := convertSeedCIM(int(f.Data[3])<<8 | int(f.Data[4]))
+
+		log.Println("SecurityAccess (sendKey)")
+		c.SendFrame(0x245, []byte{0x04, 0x27, secLvl + 1, byte(int(resp) >> 8 & int(0xFF)), byte(resp) & 0xFF})
+		f, err = c.Poll(ctx, 100*time.Millisecond, 0x645)
+		if err != nil {
+			log.Println(err)
+			return os.ErrDeadlineExceeded
+		}
+		if f.Data[1] != 0x67 && f.Data[2] == 0x02 {
+			log.Println("sec access failed")
+			return err
+		}
+
+		log.Println("requestProgrammingMode")
+		requestProgrammingMode := []byte{0xFE, 0x02, 0xA5, 0x01}
+		c.SendFrame(0x101, requestProgrammingMode)
+		presp, err := c.Poll(ctx, 150*time.Millisecond, 0x645)
+		if err != nil {
+			return err
+		}
+		if presp.Data[0] != 0x01 || presp.Data[1] != 0xE5 {
+			return fmt.Errorf("invalid response to request programming mode")
+		}
+		if err := sendKeepAlive(ctx, c); err != nil {
+			return err
+		}
+		log.Println("enableProgrammingMode")
+		enableProgrammingMode := []byte{0xFE, 0x02, 0xA5, 0x03}
+		c.SendFrame(0x245, enableProgrammingMode)
+
+		time.Sleep(100 * time.Millisecond)
+
+		/*
+			log.Println("RequestDownload")
+			c.SendFrame(0x245, []byte{0x05, 0x34, 0x00, 0x00, 0x00, 0x00})
+			rdresp, err := c.Poll(ctx, 100*time.Millisecond, 0x645)
+			if err != nil {
+				return err
+			}
+
+			if rdresp.Data[1] == 0x7F {
+				log.Println(rdresp)
+				return errors.New("error request download")
+			}
+
+		*/
+
+		toSend := len(bootloaderBytes)
+		r := bytes.NewReader(bootloaderBytes)
+		fb, err := r.ReadByte()
+		if err != nil {
+			return err
+		}
+		toSend--
+		totalLen := 5 + toSend
+		log.Println("download")
+		download := []byte{0x10, byte(totalLen), 0x36, 0x00, 0x00, 0x18, 0x00, fb}
+		log.Printf("%X", download)
+		c.SendFrame(0x245, download)
+		daeResp, err := c.Poll(ctx, 100*time.Millisecond, 0x645)
+		if err != nil {
+			return err
+		}
+		if daeResp.Data[0] != 0x30 || daeResp.Data[1] != 0x00 {
+			return errors.New("TransferData Negative Response")
+		}
+		log.Println("download mode resp:", daeResp.String())
+
+		sleeper := int(daeResp.Data[2])
+
+		seq := 0x21
+		//outer:
+		for toSend > 0 {
+			var pkgSize int
+			if toSend >= 8 {
+				pkgSize = 8
+			} else {
+				pkgSize = toSend + 1
+			}
+
+			var maxSize int
+			if toSend >= 7 {
+				maxSize = 7
+			} else {
+				maxSize = toSend
+			}
+
+			payload := make([]byte, pkgSize)
+			payload[0] = byte(seq)
+
+		inner:
+			for i := 1; i <= maxSize; i++ {
+				b, err := r.ReadByte()
+				if err != nil {
+					return err
+				}
+				payload[i] = b
+				toSend--
+				if toSend == 0 {
+					break inner
+				}
+			}
+			log.Printf("Send Data: %X", payload)
+			c.SendFrame(0x245, payload)
+			seq++
+			if seq == 0x30 {
+				seq = 0x20
+			}
+			time.Sleep(time.Duration(sleeper) * time.Millisecond)
+		}
+
+		done, err := c.Poll(ctx, 1*time.Second, 0x645)
+		if err != nil {
+			return err
+		}
+		log.Println("after download:", done.String())
+
+		log.Println("Execute")
+		c.SendFrame(0x245, []byte{0x05, 0x36, 0x80, 0x00, 0x18, 0x00})
+
+		if err := sendKeepAlive(ctx, c); err != nil {
+			return err
+		}
+
+		log.Println("ReturnToNormalMode Message Flow")
+		c.SendFrame(0x245, []byte{0x01, 0x20}) //  ReturnToNormalMode Message Flow
+
+		for i := 0; i < 10; i++ {
+			ff, err := c.Poll(ctx, 1*time.Second)
+			if err == nil {
+				log.Println(ff.String())
+			} else {
+				log.Println(err)
+			}
+		}
+
+		return nil
+	},
+}
+
+var lastKeepAlive time.Time
+
+func sendKeepAlive(ctx context.Context, c *canusb.Canusb) error {
+	if time.Since(lastKeepAlive) >= 2*time.Second {
+		c.SendFrame(0x245, []byte{0x01, 0x3e}) // Physically Requested TesterPresent (response required)
+		_, err := c.Poll(ctx, 150*time.Millisecond, 0x645)
+		if err != nil {
+			return err
+		}
+		lastKeepAlive = time.Now()
+	}
+	return nil
+}
+
+func init() {
+	canCMD.AddCommand(canCIMUpload)
+}
