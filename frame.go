@@ -1,4 +1,4 @@
-package canusb
+package gocan
 
 import (
 	"fmt"

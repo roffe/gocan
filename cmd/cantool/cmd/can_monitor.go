@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"github.com/jroimartin/gocui"
-	"github.com/roffe/canusb"
-	"github.com/roffe/canusb/cmd/cantool/pkg/ui"
-	"github.com/roffe/canusb/pkg/t7"
+	"github.com/roffe/gocan"
+	"github.com/roffe/gocan/cmd/cantool/pkg/ui"
+	"github.com/roffe/gocan/pkg/t7"
 	"github.com/spf13/cobra"
 )
 
@@ -44,7 +44,15 @@ var monitorCMD = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log.Println("Entering monitoring mode")
 		ctx := cmd.Context()
-		c, err := initCAN(ctx)
+		port, err := rootCmd.PersistentFlags().GetString(flagPort)
+		if err != nil {
+			return err
+		}
+		baudrate, err := rootCmd.PersistentFlags().GetInt(flagBaudrate)
+		if err != nil {
+			return err
+		}
+		c, err := initCAN(ctx, port, baudrate)
 		if err != nil {
 			return err
 		}
@@ -93,7 +101,7 @@ func inFilters(identifier uint32) bool {
 var coolant int
 var hPa uint16
 
-func frameParser(ctx context.Context, c *canusb.Canusb, g *gocui.Gui) {
+func frameParser(ctx context.Context, c *gocan.Client, g *gocui.Gui) {
 	msg := c.Subscribe(ctx)
 	for og := range msg {
 		if !inFilters(og.Identifier) {
@@ -247,7 +255,7 @@ func flipAutoscroll(g *gocui.Gui, v *gocui.View) error {
 func quit(g *gocui.Gui, v *gocui.View) error {
 	return gocui.ErrQuit
 }
-func setFilter(c *canusb.Canusb) func(g *gocui.Gui, v *gocui.View) error {
+func setFilter(c *gocan.Client) func(g *gocui.Gui, v *gocui.View) error {
 	return func(g *gocui.Gui, v *gocui.View) error {
 		buff := strings.TrimRight(v.Buffer(), "\n")
 		mu.Lock()
@@ -286,10 +294,10 @@ func setFilter(c *canusb.Canusb) func(g *gocui.Gui, v *gocui.View) error {
 			}
 		}
 
-		code, mask := canusb.CalcAcceptanceFilters(filters...)
-		c.Send(&canusb.RawCommand{Data: code})
-		c.Send(&canusb.RawCommand{Data: mask})
-		//c.Send(&canusb.RawCommand{Data: "O"})
+		code, mask := gocan.CalcAcceptanceFilters(filters...)
+		c.Send(&gocan.RawCommand{Data: code})
+		c.Send(&gocan.RawCommand{Data: mask})
+		//c.Send(&gocan.RawCommand{Data: "O"})
 		if v2, err2 := g.View("errors"); err2 == nil {
 			fmt.Fprintf(v2, "Set %d %s %s\n", filters, code, mask)
 		}
@@ -299,7 +307,7 @@ func setFilter(c *canusb.Canusb) func(g *gocui.Gui, v *gocui.View) error {
 		return nil
 	}
 }
-func initKeybindings(g *gocui.Gui, c *canusb.Canusb) error {
+func initKeybindings(g *gocui.Gui, c *gocan.Client) error {
 	if err := g.SetKeybinding("", 'q', gocui.ModNone, quit); err != nil {
 		return err
 	}

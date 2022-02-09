@@ -1,4 +1,4 @@
-module github.com/roffe/canusb
+module github.com/roffe/gocan
 
 go 1.17
 

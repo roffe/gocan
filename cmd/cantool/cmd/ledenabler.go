@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/manifoldco/promptui"
-	"github.com/roffe/canusb/pkg/gmlan"
+	"github.com/roffe/gocan/pkg/gmlan"
 	"github.com/spf13/cobra"
 )
 
@@ -24,7 +24,15 @@ var ledenablerCmd = &cobra.Command{
 		ctx, cancel := context.WithTimeout(cmd.Context(), 45*time.Second)
 		defer cancel()
 
-		c, err := initCAN(ctx)
+		port, err := rootCmd.PersistentFlags().GetString(flagPort)
+		if err != nil {
+			return err
+		}
+		baudrate, err := rootCmd.PersistentFlags().GetInt(flagBaudrate)
+		if err != nil {
+			return err
+		}
+		c, err := initCAN(ctx, port, baudrate)
 		if err != nil {
 			return err
 		}

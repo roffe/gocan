@@ -3,33 +3,47 @@ package cmd
 import (
 	"context"
 
-	"github.com/roffe/canusb"
-	"github.com/roffe/canusb/pkg/t7"
+	"github.com/roffe/gocan"
+	"github.com/roffe/gocan/adapters/lawicel"
+	"github.com/roffe/gocan/pkg/t7"
 	"github.com/spf13/cobra"
 )
 
 var canCMD = &cobra.Command{
 	Use:   "can",
 	Short: "CAN related commands",
-	//Long:  `Flash binary to ECU`,
-	Args: cobra.ExactArgs(1),
-	//RunE: func(cmd *cobra.Command, args []string) error {
-	//	return nil
-	//},
+	Args:  cobra.ExactArgs(1),
 }
 
 func init() {
 	rootCmd.AddCommand(canCMD)
 }
-func initCAN(ctx context.Context, filters ...uint32) (*canusb.Canusb, error) {
-	c, err := canusb.New(
+func initCAN(ctx context.Context, port string, baudrate int, filters ...uint32) (*gocan.Client, error) {
+
+	device := &lawicel.Canusb{}
+
+	if err := device.SetPort(port); err != nil {
+		return nil, err
+	}
+	if err := device.SetPortRate(baudrate); err != nil {
+		return nil, err
+	}
+	if err := device.SetCANrate(t7.PBusRate); err != nil {
+		return nil, err
+	}
+	if err := device.Init(); err != nil {
+		return nil, err
+	}
+
+	c, err := gocan.New(
 		ctx,
+		device,
 		// CAN identifiers for filtering
 		filters,
 		// Set com-port options
-		canusb.OptComPort(comPort, baudRate),
+		gocan.OptComPort(port, baudrate),
 		// Set CAN bit-rate
-		canusb.OptRate(t7.PBusRate),
+		gocan.OptRate(t7.PBusRate),
 	)
 	if err != nil {
 		return nil, err

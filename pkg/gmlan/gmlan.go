@@ -8,14 +8,14 @@ import (
 	"log"
 	"time"
 
-	"github.com/roffe/canusb"
+	"github.com/roffe/gocan"
 )
 
 type Client struct {
-	c *canusb.Canusb
+	c *gocan.Client
 }
 
-func New(c *canusb.Canusb) *Client {
+func New(c *gocan.Client) *Client {
 	return &Client{
 		c: c,
 	}

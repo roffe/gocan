@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/avast/retry-go"
-	"github.com/roffe/canusb"
+	gocan "github.com/roffe/gocan"
 )
 
 const (
@@ -18,11 +18,11 @@ const (
 )
 
 type Trionic struct {
-	c              *canusb.Canusb
+	c              *gocan.Client
 	defaultTimeout time.Duration // 150ms
 }
 
-func New(c *canusb.Canusb) *Trionic {
+func New(c *gocan.Client) *Trionic {
 	t := &Trionic{
 		c:              c,
 		defaultTimeout: 250 * time.Millisecond,
@@ -85,7 +85,7 @@ func (t *Trionic) DataInitialization(ctx context.Context) error {
 
 	err := retry.Do(
 		func() error {
-			t.c.SendFrame(0x220, canusb.B{0x3F, 0x81, 0x00, 0x11, 0x02, 0x40, 0x00, 0x00}) //init:msg
+			t.c.SendFrame(0x220, []byte{0x3F, 0x81, 0x00, 0x11, 0x02, 0x40, 0x00, 0x00}) //init:msg
 			_, err := t.c.Poll(ctx, t.defaultTimeout, 0x238)
 			if err != nil {
 				return fmt.Errorf("%v", err)
@@ -108,7 +108,7 @@ func (t *Trionic) DataInitialization(ctx context.Context) error {
 func (t *Trionic) GetHeader(ctx context.Context, id byte) (string, error) {
 	err := retry.Do(
 		func() error {
-			return t.c.SendFrame(0x240, canusb.B{0x40, 0xA1, 0x02, 0x1A, id, 0x00, 0x00, 0x00})
+			return t.c.SendFrame(0x240, []byte{0x40, 0xA1, 0x02, 0x1A, id, 0x00, 0x00, 0x00})
 		},
 		retry.Context(ctx),
 		retry.Attempts(3),
@@ -150,8 +150,8 @@ func (t *Trionic) GetHeader(ctx context.Context, id byte) (string, error) {
 				length--
 			}
 		}
-		t.c.SendFrame(0x266, canusb.B{0x40, 0xA1, 0x3F, f.Data[0] & 0xBF, 0x00, 0x00, 0x00, 0x00})
-		if bytes.Equal(f.Data[:1], canusb.B{0x80}) || bytes.Equal(f.Data[:1], canusb.B{0xC0}) {
+		t.c.SendFrame(0x266, []byte{0x40, 0xA1, 0x3F, f.Data[0] & 0xBF, 0x00, 0x00, 0x00, 0x00})
+		if bytes.Equal(f.Data[:1], []byte{0x80}) || bytes.Equal(f.Data[:1], []byte{0xC0}) {
 			break
 		}
 	}

@@ -9,8 +9,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/roffe/canusb"
-	"github.com/roffe/canusb/pkg/t7"
+	"github.com/roffe/gocan"
 	"github.com/spf13/cobra"
 )
 
@@ -26,15 +25,15 @@ var cimUpload = &cobra.Command{
 		log.SetFlags(log.Lshortfile | log.LstdFlags)
 		ctx, cancel := context.WithCancel(cmd.Context())
 		defer cancel()
-		c, err := canusb.New(
-			ctx,
-			// CAN identifiers for filtering
-			filters,
-			// Set com-port options
-			canusb.OptComPort(comPort, baudRate),
-			// Set CAN bit-rate
-			canusb.OptRate(t7.PBusRate),
-		)
+		port, err := rootCmd.PersistentFlags().GetString(flagPort)
+		if err != nil {
+			return err
+		}
+		baudrate, err := rootCmd.PersistentFlags().GetInt(flagBaudrate)
+		if err != nil {
+			return err
+		}
+		c, err := initCAN(ctx, port, baudrate)
 		if err != nil {
 			return err
 		}
@@ -215,7 +214,7 @@ var cimUpload = &cobra.Command{
 
 var lastKeepAlive time.Time
 
-func sendKeepAlive(ctx context.Context, c *canusb.Canusb) error {
+func sendKeepAlive(ctx context.Context, c *gocan.Client) error {
 	if time.Since(lastKeepAlive) >= 2*time.Second {
 		c.SendFrame(0x245, []byte{0x01, 0x3e}) // Physically Requested TesterPresent (response required)
 		_, err := c.Poll(ctx, 150*time.Millisecond, 0x645)

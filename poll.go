@@ -1,4 +1,4 @@
-package canusb
+package gocan
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func (c *Canusb) SendAndPoll(ctx context.Context, frame *Frame, timeout time.Duration, identifiers ...uint32) (*Frame, error) {
+func (c *Client) SendAndPoll(ctx context.Context, frame *Frame, timeout time.Duration, identifiers ...uint32) (*Frame, error) {
 	p := &Poll{
 		identifiers: identifiers,
 		callback:    make(chan *Frame),
@@ -41,7 +41,7 @@ func (c *Canusb) SendAndPoll(ctx context.Context, frame *Frame, timeout time.Dur
 	}
 }
 
-func (c *Canusb) Subscribe(ctx context.Context, identifiers ...uint32) chan *Frame {
+func (c *Client) Subscribe(ctx context.Context, identifiers ...uint32) chan *Frame {
 	p := &Poll{
 		identifiers: identifiers,
 		callback:    make(chan *Frame, 10),
@@ -56,7 +56,7 @@ func (c *Canusb) Subscribe(ctx context.Context, identifiers ...uint32) chan *Fra
 	return p.callback
 }
 
-func (c *Canusb) Poll(ctx context.Context, timeout time.Duration, identifiers ...uint32) (*Frame, error) {
+func (c *Client) Poll(ctx context.Context, timeout time.Duration, identifiers ...uint32) (*Frame, error) {
 	p := &Poll{
 		identifiers: identifiers,
 		callback:    make(chan *Frame, 1),

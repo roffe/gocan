@@ -1,4 +1,4 @@
-package canusb
+package gocan
 
 import "fmt"
 
@@ -13,6 +13,6 @@ func (st *Stats) String() string {
 	return fmt.Sprintf("recv: %d sent: %d errors: %d dropped : %d", st.RecvBytes, st.SentBytes, st.Errors, st.DroppedFrames)
 }
 
-func (c *Canusb) Stats() Stats {
+func (c *Client) Stats() Stats {
 	return Stats{c.recvBytes, c.sentBytes, c.errors, c.dropped}
 }

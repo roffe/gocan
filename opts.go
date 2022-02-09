@@ -1,4 +1,4 @@
-package canusb
+package gocan
 
 import (
 	"errors"
@@ -11,7 +11,7 @@ import (
 	"go.bug.st/serial/enumerator"
 )
 
-type Opts func(c *Canusb) error
+type Opts func(c *Client) error
 
 // Canusb runs
 // clock freq 16Mhz
@@ -19,7 +19,7 @@ type Opts func(c *Canusb) error
 // saab p-bus 500kbit
 
 func OptComPort(port string, baudrate int) Opts {
-	return func(c *Canusb) error {
+	return func(c *Client) error {
 		portSelected, err := portInfo(port)
 		if err != nil {
 			return err
@@ -39,8 +39,8 @@ func OptComPort(port string, baudrate int) Opts {
 	}
 }
 
-func OptCabLogging(enabled bool) Opts {
-	return func(c *Canusb) error {
+func OptCanLogging(enabled bool) Opts {
+	return func(c *Client) error {
 		c.logging = enabled
 		return nil
 	}
@@ -78,7 +78,7 @@ func portInfo(portName string) (string, error) {
 }
 
 func OptRate(kbit float64) Opts {
-	return func(c *Canusb) error {
+	return func(c *Client) error {
 		switch kbit {
 		case 10:
 			c.canrate = "S0"

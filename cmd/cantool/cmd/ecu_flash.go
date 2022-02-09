@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/roffe/canusb/pkg/t7"
+	"github.com/roffe/gocan/pkg/t7"
 	"github.com/spf13/cobra"
 )
 
@@ -18,7 +18,15 @@ var flashCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, cancel := context.WithTimeout(cmd.Context(), 900*time.Second)
 		defer cancel()
-		c, err := initCAN(ctx, 0x238, 0x258)
+		port, err := rootCmd.PersistentFlags().GetString(flagPort)
+		if err != nil {
+			return err
+		}
+		baudrate, err := rootCmd.PersistentFlags().GetInt(flagBaudrate)
+		if err != nil {
+			return err
+		}
+		c, err := initCAN(ctx, port, baudrate, 0x238, 0x258)
 		if err != nil {
 			return err
 		}

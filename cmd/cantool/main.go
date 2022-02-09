@@ -7,7 +7,7 @@ import (
 	"os/signal"
 	"time"
 
-	"github.com/roffe/canusb/cmd/cantool/cmd"
+	"github.com/roffe/gocan/cmd/cantool/cmd"
 )
 
 func main() {

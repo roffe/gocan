@@ -7,9 +7,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/roffe/canusb"
-	"github.com/roffe/canusb/pkg/gmlan"
-	"github.com/roffe/canusb/pkg/t7"
+	"github.com/roffe/gocan"
+	"github.com/roffe/gocan/pkg/gmlan"
 	"github.com/spf13/cobra"
 )
 
@@ -23,15 +22,15 @@ var cimTOY = &cobra.Command{
 		log.SetFlags(log.Lshortfile | log.LstdFlags)
 		ctx, cancel := context.WithCancel(cmd.Context())
 		defer cancel()
-		c, err := canusb.New(
-			ctx,
-			// CAN identifiers for filtering
-			filters,
-			// Set com-port options
-			canusb.OptComPort(comPort, baudRate),
-			// Set CAN bit-rate
-			canusb.OptRate(t7.PBusRate),
-		)
+		port, err := rootCmd.PersistentFlags().GetString(flagPort)
+		if err != nil {
+			return err
+		}
+		baudrate, err := rootCmd.PersistentFlags().GetInt(flagBaudrate)
+		if err != nil {
+			return err
+		}
+		c, err := initCAN(ctx, port, baudrate)
 		if err != nil {
 			return err
 		}
@@ -142,7 +141,7 @@ func init() {
 	cimCmd.AddCommand(cimTOY)
 }
 
-func readDiagnosticInformation(ctx context.Context, c *canusb.Canusb) {
+func readDiagnosticInformation(ctx context.Context, c *gocan.Client) {
 	log.Println("readDiagnosticInformation")
 	c.SendFrame(0x245, []byte{0x05, 0xA9, 0x80, 0x07, 0x00, 0x02})
 	f, err := c.Poll(ctx, 150*time.Millisecond)
@@ -153,7 +152,7 @@ func readDiagnosticInformation(ctx context.Context, c *canusb.Canusb) {
 	log.Println(f.String())
 }
 
-func reportProgrammingState(ctx context.Context, c *canusb.Canusb) {
+func reportProgrammingState(ctx context.Context, c *gocan.Client) {
 	log.Println("reportProgrammingState")
 	c.SendFrame(0x101, []byte{0xFE, 0x01, 0xA2, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA})
 	f, err := c.Poll(ctx, 150*time.Millisecond)

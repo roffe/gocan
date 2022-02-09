@@ -24,16 +24,19 @@ func Execute(ctx context.Context) {
 	rootCmd.ExecuteContext(ctx)
 }
 
-var (
-	comPort  string
-	baudRate int
-	debug    bool
+const (
+	flagPort     = "port"
+	flagBaudrate = "baudrate"
+	flagDebug    = "debug"
 )
 
 func init() {
 	log.SetFlags(0)
-	rootCmd.PersistentFlags().StringVarP(&comPort, "port", "p", "*", "com-port, * = print available")
-	rootCmd.PersistentFlags().IntVarP(&baudRate, "baudrate", "b", 115200, "baudrate")
-	rootCmd.PersistentFlags().BoolVarP(&debug, "debug", "d", false, "debug mode")
+
+	pf := rootCmd.PersistentFlags()
+	pf.StringP(flagPort, "p", "*", "com-port, * = print available")
+	pf.IntP(flagBaudrate, "b", 115200, "baudrate")
+	pf.BoolP(flagDebug, "d", false, "debug mode")
+
 	rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
 }

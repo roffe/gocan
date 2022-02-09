@@ -10,8 +10,7 @@ import (
 	"time"
 
 	"github.com/avast/retry-go"
-	"github.com/roffe/canusb"
-	"github.com/roffe/canusb/pkg/t7"
+	"github.com/roffe/gocan"
 	"github.com/spf13/cobra"
 )
 
@@ -25,15 +24,15 @@ var cimDump = &cobra.Command{
 		log.SetFlags(log.Lshortfile | log.LstdFlags)
 		ctx, cancel := context.WithCancel(cmd.Context())
 		defer cancel()
-		c, err := canusb.New(
-			ctx,
-			// CAN identifiers for filtering
-			filters,
-			// Set com-port options
-			canusb.OptComPort(comPort, baudRate),
-			// Set CAN bit-rate
-			canusb.OptRate(t7.PBusRate),
-		)
+		port, err := rootCmd.PersistentFlags().GetString(flagPort)
+		if err != nil {
+			return err
+		}
+		baudrate, err := rootCmd.PersistentFlags().GetInt(flagBaudrate)
+		if err != nil {
+			return err
+		}
+		c, err := initCAN(ctx, port, baudrate)
 		if err != nil {
 			return err
 		}
@@ -128,7 +127,7 @@ var cimDump = &cobra.Command{
 	},
 }
 
-func readRange(ctx context.Context, c *canusb.Canusb, start, length, maxlen uint32) ([]byte, error) {
+func readRange(ctx context.Context, c *gocan.Client, start, length, maxlen uint32) ([]byte, error) {
 	lastKeepAlive := time.Now()
 
 	out := bytes.NewBuffer([]byte{})
@@ -159,7 +158,7 @@ func readRange(ctx context.Context, c *canusb.Canusb, start, length, maxlen uint
 		payload := []byte{0x06, 0x23, bs[1], bs[2], bs[3], 0x00, readBytes}
 		log.Printf("%X %X\n", curOffset, bs)
 		log.Printf("payload>>%X\n", payload)
-		var fs *canusb.Frame
+		var fs *gocan.Frame
 		err := retry.Do(
 			func() error {
 				var err error
