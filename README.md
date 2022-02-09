@@ -9,7 +9,7 @@ Thanks to [TrionicTuning](https://www.trionictuning.com/), [Chriva](https://www.
 [Docs](docs/t7.md)
 
 ```go
-$go run ./cmd/t7tool/main.go -p com3 -b 921600 ecu info
+$go run ./cmd/cantool/main.go -p com3 -b 921600 ecu info
 port: COM3
    USB ID      0403:6001
    USB serial  LW5ZEIRKA

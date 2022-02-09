@@ -15,7 +15,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var canCIMDump = &cobra.Command{
+var cimDump = &cobra.Command{
 	Use:   "cimdump",
 	Short: "toy stuff",
 	//Long:  `Flash binary to ECU`,
@@ -244,7 +244,7 @@ func ignore(id uint32) bool {
 }
 */
 func init() {
-	canCMD.AddCommand(canCIMDump)
+	cimCmd.AddCommand(cimDump)
 }
 
 func convertSeedCIM(seed int) int {

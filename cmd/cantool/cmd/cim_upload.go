@@ -16,7 +16,7 @@ import (
 
 var bootloaderBytes = []byte{0xFD, 0x06, 0x18, 0x00, 0x04, 0xFB, 0x7D, 0xA7, 0xEB, 0x65, 0x75, 0xC4, 0x0E, 0x00, 0xB4, 0x72, 0x06, 0xFC, 0x0F, 0x18, 0x00, 0x04, 0x04, 0x04, 0x04}
 
-var canCIMUpload = &cobra.Command{
+var cimUpload = &cobra.Command{
 	Use:   "cimupload",
 	Short: "cim upload",
 	//Long:  `Flash binary to CIM`,
@@ -228,5 +228,5 @@ func sendKeepAlive(ctx context.Context, c *canusb.Canusb) error {
 }
 
 func init() {
-	canCMD.AddCommand(canCIMUpload)
+	cimCmd.AddCommand(cimUpload)
 }

@@ -1,21 +1,19 @@
 package cmd
 
 import (
-	"bytes"
 	"context"
-	"errors"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"time"
 
 	"github.com/roffe/canusb"
+	"github.com/roffe/canusb/pkg/gmlan"
 	"github.com/roffe/canusb/pkg/t7"
 	"github.com/spf13/cobra"
 )
 
-var canCIMTOY = &cobra.Command{
+var cimTOY = &cobra.Command{
 	Use:   "cimtoy",
 	Short: "cim toy",
 	//Long:  `Flash binary to CIM`,
@@ -37,8 +35,9 @@ var canCIMTOY = &cobra.Command{
 		if err != nil {
 			return err
 		}
-
 		defer c.Close()
+
+		gm := gmlan.New(c)
 
 		go func() {
 			for {
@@ -55,9 +54,10 @@ var canCIMTOY = &cobra.Command{
 		}
 
 		log.Println("DisableNormalCommunication Request Message")
-		c.SendFrame(0x101, []byte{0xFE, 0x01, 0x28}) // DisableNormalCommunication Request Message
-		_, err = c.Poll(ctx, 150*time.Millisecond, 0x645)
-		if err != nil {
+		if err := gm.DisableNormalCommunication(ctx); err != nil {
+			return err
+		}
+		if _, err := c.Poll(ctx, 150*time.Millisecond, 0x645); err != nil { // wait for CIM to say yes i will shutup
 			return err
 		}
 
@@ -88,7 +88,7 @@ var canCIMTOY = &cobra.Command{
 		readDiagnosticInformation(ctx, c)
 		reportProgrammingState(ctx, c)
 
-		b, err := readDataByIdentifier(ctx, c, 0x90)
+		b, err := gm.ReadDataByIdentifier(ctx, 0x245, 0x90)
 		if err != nil {
 			return err
 		}
@@ -116,7 +116,7 @@ var canCIMTOY = &cobra.Command{
 
 		time.Sleep(100 * time.Millisecond)
 
-		if err := writeDataByIdentifier(ctx, c, 0x90, []byte("YS3FB56F091023064")); err != nil {
+		if err := gm.WriteDataByIdentifier(ctx, 0x245, 0x90, []byte("YS3FB56F091023064")); err != nil {
 			return err
 		}
 		f2, err := c.Poll(ctx, 150*time.Millisecond, 0x645)
@@ -126,7 +126,7 @@ var canCIMTOY = &cobra.Command{
 		}
 		log.Println(f2.String())
 
-		b2, err := readDataByIdentifier(ctx, c, 0x90)
+		b2, err := gm.ReadDataByIdentifier(ctx, 0x245, 0x90)
 		if err != nil {
 			return err
 		}
@@ -139,7 +139,7 @@ var canCIMTOY = &cobra.Command{
 }
 
 func init() {
-	canCMD.AddCommand(canCIMTOY)
+	cimCmd.AddCommand(cimTOY)
 }
 
 func readDiagnosticInformation(ctx context.Context, c *canusb.Canusb) {
@@ -162,94 +162,4 @@ func reportProgrammingState(ctx context.Context, c *canusb.Canusb) {
 		return
 	}
 	log.Println(f.String())
-}
-
-func writeDataByIdentifier(ctx context.Context, c *canusb.Canusb, identifier byte, data []byte) error {
-	r := bytes.NewReader(data)
-
-	firstPart := make([]byte, 4)
-	if _, err := r.Read(firstPart); err != nil {
-		return err
-	}
-	payload := []byte{0x10, byte(len(data) + 2), 0x3B, identifier}
-	payload = append(payload, firstPart...)
-	c.SendFrame(0x245, payload)
-	log.Printf("%X\n", payload)
-	resp, err := c.Poll(ctx, 100*time.Millisecond, 0x645)
-	if err != nil {
-		return err
-	}
-	if resp.Data[0] != 0x30 || resp.Data[1] != 0x00 {
-		log.Println(resp.String())
-		return errors.New("invalid response to initial writeDataByIdentifier")
-	}
-
-	delay := resp.Data[2]
-
-	var seq byte = 0x21
-
-	for r.Len() > 0 {
-		pkg := []byte{seq}
-	inner:
-		for i := 1; i < 8; i++ {
-			b, err := r.ReadByte()
-			if err != nil {
-				if err == io.EOF {
-					log.Println("eof")
-					break inner
-				}
-				return err
-			}
-			pkg = append(pkg, b)
-		}
-		c.SendFrame(0x245, pkg)
-		log.Printf("%X\n", pkg)
-		time.Sleep(time.Duration(delay) * time.Millisecond)
-		seq++
-		if seq == 0x30 {
-			seq = 0x20
-		}
-	}
-
-	return nil
-}
-
-func readDataByIdentifier(ctx context.Context, c *canusb.Canusb, identifier byte) ([]byte, error) {
-	out := bytes.NewBuffer([]byte{})
-	c.SendFrame(0x245, []byte{0x02, 0x1A, identifier})
-	resp, err := c.Poll(ctx, 100*time.Millisecond, 0x645)
-	if err != nil {
-		return nil, err
-	}
-	if resp.Data[3] == 0x78 {
-		resp, err = c.Poll(ctx, 150*time.Millisecond, 0x645)
-		if err != nil {
-			return nil, err
-		}
-		out.Write(resp.Data[4:])
-	} else {
-		out.Write(resp.Data[4:])
-	}
-
-	left := int(resp.Data[1])
-	left -= 6
-	c.SendFrame(0x245, []byte{0x30, 0x00, 0x00})
-
-outer:
-	for left > 0 {
-		read, err := c.Poll(ctx, 100*time.Millisecond, 0x645)
-		if err != nil {
-			return nil, err
-		}
-		for _, b := range read.Data[1:] {
-			out.WriteByte(b)
-			left--
-			if left == 0 {
-				break outer
-			}
-		}
-
-	}
-
-	return out.Bytes(), nil
 }

@@ -122,10 +122,10 @@ func (c *Canusb) recvManager(ctx context.Context, wg *sync.WaitGroup) {
 					buff.Reset()
 					continue
 				}
-				b := buff.Bytes()
-				switch b[0] {
+				by := buff.Bytes()
+				switch by[0] {
 				case 'F':
-					if err := decodeStatus(b); err != nil {
+					if err := decodeStatus(by); err != nil {
 						log.Fatal("CAN status error", err)
 					}
 				case 't':

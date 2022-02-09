@@ -14,7 +14,7 @@ import (
 
 	"github.com/jroimartin/gocui"
 	"github.com/roffe/canusb"
-	"github.com/roffe/canusb/cmd/t7tool/pkg/ui"
+	"github.com/roffe/canusb/cmd/cantool/pkg/ui"
 	"github.com/roffe/canusb/pkg/t7"
 	"github.com/spf13/cobra"
 )
