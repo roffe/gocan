@@ -70,17 +70,19 @@ var cimUpload = &cobra.Command{
 			return err
 		}
 		time.Sleep(3 * time.Millisecond)
-
-		resp := convertSeedCIM(int(f.Data[3])<<8 | int(f.Data[4]))
+		d := f.GetData()
+		resp := convertSeedCIM(int(d[3])<<8 | int(d[4]))
 
 		log.Println("SecurityAccess (sendKey)")
 		c.SendFrame(0x245, []byte{0x04, 0x27, secLvl + 1, byte(int(resp) >> 8 & int(0xFF)), byte(resp) & 0xFF})
-		f, err = c.Poll(ctx, 100*time.Millisecond, 0x645)
+		f2, err := c.Poll(ctx, 100*time.Millisecond, 0x645)
 		if err != nil {
 			log.Println(err)
 			return os.ErrDeadlineExceeded
 		}
-		if f.Data[1] != 0x67 && f.Data[2] == 0x02 {
+		d2 := f2.GetData()
+
+		if d2[1] != 0x67 && d2[2] == 0x02 {
 			log.Println("sec access failed")
 			return err
 		}
@@ -92,7 +94,8 @@ var cimUpload = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if presp.Data[0] != 0x01 || presp.Data[1] != 0xE5 {
+		pd := presp.GetData()
+		if pd[0] != 0x01 || pd[1] != 0xE5 {
 			return fmt.Errorf("invalid response to request programming mode")
 		}
 		if err := sendKeepAlive(ctx, c); err != nil {
@@ -135,12 +138,13 @@ var cimUpload = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if daeResp.Data[0] != 0x30 || daeResp.Data[1] != 0x00 {
+		dr := daeResp.GetData()
+		if dr[0] != 0x30 || dr[1] != 0x00 {
 			return errors.New("TransferData Negative Response")
 		}
 		log.Println("download mode resp:", daeResp.String())
 
-		sleeper := int(daeResp.Data[2])
+		sleeper := int(dr[2])
 
 		seq := 0x21
 		//outer:

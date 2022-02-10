@@ -20,7 +20,7 @@ func init() {
 }
 func initCAN(ctx context.Context, port string, baudrate int, filters ...uint32) (*gocan.Client, error) {
 
-	device := &lawicel.Canusb{}
+	device := lawicel.NewCanusb()
 
 	if err := device.SetPort(port); err != nil {
 		return nil, err
@@ -37,13 +37,8 @@ func initCAN(ctx context.Context, port string, baudrate int, filters ...uint32) 
 
 	c, err := gocan.New(
 		ctx,
-		device,
-		// CAN identifiers for filtering
-		filters,
-		// Set com-port options
-		gocan.OptComPort(port, baudrate),
-		// Set CAN bit-rate
-		gocan.OptRate(t7.PBusRate),
+		device,  // Our CAN device
+		filters, // CAN identifiers for filtering
 	)
 	if err != nil {
 		return nil, err

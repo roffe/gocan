@@ -104,7 +104,7 @@ var hPa uint16
 func frameParser(ctx context.Context, c *gocan.Client, g *gocui.Gui) {
 	msg := c.Subscribe(ctx)
 	for og := range msg {
-		if !inFilters(og.Identifier) {
+		if !inFilters(og.GetIdentifier()) {
 			frameCount++
 			continue
 		}
@@ -113,7 +113,7 @@ func frameParser(ctx context.Context, c *gocan.Client, g *gocui.Gui) {
 			continue
 		}
 
-		f := *og // this must be here or else the pointer will get fucked
+		f := og // this must be here or else the pointer will get fucked
 		var updateFunc = func(g *gocui.Gui) error {
 			packets, err := g.View("packets")
 			if err != nil {
@@ -126,8 +126,8 @@ func frameParser(ctx context.Context, c *gocan.Client, g *gocui.Gui) {
 			}
 			sid.Clear()
 
-			if f.Identifier == 0x338 {
-				fmt.Fprintf(sid, "%q\n", f.Data)
+			if f.GetIdentifier() == 0x338 {
+				fmt.Fprintf(sid, "%q\n", f.GetData())
 			}
 
 			info, err := g.View("info")
@@ -142,17 +142,17 @@ func frameParser(ctx context.Context, c *gocan.Client, g *gocui.Gui) {
 			fmt.Fprintf(info, "coolant: %d\n", coolant)
 			fmt.Fprintf(info, "preassure hPa: %d\n", hPa)
 
-			if f.Identifier == 0x5c0 {
-				coolant = int(f.Data[1]) - 40
-				b, err := hex.DecodeString(fmt.Sprintf("%02X%02X", f.Data[2], f.Data[3]))
+			if f.GetIdentifier() == 0x5c0 {
+				coolant = int(f.GetData()[1]) - 40
+				b, err := hex.DecodeString(fmt.Sprintf("%02X%02X", f.GetData()[2], f.GetData()[3]))
 				if err != nil {
 					log.Fatal(err)
 				}
 				hPa = binary.LittleEndian.Uint16(b)
 			}
 
-			fmt.Fprintf(sid, "%X %d\n", f.Identifier, f.Identifier)
-			fmt.Fprintf(packets, " %s || %s || %s\n", time.Now().Format("15:04:05.00000"), f.String(), t7.LookupID(f.Identifier))
+			fmt.Fprintf(sid, "%X %d\n", f.GetIdentifier(), f.GetIdentifier())
+			fmt.Fprintf(packets, " %s || %s || %s\n", time.Now().Format("15:04:05.00000"), f.String(), t7.LookupID(f.GetIdentifier()))
 			//packets.MoveCursor(0, 1)
 			atomic.AddInt64(&buffLines, 1)
 			return nil
@@ -293,14 +293,14 @@ func setFilter(c *gocan.Client) func(g *gocui.Gui, v *gocui.View) error {
 				filters = append(filters, uint32(parsed))
 			}
 		}
-
+		/* fix me
 		code, mask := gocan.CalcAcceptanceFilters(filters...)
 		c.Send(&gocan.RawCommand{Data: code})
 		c.Send(&gocan.RawCommand{Data: mask})
-		//c.Send(&gocan.RawCommand{Data: "O"})
 		if v2, err2 := g.View("errors"); err2 == nil {
 			fmt.Fprintf(v2, "Set %d %s %s\n", filters, code, mask)
 		}
+		*/
 		if _, err := g.SetCurrentView("packets"); err != nil {
 			return err
 		}

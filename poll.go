@@ -5,14 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"sync"
 	"time"
+
+	"github.com/roffe/gocan/pkg/model"
 )
 
-func (c *Client) SendAndPoll(ctx context.Context, frame *Frame, timeout time.Duration, identifiers ...uint32) (*Frame, error) {
+func (c *Client) SendAndPoll(ctx context.Context, frame *model.Frame, timeout time.Duration, identifiers ...uint32) (model.CANFrame, error) {
 	p := &Poll{
 		identifiers: identifiers,
-		callback:    make(chan *Frame),
+		callback:    make(chan model.CANFrame),
 		variant:     OneOff,
 	}
 
@@ -21,10 +22,8 @@ func (c *Client) SendAndPoll(ctx context.Context, frame *Frame, timeout time.Dur
 		c.hub.unregister <- p
 	}()
 
-	select {
-	case c.send <- frame:
-	default:
-		return nil, errors.New("failed to put frame on queue")
+	if err := c.device.Send(frame); err != nil {
+		return nil, err
 	}
 
 	select {
@@ -41,10 +40,10 @@ func (c *Client) SendAndPoll(ctx context.Context, frame *Frame, timeout time.Dur
 	}
 }
 
-func (c *Client) Subscribe(ctx context.Context, identifiers ...uint32) chan *Frame {
+func (c *Client) Subscribe(ctx context.Context, identifiers ...uint32) chan model.CANFrame {
 	p := &Poll{
 		identifiers: identifiers,
-		callback:    make(chan *Frame, 10),
+		callback:    make(chan model.CANFrame, 10),
 		variant:     Subscription,
 	}
 	go func() {
@@ -56,10 +55,10 @@ func (c *Client) Subscribe(ctx context.Context, identifiers ...uint32) chan *Fra
 	return p.callback
 }
 
-func (c *Client) Poll(ctx context.Context, timeout time.Duration, identifiers ...uint32) (*Frame, error) {
+func (c *Client) Poll(ctx context.Context, timeout time.Duration, identifiers ...uint32) (model.CANFrame, error) {
 	p := &Poll{
 		identifiers: identifiers,
-		callback:    make(chan *Frame, 1),
+		callback:    make(chan model.CANFrame, 1),
 		variant:     OneOff,
 	}
 	c.hub.register <- p
@@ -89,28 +88,29 @@ const (
 type Poll struct {
 	errcount    uint16
 	identifiers []uint32
-	callback    chan *Frame
+	callback    chan model.CANFrame
 	variant     PollType
 }
 
 type Hub struct {
+	device     Adapter
 	pollers    map[*Poll]bool
 	register   chan *Poll
 	unregister chan *Poll
-	incoming   chan *Frame
+	//incoming   chan *model.Frame
 }
 
-func newHub() *Hub {
+func newHub(device Adapter) *Hub {
 	return &Hub{
+		device:     device,
 		pollers:    make(map[*Poll]bool),
 		register:   make(chan *Poll, 10),
 		unregister: make(chan *Poll, 10),
-		incoming:   make(chan *Frame, 16),
+		//incoming:   make(chan *model.Frame, 16),
 	}
 }
 
-func (h *Hub) run(ctx context.Context, wg *sync.WaitGroup) {
-	wg.Done()
+func (h *Hub) run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -122,7 +122,7 @@ func (h *Hub) run(ctx context.Context, wg *sync.WaitGroup) {
 				delete(h.pollers, poll)
 				close(poll.callback)
 			}
-		case frame := <-h.incoming:
+		case frame := <-h.device.Chan():
 			select {
 			case poll := <-h.register:
 				h.pollers[poll] = true
@@ -135,7 +135,7 @@ func (h *Hub) run(ctx context.Context, wg *sync.WaitGroup) {
 					continue
 				}
 				for _, id := range poll.identifiers {
-					if id == frame.Identifier {
+					if id == frame.GetIdentifier() {
 						h.deliver(poll, frame)
 						continue poll
 					}
@@ -145,7 +145,7 @@ func (h *Hub) run(ctx context.Context, wg *sync.WaitGroup) {
 	}
 }
 
-func (h *Hub) deliver(poll *Poll, frame *Frame) {
+func (h *Hub) deliver(poll *Poll, frame model.CANFrame) {
 	defer func() {
 		if err := recover(); err != nil {
 			log.Println("panic occurred:", err)

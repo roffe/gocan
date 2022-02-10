@@ -131,13 +131,14 @@ func (t *Trionic) GetHeader(ctx context.Context, id byte) (string, error) {
 			log.Println(err)
 			continue
 		}
-		if f.Data[0]&0x40 == 0x40 {
-			if int(f.Data[2]) > 2 {
-				length = int(f.Data[2]) - 2
+		d := f.GetData()
+		if d[0]&0x40 == 0x40 {
+			if int(d[2]) > 2 {
+				length = int(d[2]) - 2
 			}
 			for i := 5; i < 8; i++ {
 				if length > 0 {
-					answer = append(answer, f.Data[i])
+					answer = append(answer, d[i])
 				}
 				length--
 			}
@@ -146,12 +147,12 @@ func (t *Trionic) GetHeader(ctx context.Context, id byte) (string, error) {
 				if length == 0 {
 					break
 				}
-				answer = append(answer, f.Data[2+i])
+				answer = append(answer, d[2+i])
 				length--
 			}
 		}
-		t.c.SendFrame(0x266, []byte{0x40, 0xA1, 0x3F, f.Data[0] & 0xBF, 0x00, 0x00, 0x00, 0x00})
-		if bytes.Equal(f.Data[:1], []byte{0x80}) || bytes.Equal(f.Data[:1], []byte{0xC0}) {
+		t.c.SendFrame(0x266, []byte{0x40, 0xA1, 0x3F, d[0] & 0xBF, 0x00, 0x00, 0x00, 0x00})
+		if bytes.Equal(d[:1], []byte{0x80}) || bytes.Equal(d[:1], []byte{0xC0}) {
 			break
 		}
 	}
@@ -170,7 +171,7 @@ func (t *Trionic) KnockKnock(ctx context.Context) (bool, error) {
 			continue
 		}
 		if ok {
-			log.Println(i, "authentication successfull 🥳🎉")
+			log.Printf("authentication successfull with method %d 🥳🎉", i)
 			return true, nil
 		}
 	}
@@ -189,9 +190,10 @@ func (t *Trionic) letMeIn(ctx context.Context, method int) (bool, error) {
 		return false, err
 
 	}
-	t.Ack(f.Data[0])
+	d := f.GetData()
+	t.Ack(d[0])
 
-	s := int(f.Data[5])<<8 | int(f.Data[6])
+	s := int(d[5])<<8 | int(d[6])
 	k := calcen(s, method)
 
 	msgReply[5] = byte(int(k) >> 8 & int(0xFF))
@@ -203,8 +205,9 @@ func (t *Trionic) letMeIn(ctx context.Context, method int) (bool, error) {
 		return false, err
 
 	}
-	t.Ack(f2.Data[0])
-	if f2.Data[3] == 0x67 && f2.Data[5] == 0x34 {
+	d2 := f2.GetData()
+	t.Ack(d2[0])
+	if d2[3] == 0x67 && d2[5] == 0x34 {
 		return true, nil
 	} else {
 		return false, errors.New("invalid response")
@@ -241,9 +244,10 @@ func (t *Trionic) LetMeTry(ctx context.Context, key1, key2 int) bool {
 		return false
 
 	}
-	t.Ack(f.Data[0])
+	d := f.GetData()
+	t.Ack(d[0])
 
-	s := int(f.Data[5])<<8 | int(f.Data[6])
+	s := int(d[5])<<8 | int(d[6])
 	k := calcenCustom(s, key1, key2)
 
 	msgReply[5] = byte(int(k) >> 8 & int(0xFF))
@@ -256,8 +260,9 @@ func (t *Trionic) LetMeTry(ctx context.Context, key1, key2 int) bool {
 		return false
 
 	}
-	t.Ack(f2.Data[0])
-	if f2.Data[3] == 0x67 && f2.Data[5] == 0x34 {
+	d2 := f2.GetData()
+	t.Ack(d2[0])
+	if d2[3] == 0x67 && d2[5] == 0x34 {
 		return true
 	} else {
 		return false

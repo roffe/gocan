@@ -145,9 +145,10 @@ func (t *Trionic) Flash(ctx context.Context, bin []byte) error {
 		return fmt.Errorf("error waiting for data transfer exit reply: %v", err)
 	}
 	// Send acknowledgement
-	t.Ack(end.Data[0] & 0xBF)
+	d := end.GetData()
+	t.Ack(d[0] & 0xBF)
 
-	if end.Data[3] != 0x77 {
+	if d[3] != 0x77 {
 		return errors.New("exit download mode failed")
 	}
 
@@ -185,9 +186,9 @@ func (t *Trionic) writeJump(ctx context.Context, offset, length int) error {
 	if err != nil {
 		return fmt.Errorf("failed to enable request download")
 	}
-
-	t.Ack(f.Data[0])
-	if f.Data[3] != 0x74 {
+	d := f.GetData()
+	t.Ack(d[0])
+	if d[3] != 0x74 {
 		return fmt.Errorf("invalid response enabling download mode")
 	}
 
@@ -252,8 +253,9 @@ func (t *Trionic) writeRange(ctx context.Context, start, end int, bin []byte) er
 		return fmt.Errorf("error writing 0x%X - 0x%X was at pos 0x%X: %v", start, end, binPos, err)
 	}
 	// Send acknowledgement
-	t.Ack(f2.Data[0])
-	if f2.Data[3] != 0x76 {
+	d2 := f2.GetData()
+	t.Ack(d2[0])
+	if d2[3] != 0x76 {
 		return fmt.Errorf("ECU did not confirm write")
 	}
 	return nil

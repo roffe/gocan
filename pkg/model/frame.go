@@ -1,4 +1,4 @@
-package gocan
+package model
 
 import (
 	"fmt"
@@ -14,6 +14,14 @@ type Frame struct {
 	Identifier uint32
 	Len        uint8
 	Data       []byte
+}
+
+func (f *Frame) GetIdentifier() uint32 {
+	return f.Identifier
+}
+
+func (f *Frame) GetData() []byte {
+	return f.Data
 }
 
 func (f *Frame) Byte() []byte {

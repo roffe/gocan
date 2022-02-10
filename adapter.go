@@ -1,6 +1,6 @@
 package gocan
 
-import "context"
+import "github.com/roffe/gocan/pkg/model"
 
 type Adapter interface {
 	Init() error
@@ -8,6 +8,7 @@ type Adapter interface {
 	SetPortRate(int) error
 	SetCANrate(float64) error
 	SetCANfilter(...uint32)
-	Read(context.Context) ([]byte, error)
-	Write(context.Context, []byte) error
+	Chan() <-chan model.CANFrame
+	Send(model.CANFrame) error
+	Close() error
 }

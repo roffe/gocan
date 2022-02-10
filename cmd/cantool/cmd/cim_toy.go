@@ -70,16 +70,18 @@ var cimTOY = &cobra.Command{
 		}
 		time.Sleep(3 * time.Millisecond)
 
-		auth := convertSeedCIM(int(f.Data[3])<<8 | int(f.Data[4]))
+		d := f.GetData()
+		auth := convertSeedCIM(int(d[3])<<8 | int(d[4]))
 
 		log.Println("SecurityAccess (sendKey)")
 		c.SendFrame(0x245, []byte{0x04, 0x27, secLvl + 1, byte(int(auth) >> 8 & int(0xFF)), byte(auth) & 0xFF})
-		f, err = c.Poll(ctx, 100*time.Millisecond, 0x645)
+		f2, err := c.Poll(ctx, 100*time.Millisecond, 0x645)
 		if err != nil {
 			log.Println(err)
 			return os.ErrDeadlineExceeded
 		}
-		if f.Data[1] != 0x67 && f.Data[2] == 0x02 {
+		d2 := f2.GetData()
+		if d2[1] != 0x67 && d2[2] == 0x02 {
 			log.Println("sec access failed")
 			return err
 		}
@@ -102,7 +104,8 @@ var cimTOY = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if presp.Data[0] != 0x01 || presp.Data[1] != 0xE5 {
+		pd := presp.GetData()
+		if pd[0] != 0x01 || pd[1] != 0xE5 {
 			log.Println(presp.String())
 			return fmt.Errorf("invalid response to request programming mode")
 		}
@@ -118,12 +121,12 @@ var cimTOY = &cobra.Command{
 		if err := gm.WriteDataByIdentifier(ctx, 0x245, 0x90, []byte("YS3FB56F091023064")); err != nil {
 			return err
 		}
-		f2, err := c.Poll(ctx, 150*time.Millisecond, 0x645)
+		f3, err := c.Poll(ctx, 150*time.Millisecond, 0x645)
 		if err != nil {
 			log.Println(err)
 			return err
 		}
-		log.Println(f2.String())
+		log.Println(f3.String())
 
 		b2, err := gm.ReadDataByIdentifier(ctx, 0x245, 0x90)
 		if err != nil {

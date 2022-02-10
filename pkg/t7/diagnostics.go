@@ -21,10 +21,11 @@ func (t *Trionic) StartDiagnosticSession(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
-			if f.Data[0] == 0x40 && f.Data[3] == 0xC1 {
-				log.Printf("Tester address: 0x%X\n", f.Data[1])
-				log.Printf("ECU address: 0x%X\n", f.Data[2]|0x80)
-				log.Printf("ECU ID: 0x%X", uint16(f.Data[6])<<8|uint16(f.Data[7]))
+			d := f.GetData()
+			if d[0] == 0x40 && d[3] == 0xC1 {
+				log.Printf("Tester address: 0x%X\n", d[1])
+				log.Printf("ECU address: 0x%X\n", d[2]|0x80)
+				log.Printf("ECU ID: 0x%X", uint16(d[6])<<8|uint16(d[7]))
 				return nil
 			}
 

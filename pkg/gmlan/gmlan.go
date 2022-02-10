@@ -48,13 +48,13 @@ func (cl *Client) WriteDataByIdentifier(ctx context.Context, canID uint32, ident
 	if err != nil {
 		return err
 	}
-
-	if resp.Data[0] != 0x30 || resp.Data[1] != 0x00 {
+	d := resp.GetData()
+	if d[0] != 0x30 || d[1] != 0x00 {
 		log.Println(resp.String())
 		return errors.New("invalid response to initial writeDataByIdentifier")
 	}
 
-	delay := resp.Data[2]
+	delay := d[2]
 
 	var seq byte = 0x21
 
@@ -91,17 +91,18 @@ func (cl *Client) ReadDataByIdentifier(ctx context.Context, canID uint32, identi
 	if err != nil {
 		return nil, err
 	}
-	if resp.Data[3] == 0x78 {
+	d := resp.GetData()
+	if d[3] == 0x78 {
 		resp, err = cl.c.Poll(ctx, 150*time.Millisecond, canID+0x400)
 		if err != nil {
 			return nil, err
 		}
-		out.Write(resp.Data[4:])
+		out.Write(d[4:])
 	} else {
-		out.Write(resp.Data[4:])
+		out.Write(d[4:])
 	}
 
-	left := int(resp.Data[1])
+	left := int(d[1])
 	left -= 6
 	cl.c.SendFrame(canID, []byte{0x30, 0x00, 0x00})
 
@@ -111,7 +112,8 @@ outer:
 		if err != nil {
 			return nil, err
 		}
-		for _, b := range read.Data[1:] {
+		dr := read.GetData()
+		for _, b := range dr[1:] {
 			out.WriteByte(b)
 			left--
 			if left == 0 {

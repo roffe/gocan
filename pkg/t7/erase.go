@@ -45,7 +45,7 @@ func (t *Trionic) Erase(ctx context.Context) error {
 		if err != nil {
 			log.Println(err)
 		} else {
-			data = f.Data
+			data = f.GetData()
 			t.Ack(data[0])
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -65,7 +65,7 @@ func (t *Trionic) Erase(ctx context.Context) error {
 		if err != nil {
 			log.Println(err)
 		} else {
-			data = f.Data
+			data = f.GetData()
 			t.Ack(data[0])
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -84,15 +84,16 @@ func (t *Trionic) Erase(ctx context.Context) error {
 		log.Println()
 		return err
 	}
-
-	if f.Data[3] == 0x7E {
+	d := f.GetData()
+	if d[3] == 0x7E {
 		time.Sleep(100 * time.Millisecond)
 		t.c.SendFrame(0x240, confirmMsg)
 		f2, err := t.c.Poll(ctx, t.defaultTimeout, 0x258)
 		if err != nil {
 			log.Println(err)
 		}
-		if f2.Data[3] == 0x7E {
+		d2 := f2.GetData()
+		if d2[3] == 0x7E {
 			bar.Finish()
 			log.Println()
 			return nil
@@ -102,5 +103,5 @@ func (t *Trionic) Erase(ctx context.Context) error {
 		log.Println()
 		return errors.New("erase failed")
 	}
-	return fmt.Errorf("unknown erase error %X", f.Data)
+	return fmt.Errorf("unknown erase error %X", d)
 }

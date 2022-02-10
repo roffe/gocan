@@ -11,6 +11,7 @@ import (
 
 	"github.com/avast/retry-go"
 	"github.com/roffe/gocan"
+	"github.com/roffe/gocan/pkg/model"
 	"github.com/spf13/cobra"
 )
 
@@ -69,17 +70,18 @@ var cimDump = &cobra.Command{
 			return err
 		}
 		time.Sleep(3 * time.Millisecond)
-
-		resp := convertSeedCIM(int(f.Data[3])<<8 | int(f.Data[4]))
+		d := f.GetData()
+		resp := convertSeedCIM(int(d[3])<<8 | int(d[4]))
 
 		log.Println("SecurityAccess (sendKey)")
 		c.SendFrame(0x245, []byte{0x04, 0x27, secLvl + 1, byte(int(resp) >> 8 & int(0xFF)), byte(resp) & 0xFF})
-		f, err = c.Poll(ctx, 100*time.Millisecond, 0x645)
+		f2, err := c.Poll(ctx, 100*time.Millisecond, 0x645)
 		if err != nil {
 			log.Println(err)
 			return os.ErrDeadlineExceeded
 		}
-		if f.Data[1] != 0x67 && f.Data[2] == 0x02 {
+		d2 := f2.GetData()
+		if d2[1] != 0x67 && d2[2] == 0x02 {
 			log.Println("sec access failed")
 			return err
 		}
@@ -158,7 +160,7 @@ func readRange(ctx context.Context, c *gocan.Client, start, length, maxlen uint3
 		payload := []byte{0x06, 0x23, bs[1], bs[2], bs[3], 0x00, readBytes}
 		log.Printf("%X %X\n", curOffset, bs)
 		log.Printf("payload>>%X\n", payload)
-		var fs *gocan.Frame
+		var fs model.CANFrame
 		err := retry.Do(
 			func() error {
 				var err error
@@ -169,8 +171,9 @@ func readRange(ctx context.Context, c *gocan.Client, start, length, maxlen uint3
 				}
 				fs = ff
 				// $7F $23 $78
-				if ff.Data[1] == 0x7f {
-					if ff.Data[2] == 0x23 && ff.Data[3] == 0x78 { // plez retry
+				d := ff.GetData()
+				if d[1] == 0x7f {
+					if d[2] == 0x23 && d[3] == 0x78 { // plez retry
 						ff2, err := c.Poll(ctx, 200*time.Millisecond, 0x645)
 						if err != nil {
 							return err
@@ -192,7 +195,7 @@ func readRange(ctx context.Context, c *gocan.Client, start, length, maxlen uint3
 
 		if leftThisRound <= 3 {
 			for i := 0; i <= 2; i++ {
-				out.WriteByte(fs.Data[5+i])
+				out.WriteByte(fs.GetData()[5+i])
 				curOffset++
 				leftThisRound--
 				if leftThisRound == 0 {
@@ -202,10 +205,10 @@ func readRange(ctx context.Context, c *gocan.Client, start, length, maxlen uint3
 		}
 
 		if leftThisRound > 3 {
-			out.WriteByte(fs.Data[6])
+			out.WriteByte(fs.GetData()[6])
 			curOffset++
 			leftThisRound--
-			out.WriteByte(fs.Data[7])
+			out.WriteByte(fs.GetData()[7])
 			curOffset++
 			leftThisRound--
 
@@ -218,7 +221,7 @@ func readRange(ctx context.Context, c *gocan.Client, start, length, maxlen uint3
 					return nil, fmt.Errorf("failed to read additional data: %v", err)
 				}
 				for i := 1; i < 8; i++ {
-					out.WriteByte(f2.Data[i])
+					out.WriteByte(f2.GetData()[i])
 					curOffset++
 					leftThisRound--
 					if leftThisRound == 0 {

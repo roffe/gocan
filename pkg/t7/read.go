@@ -107,9 +107,10 @@ func (t *Trionic) readMemoryByAddress(ctx context.Context, address, length int) 
 	if err != nil {
 		return nil, err
 	}
-	t.Ack(f.Data[0] & 0xBF)
+	d := f.GetData()
+	t.Ack(d[0] & 0xBF)
 
-	if f.Data[3] != 0x6C || f.Data[4] != 0xF0 {
+	if d[3] != 0x6C || d[4] != 0xF0 {
 		return nil, fmt.Errorf("failed to jump to 0x%X got response: %s", address, f.String())
 	}
 
@@ -137,27 +138,28 @@ outer:
 			if err != nil {
 				return nil, err
 			}
-			if f.Data[0]&0x40 == 0x40 {
-				payloadLeft = int(f.Data[2]) - 2 // subtract two non-payload bytes
+			d := f.GetData()
+			if d[0]&0x40 == 0x40 {
+				payloadLeft = int(d[2]) - 2 // subtract two non-payload bytes
 				if payloadLeft > 0 && receivedBytes < length {
-					out.WriteByte(f.Data[5])
+					out.WriteByte(d[5])
 					receivedBytes++
 					payloadLeft--
 				}
 				if payloadLeft > 0 && receivedBytes < length {
-					out.WriteByte(f.Data[6])
+					out.WriteByte(d[6])
 					receivedBytes++
 					payloadLeft--
 				}
 				if payloadLeft > 0 && receivedBytes < length {
-					out.WriteByte(f.Data[7])
+					out.WriteByte(d[7])
 					receivedBytes++
 					payloadLeft--
 				}
 			} else {
 				for i := 0; i < 6; i++ {
 					if receivedBytes < length {
-						out.WriteByte(f.Data[2+i])
+						out.WriteByte(d[2+i])
 						receivedBytes++
 						payloadLeft--
 						if payloadLeft == 0 {
@@ -166,8 +168,8 @@ outer:
 					}
 				}
 			}
-			t.Ack(f.Data[0] & 0xBF)
-			if f.Data[0] == 0x80 || f.Data[0] == 0xC0 {
+			t.Ack(d[0] & 0xBF)
+			if d[0] == 0x80 || d[0] == 0xC0 {
 				break outer
 			}
 		}
@@ -181,6 +183,7 @@ func (t *Trionic) endDownloadMode(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("end download mode: %v", err)
 	}
-	t.Ack(f.Data[0] & 0xBF)
+	d := f.GetData()
+	t.Ack(d[0] & 0xBF)
 	return nil
 }
