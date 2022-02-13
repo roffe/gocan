@@ -28,6 +28,7 @@ const (
 	flagPort     = "port"
 	flagBaudrate = "baudrate"
 	flagDebug    = "debug"
+	flagAdapter  = "adapter"
 )
 
 func init() {
@@ -38,6 +39,6 @@ func init() {
 	pf.StringP(flagPort, "p", "*", "com-port, * = print available")
 	pf.IntP(flagBaudrate, "b", 115200, "baudrate")
 	pf.BoolP(flagDebug, "d", false, "debug mode")
-
+	pf.StringP(flagAdapter, "a", "canusb", "what adapter to use")
 	rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
 }

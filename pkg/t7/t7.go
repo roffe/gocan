@@ -19,7 +19,7 @@ const (
 
 type Trionic struct {
 	c              *gocan.Client
-	defaultTimeout time.Duration // 150ms
+	defaultTimeout time.Duration
 }
 
 func New(c *gocan.Client) *Trionic {
@@ -40,14 +40,6 @@ func (t *Trionic) Ack(val byte) {
 func (t *Trionic) Info(ctx context.Context) error {
 	if err := t.DataInitialization(ctx); err != nil {
 		return err
-	}
-
-	asd, err := t.KnockKnock(ctx)
-	if err != nil {
-		log.Println(err)
-	}
-	if !asd {
-		return fmt.Errorf("not authed")
 	}
 	data := []struct {
 		name string

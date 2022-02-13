@@ -25,19 +25,14 @@ var cimUpload = &cobra.Command{
 		log.SetFlags(log.Lshortfile | log.LstdFlags)
 		ctx, cancel := context.WithCancel(cmd.Context())
 		defer cancel()
-		port, err := rootCmd.PersistentFlags().GetString(flagPort)
+		adapter, port, baudrate, err := getAdapterOpts()
 		if err != nil {
 			return err
 		}
-		baudrate, err := rootCmd.PersistentFlags().GetInt(flagBaudrate)
+		c, err := initCAN(ctx, adapter, port, baudrate)
 		if err != nil {
 			return err
 		}
-		c, err := initCAN(ctx, port, baudrate)
-		if err != nil {
-			return err
-		}
-
 		defer c.Close()
 
 		go func() {

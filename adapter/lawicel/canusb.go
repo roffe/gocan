@@ -31,11 +31,11 @@ func NewCanusb() *Canusb {
 	return &Canusb{
 		send:  make(chan model.CANFrame, 100),
 		recv:  make(chan model.CANFrame, 100),
-		close: make(chan struct{}, 16),
+		close: make(chan struct{}, 1),
 	}
 }
 
-func (cu *Canusb) Init() error {
+func (cu *Canusb) Init(ctx context.Context) error {
 	mode := &serial.Mode{
 		BaudRate: cu.portRate,
 		Parity:   serial.NoParity,
@@ -65,16 +65,13 @@ func (cu *Canusb) Init() error {
 			log.Println(err)
 		}
 	}
-	/* implement this kk thx bai
+
 	go func() {
 		for ctx.Err() == nil {
 			<-time.After(5 * time.Second)
-			c.Send(&RawCommand{Data: "F"})
+			cu.Send(&model.RawCommand{Data: "F"})
 		}
 	}()
-	*/
-
-	ctx := context.TODO()
 
 	go cu.recvManager(ctx)
 	go cu.sendManager(ctx)

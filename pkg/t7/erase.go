@@ -95,12 +95,12 @@ func (t *Trionic) Erase(ctx context.Context) error {
 		d2 := f2.GetData()
 		if d2[3] == 0x7E {
 			bar.Finish()
-			log.Println()
+			fmt.Println()
 			return nil
 		}
 	} else {
 		bar.Finish()
-		log.Println()
+		fmt.Println()
 		return errors.New("erase failed")
 	}
 	return fmt.Errorf("unknown erase error %X", d)

@@ -76,7 +76,7 @@ func (t *Trionic) readECU(ctx context.Context, addr, length int) ([]byte, error)
 			},
 				retry.Context(ctx),
 				retry.OnRetry(func(n uint, err error) {
-					log.Printf("#%d %v\n", n, err)
+					log.Printf("retry #%d %v\n", n, err)
 				}),
 				retry.Attempts(5),
 			)
@@ -88,11 +88,11 @@ func (t *Trionic) readECU(ctx context.Context, addr, length int) ([]byte, error)
 	}
 	bar.Set(out.Len())
 	bar.Close()
+	fmt.Println()
 
 	if err := t.endDownloadMode(ctx); err != nil {
 		return nil, err
 	}
-
 	log.Println(" download done, took:", time.Since(start).Round(time.Second).String())
 
 	return out.Bytes(), nil

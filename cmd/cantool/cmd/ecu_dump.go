@@ -14,18 +14,14 @@ var readCMD = &cobra.Command{
 	Short: "dump binary from ECU",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx, cancel := context.WithTimeout(cmd.Context(), 900*time.Second)
+		ctx, cancel := context.WithTimeout(cmd.Context(), 60*time.Minute)
 		defer cancel()
 
-		port, err := rootCmd.PersistentFlags().GetString(flagPort)
+		adapter, port, baudrate, err := getAdapterOpts()
 		if err != nil {
 			return err
 		}
-		baudrate, err := rootCmd.PersistentFlags().GetInt(flagBaudrate)
-		if err != nil {
-			return err
-		}
-		c, err := initCAN(ctx, port, baudrate, 0x238, 0x258)
+		c, err := initCAN(ctx, adapter, port, baudrate, 0x238, 0x258)
 		if err != nil {
 			return err
 		}

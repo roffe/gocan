@@ -17,15 +17,12 @@ var infoCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, cancel := context.WithTimeout(cmd.Context(), 15*time.Second)
 		defer cancel()
-		port, err := rootCmd.PersistentFlags().GetString(flagPort)
+
+		adapter, port, baudrate, err := getAdapterOpts()
 		if err != nil {
 			return err
 		}
-		baudrate, err := rootCmd.PersistentFlags().GetInt(flagBaudrate)
-		if err != nil {
-			return err
-		}
-		c, err := initCAN(ctx, port, baudrate, 0x238, 0x258)
+		c, err := initCAN(ctx, adapter, port, baudrate)
 		if err != nil {
 			return err
 		}

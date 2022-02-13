@@ -1,9 +1,13 @@
 package gocan
 
-import "github.com/roffe/gocan/pkg/model"
+import (
+	"context"
+
+	"github.com/roffe/gocan/pkg/model"
+)
 
 type Adapter interface {
-	Init() error
+	Init(context.Context) error
 	SetPort(string) error
 	SetPortRate(int) error
 	SetCANrate(float64) error

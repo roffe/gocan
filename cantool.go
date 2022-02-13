@@ -17,7 +17,7 @@ type Client struct {
 
 func New(ctx context.Context, device Adapter, filters []uint32) (*Client, error) {
 	c := &Client{
-		hub:    newHub(device),
+		hub:    newHub(device.Chan()),
 		device: device,
 	}
 	go c.hub.run(ctx)
@@ -46,5 +46,5 @@ func (c *Client) SendFrame(identifier uint32, data []byte) error {
 
 // SendString is used to bypass the frame parser and send raw commands to the CANUSB adapter
 func (c *Client) SendString(str string) error {
-	return c.Send(&RawCommand{Data: str})
+	return c.Send(&model.RawCommand{Data: str})
 }

@@ -93,20 +93,18 @@ type Poll struct {
 }
 
 type Hub struct {
-	device     Adapter
 	pollers    map[*Poll]bool
 	register   chan *Poll
 	unregister chan *Poll
-	//incoming   chan *model.Frame
+	incoming   <-chan model.CANFrame
 }
 
-func newHub(device Adapter) *Hub {
+func newHub(incoming <-chan model.CANFrame) *Hub {
 	return &Hub{
-		device:     device,
 		pollers:    make(map[*Poll]bool),
 		register:   make(chan *Poll, 10),
 		unregister: make(chan *Poll, 10),
-		//incoming:   make(chan *model.Frame, 16),
+		incoming:   incoming,
 	}
 }
 
@@ -122,7 +120,7 @@ func (h *Hub) run(ctx context.Context) {
 				delete(h.pollers, poll)
 				close(poll.callback)
 			}
-		case frame := <-h.device.Chan():
+		case frame := <-h.incoming:
 			select {
 			case poll := <-h.register:
 				h.pollers[poll] = true

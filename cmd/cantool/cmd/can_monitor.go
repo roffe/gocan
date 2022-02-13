@@ -44,15 +44,11 @@ var monitorCMD = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log.Println("Entering monitoring mode")
 		ctx := cmd.Context()
-		port, err := rootCmd.PersistentFlags().GetString(flagPort)
+		adapter, port, baudrate, err := getAdapterOpts()
 		if err != nil {
 			return err
 		}
-		baudrate, err := rootCmd.PersistentFlags().GetInt(flagBaudrate)
-		if err != nil {
-			return err
-		}
-		c, err := initCAN(ctx, port, baudrate)
+		c, err := initCAN(ctx, adapter, port, baudrate)
 		if err != nil {
 			return err
 		}

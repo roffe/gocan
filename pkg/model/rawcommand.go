@@ -1,4 +1,4 @@
-package gocan
+package model
 
 type RawCommand struct {
 	Data string
