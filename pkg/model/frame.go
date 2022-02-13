@@ -14,6 +14,7 @@ type Frame struct {
 	Identifier uint32
 	Len        uint8
 	Data       []byte
+	Response   bool // does this frame expect a response?
 }
 
 func (f *Frame) GetIdentifier() uint32 {

@@ -1,7 +1,6 @@
 package t7
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -10,6 +9,7 @@ import (
 
 	"github.com/avast/retry-go"
 	gocan "github.com/roffe/gocan"
+	"github.com/roffe/gocan/pkg/model"
 )
 
 const (
@@ -31,9 +31,9 @@ func New(c *gocan.Client) *Trionic {
 }
 
 // 266h Send acknowledgement, has 0x3F on 3rd!
-func (t *Trionic) Ack(val byte) {
+func (t *Trionic) Ack(val byte, opts ...model.FrameOpt) {
 	ack := []byte{0x40, 0xA1, 0x3F, val & 0xBF, 0x00, 0x00, 0x00, 0x00}
-	t.c.SendFrame(0x266, ack)
+	t.c.SendFrame(0x266, ack, opts...)
 }
 
 // Print out some Trionic7 info
@@ -62,6 +62,7 @@ func (t *Trionic) Info(ctx context.Context) error {
 		}
 		log.Println(d.name, h)
 	}
+	time.Sleep(50 * time.Millisecond)
 	return nil
 }
 
@@ -85,11 +86,11 @@ func (t *Trionic) DataInitialization(ctx context.Context) error {
 			return nil
 		},
 		retry.Context(ctx),
-		retry.Attempts(5),
+		retry.Attempts(3),
 		retry.OnRetry(func(n uint, err error) {
 			log.Printf("#%d: %s\n", n, err.Error())
 		}),
-		retry.Delay(200*time.Millisecond),
+		retry.Delay(100*time.Millisecond),
 	)
 	if err != nil {
 		return errors.New("Trionic data initialization failed")
@@ -128,24 +129,27 @@ func (t *Trionic) GetHeader(ctx context.Context, id byte) (string, error) {
 			if int(d[2]) > 2 {
 				length = int(d[2]) - 2
 			}
-			for i := 5; i < 8; i++ {
+			for b := 5; b < 8; b++ {
 				if length > 0 {
-					answer = append(answer, d[i])
+					answer = append(answer, d[b])
 				}
 				length--
 			}
 		} else {
-			for i := 0; i < 6; i++ {
+			for c := 0; c < 6; c++ {
 				if length == 0 {
 					break
 				}
-				answer = append(answer, d[2+i])
+				answer = append(answer, d[2+c])
 				length--
 			}
 		}
-		t.c.SendFrame(0x266, []byte{0x40, 0xA1, 0x3F, d[0] & 0xBF, 0x00, 0x00, 0x00, 0x00})
-		if bytes.Equal(d[:1], []byte{0x80}) || bytes.Equal(d[:1], []byte{0xC0}) {
+
+		if d[0] == 0x80 || d[0] == 0xC0 {
+			t.Ack(d[0], er(false))
 			break
+		} else {
+			t.Ack(d[0])
 		}
 	}
 
@@ -166,6 +170,7 @@ func (t *Trionic) KnockKnock(ctx context.Context) (bool, error) {
 			log.Printf("authentication successfull with method %d 🥳🎉", i)
 			return true, nil
 		}
+		time.Sleep(200 * time.Millisecond)
 	}
 	log.Println("/!\\ authentication failure 😞👎🏻")
 	return false, nil

@@ -33,7 +33,7 @@ const (
 
 func init() {
 	//	log.SetFlags(0)
-	log.SetFlags(log.Lshortfile | log.LstdFlags)
+	log.SetFlags(log.Lshortfile | log.LstdFlags | log.Lmicroseconds)
 
 	pf := rootCmd.PersistentFlags()
 	pf.StringP(flagPort, "p", "*", "com-port, * = print available")

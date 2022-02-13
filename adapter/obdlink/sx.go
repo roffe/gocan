@@ -34,6 +34,7 @@ type SX struct {
 	port       serial.Port
 	portName   string
 	portRate   int
+	canRate    string
 	send, recv chan model.CANFrame
 	close      chan struct{}
 }
@@ -42,7 +43,7 @@ func NewSX() *SX {
 	return &SX{
 		send:  make(chan model.CANFrame, 100),
 		recv:  make(chan model.CANFrame, 100),
-		close: make(chan struct{}, 1),
+		close: make(chan struct{}, 10),
 	}
 }
 
@@ -60,24 +61,24 @@ func (cu *SX) Init(ctx context.Context) error {
 	cu.port = p
 
 	p.Write([]byte("ATZ\r"))
-	time.Sleep(1 * time.Second)
+	time.Sleep(1000 * time.Millisecond)
 	p.ResetInputBuffer()
 	var cmds = []string{
-		"ATE0\r",
-		"STIX\r",
-		"ATS0\r",
-		"STPCB0\r",
-		"STIP41\r",
-		"STP33\r",  // Set canbus protocol 33
-		"ATCAF0\r", //
-		"ATH1\r",   // Headers on
-		"ATAT2\r",
-		"ATCF200\r", // code
-		"ATCM781\r", // mask
+		"ATE0", // turn off echo
+		"ATS0", // turn of spaces
+		"STIX", // show extended firmware info
+		//"STPCB0", // Turn automatic check byte calculation and checking off/on
+		"ATR0",
+		cu.canRate, // Set canbus protocol 33
+		"ATCAF0",   // Automatic formatting of
+		"ATH1",     // Headers on
+		"ATAT0",    // Set adaptive timing mode, Adaptive timing on, aggressive mode. This option may increase throughput on slower connections, at the expense of slightly increasing the risk of missing frames.
+		"ATCF200",  // code
+		"ATCM781",  // mask
 	}
-	p.SetReadTimeout(3 * time.Millisecond)
+	p.SetReadTimeout(5 * time.Millisecond)
 	for _, c := range cmds {
-		_, err := p.Write([]byte(c))
+		_, err := p.Write([]byte(c + "\r"))
 		if err != nil {
 			log.Println(err)
 		}
@@ -85,7 +86,7 @@ func (cu *SX) Init(ctx context.Context) error {
 		p.ResetInputBuffer()
 	}
 
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 	p.ResetInputBuffer()
 
 	go cu.recvManager(ctx)
@@ -105,22 +106,18 @@ func (cu *SX) SetPortRate(rate int) error {
 }
 
 func (cu *SX) SetCANrate(rate float64) error {
+	switch rate {
+	case 500:
+		cu.canRate = "STP33"
+	default:
+		log.Fatalf("unhandled canbus rate: %f", rate)
+	}
 	return nil
 }
 
 func (cu *SX) SetCANfilter(ids ...uint32) {
 	log.Println(ids)
 }
-
-/*
-func (cu *SX) Read(data []byte) (int, error) {
-	return cu.port.Read(data)
-}
-
-func (cu *SX) Write(data []byte) (int, error) {
-	return cu.port.Write(data)
-}
-*/
 
 func (cu *SX) Chan() <-chan model.CANFrame {
 	return cu.recv
@@ -136,6 +133,7 @@ func (cu *SX) Send(frame model.CANFrame) error {
 }
 
 func (cu *SX) Close() error {
+	cu.close <- token{}
 	return cu.port.Close()
 }
 
@@ -144,22 +142,32 @@ type token struct{}
 var sendMutex = make(chan token, 1)
 
 func (cu *SX) sendManager(ctx context.Context) {
-
 outer:
 	for {
 		select {
 		case v := <-cu.send:
 			sendMutex <- token{}
-			out := fmt.Sprintf("STPX h:%X,d:%X\r", v.GetIdentifier(), v.GetData())
+			var out string
+			switch t := v.(type) {
+			case *model.RawCommand:
+				out = fmt.Sprintf("%s\r", t.Data)
+			case *model.Frame:
+				if !t.Response {
+					out = fmt.Sprintf("STPX h:%X,d:%X,r:0\r", t.Identifier, t.Data)
+					break
+				}
+				out = fmt.Sprintf("STPX h:%X,d:%X,r:1\r", t.Identifier, t.Data)
+			default:
+				panic("can't touch this")
+			}
 			_, err := cu.port.Write([]byte(out))
 			if err != nil {
-				log.Printf("failed to write to com port: %q, %v\n", string(v.Byte()), err)
+				log.Printf("failed to write to com port: %q, %v\n", out, err)
 			}
 		case <-ctx.Done():
 			break outer
 		case <-cu.close:
 			break outer
-
 		}
 	}
 	if err := cu.Close(); err != nil {
@@ -169,7 +177,7 @@ outer:
 
 func (cu *SX) recvManager(ctx context.Context) {
 	buff := bytes.NewBuffer(nil)
-	readBuffer := make([]byte, 11)
+	readBuffer := make([]byte, 8)
 	for ctx.Err() == nil {
 		select {
 		case <-ctx.Done():
@@ -237,12 +245,7 @@ func (cu *SX) recvManager(ctx context.Context) {
 }
 
 func (*SX) decodeFrame(buff []byte) (model.CANFrame, error) {
-	//	log.Printf("%q", buff)
 	received := time.Now()
-	//p := strings.ReplaceAll(string(buff), " ", "")
-	//p = strings.ReplaceAll(p, "\r", "")
-	//p = strings.TrimLeft(p, ">")
-
 	idBytes, err := hex.DecodeString(fmt.Sprintf("%08s", buff[0:3]))
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode identifier: %v", err)

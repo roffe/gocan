@@ -34,14 +34,22 @@ func (c *Client) Send(msg model.CANFrame) error {
 }
 
 // Shortcommand to send a standard 11bit frame
-func (c *Client) SendFrame(identifier uint32, data []byte) error {
+func (c *Client) SendFrame(identifier uint32, data []byte, opts ...model.FrameOpt) error {
 	var b = make([]byte, 8)
 	copy(b, data)
-	return c.Send(&model.Frame{
+
+	frame := &model.Frame{
 		Identifier: identifier,
 		Len:        uint8(len(b)),
 		Data:       b,
-	})
+		Response:   true,
+	}
+
+	for _, o := range opts {
+		o(frame)
+	}
+
+	return c.Send(frame)
 }
 
 // SendString is used to bypass the frame parser and send raw commands to the CANUSB adapter

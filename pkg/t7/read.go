@@ -10,6 +10,7 @@ import (
 
 	"github.com/avast/retry-go"
 	"github.com/k0kubun/go-ansi"
+	"github.com/roffe/gocan/pkg/model"
 	"github.com/schollz/progressbar/v3"
 )
 
@@ -53,7 +54,7 @@ func (t *Trionic) readECU(ctx context.Context, addr, length int) ([]byte, error)
 		}))
 
 	defer bar.Finish()
-
+	bar.RenderBlank()
 	for readPos < length {
 		bar.Set(out.Len())
 		select {
@@ -100,7 +101,7 @@ func (t *Trionic) readECU(ctx context.Context, addr, length int) ([]byte, error)
 
 func (t *Trionic) readMemoryByAddress(ctx context.Context, address, length int) ([]byte, error) {
 	// Jump to read adress
-	t.c.SendFrame(0x240, []byte{0x41, 0xA1, 0x08, 0x2C, 0xF0, 0x03, 0x00, byte(length)})
+	t.c.SendFrame(0x240, []byte{0x41, 0xA1, 0x08, 0x2C, 0xF0, 0x03, 0x00, byte(length)}, er(false))
 	t.c.SendFrame(0x240, []byte{0x00, 0xA1, byte((address >> 16) & 0xFF), byte((address >> 8) & 0xFF), byte(address & 0xFF), 0x00, 0x00, 0x00})
 
 	f, err := t.c.Poll(ctx, t.defaultTimeout, 0x258)
@@ -108,7 +109,7 @@ func (t *Trionic) readMemoryByAddress(ctx context.Context, address, length int) 
 		return nil, err
 	}
 	d := f.GetData()
-	t.Ack(d[0] & 0xBF)
+	t.Ack(d[0], er(false))
 
 	if d[3] != 0x6C || d[4] != 0xF0 {
 		return nil, fmt.Errorf("failed to jump to 0x%X got response: %s", address, f.String())
@@ -168,9 +169,11 @@ outer:
 					}
 				}
 			}
-			t.Ack(d[0] & 0xBF)
 			if d[0] == 0x80 || d[0] == 0xC0 {
+				t.Ack(d[0]&0xBF, er(false))
 				break outer
+			} else {
+				t.Ack(d[0]&0xBF, er(true))
 			}
 		}
 	}
@@ -184,6 +187,16 @@ func (t *Trionic) endDownloadMode(ctx context.Context) error {
 		return fmt.Errorf("end download mode: %v", err)
 	}
 	d := f.GetData()
-	t.Ack(d[0] & 0xBF)
+	t.Ack(d[0], er(false))
 	return nil
+}
+
+// expect Response
+func er(expect bool) model.FrameOpt {
+	return func(f model.CANFrame) {
+		switch t := f.(type) {
+		case *model.Frame:
+			t.Response = expect
+		}
+	}
 }

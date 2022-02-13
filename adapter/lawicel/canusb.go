@@ -185,9 +185,10 @@ outer:
 	for {
 		select {
 		case v := <-cu.send:
-			_, err := cu.port.Write(v.Byte())
+			b := []byte(fmt.Sprintf("t%x%d%x\r", v.GetIdentifier(), len(v.GetData()), v.GetData()))
+			_, err := cu.port.Write(b)
 			if err != nil {
-				log.Printf("failed to write to com port: %q, %v\n", string(v.Byte()), err)
+				log.Printf("failed to write to com port: %q, %v\n", string(b), err)
 			}
 		case <-ctx.Done():
 			break outer
@@ -203,7 +204,7 @@ outer:
 
 func (cu *Canusb) recvManager(ctx context.Context) {
 	buff := bytes.NewBuffer(nil)
-	readBuffer := make([]byte, 8)
+	readBuffer := make([]byte, 12)
 	for ctx.Err() == nil {
 		select {
 		case <-ctx.Done():
@@ -227,10 +228,8 @@ func (cu *Canusb) recvManager(ctx context.Context) {
 				return
 			default:
 			}
-			buff.WriteByte(b)
 			if b == 0x0D {
-				if buff.Len() == 1 {
-					buff.Reset()
+				if buff.Len() == 0 {
 					continue
 				}
 				by := buff.Bytes()
@@ -240,7 +239,7 @@ func (cu *Canusb) recvManager(ctx context.Context) {
 						log.Fatal("CAN status error", err)
 					}
 				case 't':
-					f, err := cu.decodeFrame(buff.Bytes())
+					f, err := cu.decodeFrame(by)
 					if err != nil {
 						log.Fatalf("failed to decode frame: %q\n", buff.String())
 						continue
@@ -264,7 +263,9 @@ func (cu *Canusb) recvManager(ctx context.Context) {
 					log.Printf("COM>> %q\n", buff.String())
 				}
 				buff.Reset()
+				continue
 			}
+			buff.WriteByte(b)
 		}
 	}
 }
@@ -309,23 +310,22 @@ func decodeStatus(b []byte) error {
 
 func (*Canusb) decodeFrame(buff []byte) (*model.Frame, error) {
 	received := time.Now()
-	p := strings.ReplaceAll(string(buff), "\r", "")
-	idBytes, err := hex.DecodeString(fmt.Sprintf("%08s", p[1:4]))
+	idBytes, err := hex.DecodeString(fmt.Sprintf("%08s", buff[1:4]))
 	if err != nil {
 		return nil, fmt.Errorf("filed to decode identifier: %v", err)
 	}
-	len, err := strconv.ParseUint(string(p[4:5]), 0, 8)
+	leng, err := strconv.ParseUint(string(buff[4:5]), 0, 8)
 	if err != nil {
 		log.Fatal(err)
 	}
-	data, err := hex.DecodeString(p[5:])
-	if err != nil {
+	var data = make([]byte, hex.DecodedLen(len(buff[5:])))
+	if _, err := hex.Decode(data, buff[5:]); err != nil {
 		return nil, fmt.Errorf("failed to decode frame body: %v", err)
 	}
 	return &model.Frame{
 		Time:       received,
 		Identifier: binary.BigEndian.Uint32(idBytes),
-		Len:        uint8(len),
+		Len:        uint8(leng),
 		Data:       data,
 	}, nil
 }

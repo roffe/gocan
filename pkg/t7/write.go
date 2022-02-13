@@ -92,7 +92,6 @@ func (t *Trionic) Flash(ctx context.Context, bin []byte) error {
 			retry.Context(ctx),
 			retry.Attempts(5),
 			retry.OnRetry(func(n uint, err error) {
-				fmt.Println()
 				log.Println(err)
 			}),
 		)
@@ -111,7 +110,6 @@ func (t *Trionic) Flash(ctx context.Context, bin []byte) error {
 			err := t.writeRange(ctx, binPos, binPos+writeBytes, bin)
 			if err != nil {
 				if retries < maxRetries {
-					log.Println()
 					log.Println(err)
 					time.Sleep(100 * time.Millisecond)
 					err := retry.Do(
@@ -119,7 +117,7 @@ func (t *Trionic) Flash(ctx context.Context, bin []byte) error {
 							return t.writeJump(ctx, binPos, o.end-binPos)
 						},
 						retry.Context(ctx),
-						retry.Attempts(5),
+						retry.Attempts(3),
 						retry.OnRetry(func(n uint, err error) {
 							log.Println()
 							log.Println(err)
@@ -153,6 +151,7 @@ func (t *Trionic) Flash(ctx context.Context, bin []byte) error {
 	}
 
 	bar.Finish()
+	fmt.Println()
 	log.Println(", flash successfull. took: ", time.Since(start).Round(time.Second))
 	return nil
 }
@@ -180,15 +179,17 @@ func (t *Trionic) writeJump(ctx context.Context, offset, length int) error {
 		jumpMsg2[k] = lengthBytes[k-2]
 	}
 
-	t.c.SendFrame(0x240, jumpMsg)
+	t.c.SendFrame(0x240, jumpMsg, er(false))
+	time.Sleep(20 * time.Millisecond)
 	t.c.SendFrame(0x240, jumpMsg2)
 	f, err := t.c.Poll(ctx, t.defaultTimeout, 0x258)
 	if err != nil {
 		return fmt.Errorf("failed to enable request download")
 	}
 	d := f.GetData()
-	t.Ack(d[0])
+	t.Ack(d[0], er(false))
 	if d[3] != 0x74 {
+		log.Println(f.String())
 		return fmt.Errorf("invalid response enabling download mode")
 	}
 
@@ -198,7 +199,6 @@ func (t *Trionic) writeJump(ctx context.Context, offset, length int) error {
 func (t *Trionic) writeRange(ctx context.Context, start, end int, bin []byte) error {
 	length := end - start
 	binPos := start
-	// length / 6
 	rows := int(math.Floor(float64((length + 3)) / 6.0))
 	first := true
 	for i := rows; i >= 0; i-- {
@@ -245,7 +245,11 @@ func (t *Trionic) writeRange(ctx context.Context, start, end int, bin []byte) er
 			}
 		}
 
-		t.c.SendFrame(0x240, data)
+		if i > 0 {
+			t.c.SendFrame(0x240, data, er(false))
+		} else {
+			t.c.SendFrame(0x240, data)
+		}
 	}
 
 	f2, err := t.c.Poll(ctx, t.defaultTimeout, 0x258)
@@ -254,7 +258,7 @@ func (t *Trionic) writeRange(ctx context.Context, start, end int, bin []byte) er
 	}
 	// Send acknowledgement
 	d2 := f2.GetData()
-	t.Ack(d2[0])
+	t.Ack(d2[0], er(false))
 	if d2[3] != 0x76 {
 		return fmt.Errorf("ECU did not confirm write")
 	}

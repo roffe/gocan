@@ -2,7 +2,7 @@ package model
 
 type CANFrame interface {
 	GetIdentifier() uint32
-	Byte() []byte
+	//Byte() []byte
 	GetData() []byte
 	String() string
 }
