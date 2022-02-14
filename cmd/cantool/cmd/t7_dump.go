@@ -46,5 +46,5 @@ var readCMD = &cobra.Command{
 }
 
 func init() {
-	ecuCmd.AddCommand(readCMD)
+	t7Cmd.AddCommand(readCMD)
 }

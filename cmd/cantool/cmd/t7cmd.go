@@ -11,9 +11,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var ecuCmd = &cobra.Command{
-	Use:   "ecu",
-	Short: "ECU related commands",
+var t7Cmd = &cobra.Command{
+	Use:   "t7",
+	Short: "Trionic 7 ECU related commands",
 	Long:  `commands related to erasing, writing and dumping flash memory`,
 	//Run: func(cmd *cobra.Command, args []string) {
 	//	fmt.Println("ecu called")
@@ -21,7 +21,7 @@ var ecuCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.AddCommand(ecuCmd)
+	rootCmd.AddCommand(t7Cmd)
 }
 
 func yesNo() bool {

@@ -1,3 +1,5 @@
+*.bin
+*.md5
 tmp
 tmp/*
 dump

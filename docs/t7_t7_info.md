@@ -1,11 +1,19 @@
-## t7 can
+## t7 t7 info
 
-CAN related commands
+print ECU info
+
+### Synopsis
+
+Connect to the ECU over CAN and print the info from it
+
+```
+t7 t7 info [flags]
+```
 
 ### Options
 
 ```
-  -h, --help   help for can
+  -h, --help   help for info
 ```
 
 ### Options inherited from parent commands
@@ -19,6 +27,5 @@ CAN related commands
 
 ### SEE ALSO
 
-* [t7](t7.md)	 - T7 swish army tool
-* [t7 can monitor](t7_can_monitor.md)	 - Monitor the CANbus for frames
+* [t7 t7](t7_t7.md)	 - Trionic 7 ECU related commands
 

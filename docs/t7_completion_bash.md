@@ -40,9 +40,10 @@ t7 completion bash
 ### Options inherited from parent commands
 
 ```
-  -b, --baudrate int   baudrate (default 115200)
-  -d, --debug          debug mode
-  -p, --port string    com-port, * = print available (default "*")
+  -a, --adapter string   what adapter to use (default "canusb")
+  -b, --baudrate int     baudrate (default 115200)
+  -d, --debug            debug mode
+  -p, --port string      com-port, * = print available (default "*")
 ```
 
 ### SEE ALSO

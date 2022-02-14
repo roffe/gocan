@@ -8,7 +8,7 @@ import (
 	"github.com/avast/retry-go"
 )
 
-func (t *Trionic) StartDiagnosticSession(ctx context.Context) error {
+func (t *Client) StartDiagnosticSession(ctx context.Context) error {
 	log.Println("starting diagnostics session")
 	testerID := 0x240
 

@@ -1,6 +1,6 @@
 ## t7 can monitor
 
-Monitor the CANbus for packages
+Monitor the CANbus for frames
 
 ```
 t7 can monitor [flags]
@@ -15,9 +15,10 @@ t7 can monitor [flags]
 ### Options inherited from parent commands
 
 ```
-  -b, --baudrate int   baudrate (default 115200)
-  -d, --debug          debug mode
-  -p, --port string    com-port, * = print available (default "*")
+  -a, --adapter string   what adapter to use (default "canusb")
+  -b, --baudrate int     baudrate (default 115200)
+  -d, --debug            debug mode
+  -p, --port string      com-port, * = print available (default "*")
 ```
 
 ### SEE ALSO

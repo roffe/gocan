@@ -17,13 +17,13 @@ const (
 	PBusRate = 500
 )
 
-type Trionic struct {
+type Client struct {
 	c              *gocan.Client
 	defaultTimeout time.Duration
 }
 
-func New(c *gocan.Client) *Trionic {
-	t := &Trionic{
+func New(c *gocan.Client) *Client {
+	t := &Client{
 		c:              c,
 		defaultTimeout: 250 * time.Millisecond,
 	}
@@ -31,13 +31,13 @@ func New(c *gocan.Client) *Trionic {
 }
 
 // 266h Send acknowledgement, has 0x3F on 3rd!
-func (t *Trionic) Ack(val byte, opts ...model.FrameOpt) {
+func (t *Client) Ack(val byte, opts ...model.FrameOpt) {
 	ack := []byte{0x40, 0xA1, 0x3F, val & 0xBF, 0x00, 0x00, 0x00, 0x00}
 	t.c.SendFrame(0x266, ack, opts...)
 }
 
 // Print out some Trionic7 info
-func (t *Trionic) Info(ctx context.Context) error {
+func (t *Client) Info(ctx context.Context) error {
 	if err := t.DataInitialization(ctx); err != nil {
 		return err
 	}
@@ -68,7 +68,7 @@ func (t *Trionic) Info(ctx context.Context) error {
 
 var lastDataInitialization time.Time
 
-func (t *Trionic) DataInitialization(ctx context.Context) error {
+func (t *Client) DataInitialization(ctx context.Context) error {
 	if !lastDataInitialization.IsZero() {
 		if time.Since(lastDataInitialization) < 10*time.Second {
 			return nil
@@ -93,12 +93,12 @@ func (t *Trionic) DataInitialization(ctx context.Context) error {
 		retry.Delay(100*time.Millisecond),
 	)
 	if err != nil {
-		return errors.New("Trionic data initialization failed")
+		return errors.New("trionic data initialization failed")
 	}
 	return nil
 }
 
-func (t *Trionic) GetHeader(ctx context.Context, id byte) (string, error) {
+func (t *Client) GetHeader(ctx context.Context, id byte) (string, error) {
 	err := retry.Do(
 		func() error {
 			return t.c.SendFrame(0x240, []byte{0x40, 0xA1, 0x02, 0x1A, id, 0x00, 0x00, 0x00})
@@ -156,7 +156,7 @@ func (t *Trionic) GetHeader(ctx context.Context, id byte) (string, error) {
 	return string(answer), nil
 }
 
-func (t *Trionic) KnockKnock(ctx context.Context) (bool, error) {
+func (t *Client) KnockKnock(ctx context.Context) (bool, error) {
 	if err := t.DataInitialization(ctx); err != nil {
 		return false, err
 	}
@@ -176,7 +176,7 @@ func (t *Trionic) KnockKnock(ctx context.Context) (bool, error) {
 	return false, nil
 }
 
-func (t *Trionic) letMeIn(ctx context.Context, method int) (bool, error) {
+func (t *Client) letMeIn(ctx context.Context, method int) (bool, error) {
 	msg := []byte{0x40, 0xA1, 0x02, 0x27, 0x05, 0x00, 0x00, 0x00}
 	msgReply := []byte{0x40, 0xA1, 0x04, 0x27, 0x06, 0x00, 0x00, 0x00}
 
@@ -229,7 +229,7 @@ func calcen(seed int, method int) int {
 	return key
 }
 
-func (t *Trionic) LetMeTry(ctx context.Context, key1, key2 int) bool {
+func (t *Client) LetMeTry(ctx context.Context, key1, key2 int) bool {
 	msg := []byte{0x40, 0xA1, 0x02, 0x27, 0x05, 0x00, 0x00, 0x00}
 	msgReply := []byte{0x40, 0xA1, 0x04, 0x27, 0x06, 0x00, 0x00, 0x00}
 

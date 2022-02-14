@@ -15,7 +15,7 @@ import (
 	"github.com/schollz/progressbar/v3"
 )
 
-func (t *Trionic) LoadBinFile(filename string) (int64, []byte, error) {
+func (t *Client) LoadBinFile(filename string) (int64, []byte, error) {
 	var temp byte
 	readBytes := 0
 	data, err := os.ReadFile(filename)
@@ -57,7 +57,7 @@ var offsets = []struct {
 }
 
 // Flash the ECU
-func (t *Trionic) Flash(ctx context.Context, bin []byte) error {
+func (t *Client) Flash(ctx context.Context, bin []byte) error {
 	if err := t.DataInitialization(ctx); err != nil {
 		return err
 	}
@@ -157,7 +157,7 @@ func (t *Trionic) Flash(ctx context.Context, bin []byte) error {
 }
 
 // send request "Download - tool to module" to Trionic"
-func (t *Trionic) writeJump(ctx context.Context, offset, length int) error {
+func (t *Client) writeJump(ctx context.Context, offset, length int) error {
 	jumpMsg := []byte{0x41, 0xA1, 0x08, 0x34, 0x00, 0x00, 0x00, 0x00}
 	jumpMsg2 := []byte{0x00, 0xA1, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
 
@@ -196,7 +196,7 @@ func (t *Trionic) writeJump(ctx context.Context, offset, length int) error {
 	return nil
 }
 
-func (t *Trionic) writeRange(ctx context.Context, start, end int, bin []byte) error {
+func (t *Client) writeRange(ctx context.Context, start, end int, bin []byte) error {
 	length := end - start
 	binPos := start
 	rows := int(math.Floor(float64((length + 3)) / 6.0))
@@ -266,7 +266,7 @@ func (t *Trionic) writeRange(ctx context.Context, start, end int, bin []byte) er
 }
 
 /*
-func (t *Trionic) writeDataBlock(ctx context.Context, headerId byte, d []byte) error {
+func (t *Client) writeDataBlock(ctx context.Context, headerId byte, d []byte) error {
 	var blockPos int
 	var length, rows int
 	var i, k int
@@ -324,7 +324,7 @@ func (t *Trionic) writeDataBlock(ctx context.Context, headerId byte, d []byte) e
 
 }
 
-func (t *Trionic) Program2(ctx context.Context, bin []byte) error {
+func (t *Client) Program2(ctx context.Context, bin []byte) error {
 	binCount := 0
 	//n := len(bin)
 	//bInfo := GetBinInfo(bin)

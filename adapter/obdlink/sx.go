@@ -61,13 +61,12 @@ func (cu *SX) Init(ctx context.Context) error {
 	cu.port = p
 
 	p.Write([]byte("ATZ\r"))
-	time.Sleep(1000 * time.Millisecond)
+	time.Sleep(1100 * time.Millisecond)
 	p.ResetInputBuffer()
 	var cmds = []string{
 		"ATE0", // turn off echo
 		"ATS0", // turn of spaces
 		"STIX", // show extended firmware info
-		//"STPCB0", // Turn automatic check byte calculation and checking off/on
 		"ATR0",
 		cu.canRate, // Set canbus protocol 33
 		"ATCAF0",   // Automatic formatting of
@@ -177,7 +176,7 @@ outer:
 
 func (cu *SX) recvManager(ctx context.Context) {
 	buff := bytes.NewBuffer(nil)
-	readBuffer := make([]byte, 8)
+	readBuffer := make([]byte, 19)
 	for ctx.Err() == nil {
 		select {
 		case <-ctx.Done():

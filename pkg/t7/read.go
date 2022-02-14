@@ -14,7 +14,7 @@ import (
 	"github.com/schollz/progressbar/v3"
 )
 
-func (t *Trionic) ReadECU(ctx context.Context, filename string) error {
+func (t *Client) ReadECU(ctx context.Context, filename string) error {
 	ok, err := t.KnockKnock(ctx)
 	if err != nil || !ok {
 		return fmt.Errorf("failed to authenticate: %v", err)
@@ -34,7 +34,7 @@ func (t *Trionic) ReadECU(ctx context.Context, filename string) error {
 	return nil
 }
 
-func (t *Trionic) readECU(ctx context.Context, addr, length int) ([]byte, error) {
+func (t *Client) readECU(ctx context.Context, addr, length int) ([]byte, error) {
 	start := time.Now()
 	var readPos int
 	out := bytes.NewBuffer([]byte{})
@@ -99,7 +99,7 @@ func (t *Trionic) readECU(ctx context.Context, addr, length int) ([]byte, error)
 	return out.Bytes(), nil
 }
 
-func (t *Trionic) readMemoryByAddress(ctx context.Context, address, length int) ([]byte, error) {
+func (t *Client) readMemoryByAddress(ctx context.Context, address, length int) ([]byte, error) {
 	// Jump to read adress
 	t.c.SendFrame(0x240, []byte{0x41, 0xA1, 0x08, 0x2C, 0xF0, 0x03, 0x00, byte(length)}, er(false))
 	t.c.SendFrame(0x240, []byte{0x00, 0xA1, byte((address >> 16) & 0xFF), byte((address >> 8) & 0xFF), byte(address & 0xFF), 0x00, 0x00, 0x00})
@@ -126,7 +126,7 @@ func (t *Trionic) readMemoryByAddress(ctx context.Context, address, length int) 
 	return b, nil
 }
 
-func (t *Trionic) recvData(ctx context.Context, length int) ([]byte, error) {
+func (t *Client) recvData(ctx context.Context, length int) ([]byte, error) {
 	var receivedBytes, payloadLeft int
 	out := bytes.NewBuffer([]byte{})
 outer:
@@ -180,7 +180,7 @@ outer:
 	return out.Bytes(), nil
 }
 
-func (t *Trionic) endDownloadMode(ctx context.Context) error {
+func (t *Client) endDownloadMode(ctx context.Context) error {
 	t.c.SendFrame(0x240, []byte{0x40, 0xA1, 0x01, 0x82, 0x00, 0x00, 0x00, 0x00})
 	f, err := t.c.Poll(ctx, t.defaultTimeout, 0x258)
 	if err != nil {

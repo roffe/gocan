@@ -1,11 +1,15 @@
-## t7 can
+## t7 t7 flash
 
-CAN related commands
+flash binary to ecu
+
+```
+t7 t7 flash <filename> [flags]
+```
 
 ### Options
 
 ```
-  -h, --help   help for can
+  -h, --help   help for flash
 ```
 
 ### Options inherited from parent commands
@@ -19,6 +23,5 @@ CAN related commands
 
 ### SEE ALSO
 
-* [t7](t7.md)	 - T7 swish army tool
-* [t7 can monitor](t7_can_monitor.md)	 - Monitor the CANbus for frames
+* [t7 t7](t7_t7.md)	 - Trionic 7 ECU related commands
 

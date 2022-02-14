@@ -1,11 +1,15 @@
-## t7 can
+## t7 ledenabler
 
-CAN related commands
+led enabler for 9-3
+
+```
+t7 ledenabler [flags]
+```
 
 ### Options
 
 ```
-  -h, --help   help for can
+  -h, --help   help for ledenabler
 ```
 
 ### Options inherited from parent commands
@@ -20,5 +24,4 @@ CAN related commands
 ### SEE ALSO
 
 * [t7](t7.md)	 - T7 swish army tool
-* [t7 can monitor](t7_can_monitor.md)	 - Monitor the CANbus for frames
 

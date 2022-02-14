@@ -66,5 +66,5 @@ var flashCmd = &cobra.Command{
 }
 
 func init() {
-	ecuCmd.AddCommand(flashCmd)
+	t7Cmd.AddCommand(flashCmd)
 }

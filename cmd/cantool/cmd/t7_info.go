@@ -38,5 +38,5 @@ var infoCmd = &cobra.Command{
 }
 
 func init() {
-	ecuCmd.AddCommand(infoCmd)
+	t7Cmd.AddCommand(infoCmd)
 }
