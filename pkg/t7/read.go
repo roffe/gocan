@@ -101,15 +101,15 @@ func (t *Client) readECU(ctx context.Context, addr, length int) ([]byte, error) 
 
 func (t *Client) readMemoryByAddress(ctx context.Context, address, length int) ([]byte, error) {
 	// Jump to read adress
-	t.c.SendFrame(0x240, []byte{0x41, 0xA1, 0x08, 0x2C, 0xF0, 0x03, 0x00, byte(length)}, er(false))
+	t.c.SendFrame(0x240, []byte{0x41, 0xA1, 0x08, 0x2C, 0xF0, 0x03, 0x00, byte(length)}, model.OptFrameType(model.Outgoing))
 	t.c.SendFrame(0x240, []byte{0x00, 0xA1, byte((address >> 16) & 0xFF), byte((address >> 8) & 0xFF), byte(address & 0xFF), 0x00, 0x00, 0x00})
 
 	f, err := t.c.Poll(ctx, t.defaultTimeout, 0x258)
 	if err != nil {
 		return nil, err
 	}
-	d := f.GetData()
-	t.Ack(d[0], er(false))
+	d := f.Data()
+	t.Ack(d[0], model.OptFrameType(model.Outgoing))
 
 	if d[3] != 0x6C || d[4] != 0xF0 {
 		return nil, fmt.Errorf("failed to jump to 0x%X got response: %s", address, f.String())
@@ -139,7 +139,7 @@ outer:
 			if err != nil {
 				return nil, err
 			}
-			d := f.GetData()
+			d := f.Data()
 			if d[0]&0x40 == 0x40 {
 				payloadLeft = int(d[2]) - 2 // subtract two non-payload bytes
 				if payloadLeft > 0 && receivedBytes < length {
@@ -170,10 +170,10 @@ outer:
 				}
 			}
 			if d[0] == 0x80 || d[0] == 0xC0 {
-				t.Ack(d[0]&0xBF, er(false))
+				t.Ack(d[0]&0xBF, model.OptFrameType(model.Outgoing))
 				break outer
 			} else {
-				t.Ack(d[0]&0xBF, er(true))
+				t.Ack(d[0]&0xBF, model.OptFrameType(model.OutResponseRequired))
 			}
 		}
 	}
@@ -186,17 +186,7 @@ func (t *Client) endDownloadMode(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("end download mode: %v", err)
 	}
-	d := f.GetData()
-	t.Ack(d[0], er(false))
+	d := f.Data()
+	t.Ack(d[0], model.OptFrameType(model.Outgoing))
 	return nil
-}
-
-// expect Response
-func er(expect bool) model.FrameOpt {
-	return func(f model.CANFrame) {
-		switch t := f.(type) {
-		case *model.Frame:
-			t.Response = expect
-		}
-	}
 }

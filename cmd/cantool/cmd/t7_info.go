@@ -18,21 +18,17 @@ var infoCmd = &cobra.Command{
 		ctx, cancel := context.WithTimeout(cmd.Context(), 15*time.Second)
 		defer cancel()
 
-		adapter, port, baudrate, err := getAdapterOpts()
-		if err != nil {
-			return err
-		}
-		c, err := initCAN(ctx, adapter, port, baudrate)
+		c, err := initCAN(ctx)
 		if err != nil {
 			return err
 		}
 		defer c.Close()
 
 		tr := t7.New(c)
-
 		if err := tr.Info(ctx); err != nil {
 			return err
 		}
+
 		return nil
 	},
 }

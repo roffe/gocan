@@ -17,11 +17,7 @@ var readCMD = &cobra.Command{
 		ctx, cancel := context.WithTimeout(cmd.Context(), 60*time.Minute)
 		defer cancel()
 
-		adapter, port, baudrate, err := getAdapterOpts()
-		if err != nil {
-			return err
-		}
-		c, err := initCAN(ctx, adapter, port, baudrate, 0x238, 0x258)
+		c, err := initCAN(ctx, 0x238, 0x258)
 		if err != nil {
 			return err
 		}

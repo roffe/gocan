@@ -8,17 +8,12 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:          "t7",
-	Short:        "T7 swish army tool",
-	Long:         `Lorem ipsum and all the colors`,
+	Use:   "cantool",
+	Short: "CANbus swish army tool",
+	//Long:         `Lorem ipsum and all the colors`,
 	SilenceUsage: true,
-	// Uncomment the following line if your bare application
-	// has an action associated with it:
-	// Run: func(cmd *cobra.Command, args []string) { },
 }
 
-// Execute adds all child commands to the root command and sets flags appropriately.
-// This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute(ctx context.Context) {
 	//colorstring.Fprintln(ansi.NewAnsiStdout(), saab)
 	rootCmd.ExecuteContext(ctx)
@@ -29,6 +24,7 @@ const (
 	flagBaudrate = "baudrate"
 	flagDebug    = "debug"
 	flagAdapter  = "adapter"
+	flagCANRate  = "canrate"
 )
 
 func init() {
@@ -40,5 +36,6 @@ func init() {
 	pf.IntP(flagBaudrate, "b", 115200, "baudrate")
 	pf.BoolP(flagDebug, "d", false, "debug mode")
 	pf.StringP(flagAdapter, "a", "canusb", "what adapter to use")
+	pf.StringP(flagCANRate, "c", "500", "CAN rate in kbit/s, shorts: pbus = 500 (default), ibus = 47.619, t5 = 615.384")
 	rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
 }

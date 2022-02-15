@@ -48,7 +48,7 @@ func (cl *Client) WriteDataByIdentifier(ctx context.Context, canID uint32, ident
 	if err != nil {
 		return err
 	}
-	d := resp.GetData()
+	d := resp.Data()
 	if d[0] != 0x30 || d[1] != 0x00 {
 		log.Println(resp.String())
 		return errors.New("invalid response to initial writeDataByIdentifier")
@@ -91,7 +91,7 @@ func (cl *Client) ReadDataByIdentifier(ctx context.Context, canID uint32, identi
 	if err != nil {
 		return nil, err
 	}
-	d := resp.GetData()
+	d := resp.Data()
 	if d[3] == 0x78 {
 		resp, err = cl.c.Poll(ctx, 150*time.Millisecond, canID+0x400)
 		if err != nil {
@@ -112,7 +112,7 @@ outer:
 		if err != nil {
 			return nil, err
 		}
-		dr := read.GetData()
+		dr := read.Data()
 		for _, b := range dr[1:] {
 			out.WriteByte(b)
 			left--

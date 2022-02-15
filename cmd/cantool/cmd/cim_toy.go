@@ -22,11 +22,8 @@ var cimTOY = &cobra.Command{
 		log.SetFlags(log.Lshortfile | log.LstdFlags)
 		ctx, cancel := context.WithCancel(cmd.Context())
 		defer cancel()
-		adapter, port, baudrate, err := getAdapterOpts()
-		if err != nil {
-			return err
-		}
-		c, err := initCAN(ctx, adapter, port, baudrate)
+
+		c, err := initCAN(ctx)
 		if err != nil {
 			return err
 		}
@@ -66,7 +63,7 @@ var cimTOY = &cobra.Command{
 		}
 		time.Sleep(3 * time.Millisecond)
 
-		d := f.GetData()
+		d := f.Data()
 		auth := convertSeedCIM(int(d[3])<<8 | int(d[4]))
 
 		log.Println("SecurityAccess (sendKey)")
@@ -76,7 +73,7 @@ var cimTOY = &cobra.Command{
 			log.Println(err)
 			return os.ErrDeadlineExceeded
 		}
-		d2 := f2.GetData()
+		d2 := f2.Data()
 		if d2[1] != 0x67 && d2[2] == 0x02 {
 			log.Println("sec access failed")
 			return err
@@ -100,7 +97,7 @@ var cimTOY = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		pd := presp.GetData()
+		pd := presp.Data()
 		if pd[0] != 0x01 || pd[1] != 0xE5 {
 			log.Println(presp.String())
 			return fmt.Errorf("invalid response to request programming mode")

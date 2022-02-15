@@ -62,14 +62,15 @@ func (cu *Canusb) Init(ctx context.Context) error {
 	for _, c := range cmds {
 		_, err := p.Write([]byte(c + "\r"))
 		if err != nil {
-			log.Println(err)
+			return err
 		}
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	go func() {
 		for ctx.Err() == nil {
-			<-time.After(5 * time.Second)
-			cu.Send(&model.RawCommand{Data: "F"})
+			<-time.After(600 * time.Millisecond)
+			cu.Send(model.NewRawCommand("F"))
 		}
 	}()
 
@@ -111,7 +112,7 @@ func (cu *Canusb) SetCANrate(rate float64) error {
 		cu.canRate = "S5"
 	case 500:
 		cu.canRate = "S6"
-	case 615:
+	case 615.384:
 		cu.canRate = "s4037"
 	case 800:
 		cu.canRate = "S7"
@@ -185,7 +186,13 @@ outer:
 	for {
 		select {
 		case v := <-cu.send:
-			b := []byte(fmt.Sprintf("t%x%d%x\r", v.GetIdentifier(), len(v.GetData()), v.GetData()))
+			var b []byte
+			switch v.(type) {
+			case *model.RawCommand:
+				b = []byte(append(v.Data(), '\r'))
+			default:
+				b = []byte(fmt.Sprintf("t%03X%d%X\r", v.Identifier(), v.Len(), v.Data()))
+			}
 			_, err := cu.port.Write(b)
 			if err != nil {
 				log.Printf("failed to write to com port: %q, %v\n", string(b), err)
@@ -309,25 +316,31 @@ func decodeStatus(b []byte) error {
 }
 
 func (*Canusb) decodeFrame(buff []byte) (*model.Frame, error) {
-	received := time.Now()
 	idBytes, err := hex.DecodeString(fmt.Sprintf("%08s", buff[1:4]))
 	if err != nil {
 		return nil, fmt.Errorf("filed to decode identifier: %v", err)
 	}
+	recvBytes := len(buff[5:])
+
 	leng, err := strconv.ParseUint(string(buff[4:5]), 0, 8)
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
-	var data = make([]byte, hex.DecodedLen(len(buff[5:])))
+
+	if uint64(recvBytes/2) != leng {
+		return nil, errors.New("frame received bytes does not match header")
+	}
+
+	var data = make([]byte, hex.DecodedLen(recvBytes))
 	if _, err := hex.Decode(data, buff[5:]); err != nil {
 		return nil, fmt.Errorf("failed to decode frame body: %v", err)
 	}
-	return &model.Frame{
-		Time:       received,
-		Identifier: binary.BigEndian.Uint32(idBytes),
-		Len:        uint8(leng),
-		Data:       data,
-	}, nil
+
+	return model.NewFrame(
+		binary.BigEndian.Uint32(idBytes),
+		data,
+		model.Incoming,
+	), nil
 }
 
 func checkBitSet(n, k int) bool {

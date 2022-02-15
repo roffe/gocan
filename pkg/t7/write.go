@@ -12,6 +12,7 @@ import (
 
 	"github.com/avast/retry-go"
 	"github.com/k0kubun/go-ansi"
+	"github.com/roffe/gocan/pkg/model"
 	"github.com/schollz/progressbar/v3"
 )
 
@@ -143,7 +144,7 @@ func (t *Client) Flash(ctx context.Context, bin []byte) error {
 		return fmt.Errorf("error waiting for data transfer exit reply: %v", err)
 	}
 	// Send acknowledgement
-	d := end.GetData()
+	d := end.Data()
 	t.Ack(d[0] & 0xBF)
 
 	if d[3] != 0x77 {
@@ -179,15 +180,15 @@ func (t *Client) writeJump(ctx context.Context, offset, length int) error {
 		jumpMsg2[k] = lengthBytes[k-2]
 	}
 
-	t.c.SendFrame(0x240, jumpMsg, er(false))
+	t.c.SendFrame(0x240, jumpMsg, model.OptFrameType(model.Outgoing))
 	time.Sleep(20 * time.Millisecond)
 	t.c.SendFrame(0x240, jumpMsg2)
 	f, err := t.c.Poll(ctx, t.defaultTimeout, 0x258)
 	if err != nil {
 		return fmt.Errorf("failed to enable request download")
 	}
-	d := f.GetData()
-	t.Ack(d[0], er(false))
+	d := f.Data()
+	t.Ack(d[0], model.OptFrameType(model.Outgoing))
 	if d[3] != 0x74 {
 		log.Println(f.String())
 		return fmt.Errorf("invalid response enabling download mode")
@@ -246,7 +247,7 @@ func (t *Client) writeRange(ctx context.Context, start, end int, bin []byte) err
 		}
 
 		if i > 0 {
-			t.c.SendFrame(0x240, data, er(false))
+			t.c.SendFrame(0x240, data, model.OptFrameType(model.Outgoing))
 		} else {
 			t.c.SendFrame(0x240, data)
 		}
@@ -257,8 +258,8 @@ func (t *Client) writeRange(ctx context.Context, start, end int, bin []byte) err
 		return fmt.Errorf("error writing 0x%X - 0x%X was at pos 0x%X: %v", start, end, binPos, err)
 	}
 	// Send acknowledgement
-	d2 := f2.GetData()
-	t.Ack(d2[0], er(false))
+	d2 := f2.Data()
+	t.Ack(d2[0], model.OptFrameType(model.Outgoing))
 	if d2[3] != 0x76 {
 		return fmt.Errorf("ECU did not confirm write")
 	}

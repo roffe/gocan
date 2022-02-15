@@ -6,6 +6,10 @@ import (
 	"github.com/roffe/gocan"
 )
 
+const (
+	PBusRate = 615.384
+)
+
 type Client struct {
 	c              *gocan.Client
 	defaultTimeout time.Duration

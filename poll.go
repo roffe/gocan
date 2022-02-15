@@ -133,7 +133,7 @@ func (h *Hub) run(ctx context.Context) {
 					continue
 				}
 				for _, id := range poll.identifiers {
-					if id == frame.GetIdentifier() {
+					if id == frame.Identifier() {
 						h.deliver(poll, frame)
 						continue poll
 					}

@@ -4,30 +4,40 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/fatih/color"
 )
 
 type Frame struct {
-	Time       time.Time
-	Identifier uint32
-	Len        uint8
-	Data       []byte
-	Response   bool // does this frame expect a response?
+	identifier uint32
+	len        int
+	data       []byte
+	frameType  CANFrameType
 }
 
-func (f *Frame) GetIdentifier() uint32 {
-	return f.Identifier
+func NewFrame(identifier uint32, data []byte, frameType CANFrameType) *Frame {
+	return &Frame{
+		identifier: identifier,
+		len:        len(data),
+		data:       data,
+		frameType:  frameType,
+	}
 }
 
-func (f *Frame) GetData() []byte {
-	return f.Data
+func (f *Frame) Identifier() uint32 {
+	return f.identifier
 }
 
-func (f *Frame) Byte() []byte {
-	//fmt.Println(f.String())
-	return []byte(fmt.Sprintf("t%x%d%x\r", f.Identifier, f.Len, f.Data))
+func (f *Frame) Len() int {
+	return len(f.data)
+}
+
+func (f *Frame) Data() []byte {
+	return f.data
+}
+
+func (f *Frame) Type() CANFrameType {
+	return f.frameType
 }
 
 var (
@@ -38,13 +48,13 @@ var (
 
 func (f *Frame) String() string {
 	var out strings.Builder
-	out.WriteString(green("0x%03X", f.Identifier) + " || ")
+	out.WriteString(green("0x%03X", f.identifier) + " || ")
 
 	var hexView strings.Builder
 
-	for i, b := range f.Data {
+	for i, b := range f.data {
 		hexView.WriteString(fmt.Sprintf("%02X", b))
-		if i != len(f.Data)-1 {
+		if i != len(f.data)-1 {
 			hexView.WriteString(" ")
 		}
 	}
@@ -54,9 +64,9 @@ func (f *Frame) String() string {
 	out.WriteString(" || ")
 
 	var binView strings.Builder
-	for i, b := range f.Data {
+	for i, b := range f.data {
 		binView.WriteString(fmt.Sprintf("%08b", b))
-		if i != len(f.Data)-1 {
+		if i != len(f.data)-1 {
 			binView.WriteString(" ")
 		}
 	}
@@ -64,7 +74,7 @@ func (f *Frame) String() string {
 	out.WriteString(red(fmt.Sprintf("%-72s", binView.String())))
 
 	out.WriteString(" || ")
-	out.WriteString(yellow("%8s", kex.ReplaceAllString(string(f.Data), ".")))
+	out.WriteString(yellow("%8s", kex.ReplaceAllString(string(f.data), ".")))
 	return out.String()
 }
 

@@ -44,11 +44,8 @@ var monitorCMD = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log.Println("Entering monitoring mode")
 		ctx := cmd.Context()
-		adapter, port, baudrate, err := getAdapterOpts()
-		if err != nil {
-			return err
-		}
-		c, err := initCAN(ctx, adapter, port, baudrate)
+
+		c, err := initCAN(ctx)
 		if err != nil {
 			return err
 		}
@@ -100,7 +97,7 @@ var hPa uint16
 func frameParser(ctx context.Context, c *gocan.Client, g *gocui.Gui) {
 	msg := c.Subscribe(ctx)
 	for og := range msg {
-		if !inFilters(og.GetIdentifier()) {
+		if !inFilters(og.Identifier()) {
 			frameCount++
 			continue
 		}
@@ -122,8 +119,8 @@ func frameParser(ctx context.Context, c *gocan.Client, g *gocui.Gui) {
 			}
 			sid.Clear()
 
-			if f.GetIdentifier() == 0x338 {
-				fmt.Fprintf(sid, "%q\n", f.GetData())
+			if f.Identifier() == 0x338 {
+				fmt.Fprintf(sid, "%q\n", f.Data())
 			}
 
 			info, err := g.View("info")
@@ -138,17 +135,17 @@ func frameParser(ctx context.Context, c *gocan.Client, g *gocui.Gui) {
 			fmt.Fprintf(info, "coolant: %d\n", coolant)
 			fmt.Fprintf(info, "preassure hPa: %d\n", hPa)
 
-			if f.GetIdentifier() == 0x5c0 {
-				coolant = int(f.GetData()[1]) - 40
-				b, err := hex.DecodeString(fmt.Sprintf("%02X%02X", f.GetData()[2], f.GetData()[3]))
+			if f.Identifier() == 0x5c0 {
+				coolant = int(f.Data()[1]) - 40
+				b, err := hex.DecodeString(fmt.Sprintf("%02X%02X", f.Data()[2], f.Data()[3]))
 				if err != nil {
 					log.Fatal(err)
 				}
 				hPa = binary.LittleEndian.Uint16(b)
 			}
 
-			fmt.Fprintf(sid, "%X %d\n", f.GetIdentifier(), f.GetIdentifier())
-			fmt.Fprintf(packets, " %s || %s || %s\n", time.Now().Format("15:04:05.00000"), f.String(), t7.LookupID(f.GetIdentifier()))
+			fmt.Fprintf(sid, "%X %d\n", f.Identifier(), f.Identifier())
+			fmt.Fprintf(packets, " %s || %s || %s\n", time.Now().Format("15:04:05.00000"), f.String(), t7.LookupID(f.Identifier()))
 			//packets.MoveCursor(0, 1)
 			atomic.AddInt64(&buffLines, 1)
 			return nil

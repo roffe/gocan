@@ -21,7 +21,7 @@ func (t *Client) StartDiagnosticSession(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
-			d := f.GetData()
+			d := f.Data()
 			if d[0] == 0x40 && d[3] == 0xC1 {
 				log.Printf("Tester address: 0x%X\n", d[1])
 				log.Printf("ECU address: 0x%X\n", d[2]|0x80)

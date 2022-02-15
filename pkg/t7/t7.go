@@ -124,7 +124,7 @@ func (t *Client) GetHeader(ctx context.Context, id byte) (string, error) {
 			log.Println(err)
 			continue
 		}
-		d := f.GetData()
+		d := f.Data()
 		if d[0]&0x40 == 0x40 {
 			if int(d[2]) > 2 {
 				length = int(d[2]) - 2
@@ -146,7 +146,7 @@ func (t *Client) GetHeader(ctx context.Context, id byte) (string, error) {
 		}
 
 		if d[0] == 0x80 || d[0] == 0xC0 {
-			t.Ack(d[0], er(false))
+			t.Ack(d[0], model.OptFrameType(model.Outgoing))
 			break
 		} else {
 			t.Ack(d[0])
@@ -187,7 +187,7 @@ func (t *Client) letMeIn(ctx context.Context, method int) (bool, error) {
 		return false, err
 
 	}
-	d := f.GetData()
+	d := f.Data()
 	t.Ack(d[0])
 
 	s := int(d[5])<<8 | int(d[6])
@@ -202,7 +202,7 @@ func (t *Client) letMeIn(ctx context.Context, method int) (bool, error) {
 		return false, err
 
 	}
-	d2 := f2.GetData()
+	d2 := f2.Data()
 	t.Ack(d2[0])
 	if d2[3] == 0x67 && d2[5] == 0x34 {
 		return true, nil
@@ -241,7 +241,7 @@ func (t *Client) LetMeTry(ctx context.Context, key1, key2 int) bool {
 		return false
 
 	}
-	d := f.GetData()
+	d := f.Data()
 	t.Ack(d[0])
 
 	s := int(d[5])<<8 | int(d[6])
@@ -257,7 +257,7 @@ func (t *Client) LetMeTry(ctx context.Context, key1, key2 int) bool {
 		return false
 
 	}
-	d2 := f2.GetData()
+	d2 := f2.Data()
 	t.Ack(d2[0])
 	if d2[3] == 0x67 && d2[5] == 0x34 {
 		return true

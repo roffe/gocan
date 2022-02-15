@@ -147,17 +147,15 @@ outer:
 		case v := <-cu.send:
 			sendMutex <- token{}
 			var out string
-			switch t := v.(type) {
+			switch v.(type) {
 			case *model.RawCommand:
-				out = fmt.Sprintf("%s\r", t.Data)
-			case *model.Frame:
-				if !t.Response {
-					out = fmt.Sprintf("STPX h:%X,d:%X,r:0\r", t.Identifier, t.Data)
+				out = fmt.Sprintf("%s\r", v.String())
+			default:
+				if v.Type() == model.Outgoing {
+					out = fmt.Sprintf("STPX h:%X,d:%X,r:0\r", v.Identifier(), v.Data())
 					break
 				}
-				out = fmt.Sprintf("STPX h:%X,d:%X,r:1\r", t.Identifier, t.Data)
-			default:
-				panic("can't touch this")
+				out = fmt.Sprintf("STPX h:%X,d:%X,r:1\r", v.Identifier(), v.Data())
 			}
 			_, err := cu.port.Write([]byte(out))
 			if err != nil {
@@ -244,7 +242,7 @@ func (cu *SX) recvManager(ctx context.Context) {
 }
 
 func (*SX) decodeFrame(buff []byte) (model.CANFrame, error) {
-	received := time.Now()
+	//received := time.Now()
 	idBytes, err := hex.DecodeString(fmt.Sprintf("%08s", buff[0:3]))
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode identifier: %v", err)
@@ -254,12 +252,18 @@ func (*SX) decodeFrame(buff []byte) (model.CANFrame, error) {
 		return nil, fmt.Errorf("failed to decode frame body: %v", err)
 	}
 
-	length := uint8(len(data))
+	//length := uint8(len(data))
 
-	return &model.Frame{
-		Time:       received,
-		Identifier: binary.BigEndian.Uint32(idBytes),
-		Len:        length,
-		Data:       data,
-	}, nil
+	return model.NewFrame(
+		binary.BigEndian.Uint32(idBytes),
+		data,
+		model.Incoming,
+	), nil
+
+	//return &model.Frame{
+	//	Time:       received,
+	//	Identifier: binary.BigEndian.Uint32(idBytes),
+	//	Len:        length,
+	//	Data:       data,
+	//}, nil
 }

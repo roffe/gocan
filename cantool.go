@@ -38,12 +38,7 @@ func (c *Client) SendFrame(identifier uint32, data []byte, opts ...model.FrameOp
 	var b = make([]byte, 8)
 	copy(b, data)
 
-	frame := &model.Frame{
-		Identifier: identifier,
-		Len:        uint8(len(b)),
-		Data:       b,
-		Response:   true,
-	}
+	frame := model.NewFrame(identifier, b, model.OutResponseRequired)
 
 	for _, o := range opts {
 		o(frame)
@@ -54,5 +49,5 @@ func (c *Client) SendFrame(identifier uint32, data []byte, opts ...model.FrameOp
 
 // SendString is used to bypass the frame parser and send raw commands to the CANUSB adapter
 func (c *Client) SendString(str string) error {
-	return c.Send(&model.RawCommand{Data: str})
+	return c.Send(model.NewRawCommand(str))
 }

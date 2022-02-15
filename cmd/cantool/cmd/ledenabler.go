@@ -24,11 +24,7 @@ var ledenablerCmd = &cobra.Command{
 		ctx, cancel := context.WithTimeout(cmd.Context(), 45*time.Second)
 		defer cancel()
 
-		adapter, port, baudrate, err := getAdapterOpts()
-		if err != nil {
-			return err
-		}
-		c, err := initCAN(ctx, adapter, port, baudrate)
+		c, err := initCAN(ctx)
 		if err != nil {
 			return err
 		}

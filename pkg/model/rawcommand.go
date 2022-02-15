@@ -1,21 +1,29 @@
 package model
 
 type RawCommand struct {
-	Data string
+	data string
 }
 
-func (r *RawCommand) Byte() []byte {
-	return []byte(r.Data + "\r")
+func NewRawCommand(data string) *RawCommand {
+	return &RawCommand{data: data}
 }
 
-func (r *RawCommand) GetIdentifier() uint32 {
+func (r *RawCommand) Identifier() uint32 {
 	return 0
 }
 
-func (r *RawCommand) GetData() []byte {
-	return []byte(r.Data)
+func (r *RawCommand) Len() int {
+	return len(r.data)
+}
+
+func (r *RawCommand) Data() []byte {
+	return []byte(r.data)
+}
+
+func (r *RawCommand) Type() CANFrameType {
+	return Outgoing
 }
 
 func (r *RawCommand) String() string {
-	return r.Data
+	return r.data
 }

@@ -45,7 +45,7 @@ func (t *Client) Erase(ctx context.Context) error {
 		if err != nil {
 			log.Println(err)
 		} else {
-			data = f.GetData()
+			data = f.Data()
 			t.Ack(data[0])
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -65,7 +65,7 @@ func (t *Client) Erase(ctx context.Context) error {
 		if err != nil {
 			log.Println(err)
 		} else {
-			data = f.GetData()
+			data = f.Data()
 			t.Ack(data[0])
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -84,7 +84,7 @@ func (t *Client) Erase(ctx context.Context) error {
 		log.Println()
 		return err
 	}
-	d := f.GetData()
+	d := f.Data()
 	if d[3] == 0x7E {
 		time.Sleep(100 * time.Millisecond)
 		t.c.SendFrame(0x240, confirmMsg)
@@ -92,7 +92,7 @@ func (t *Client) Erase(ctx context.Context) error {
 		if err != nil {
 			log.Println(err)
 		}
-		d2 := f2.GetData()
+		d2 := f2.Data()
 		if d2[3] == 0x7E {
 			bar.Finish()
 			fmt.Println()

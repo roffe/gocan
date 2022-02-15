@@ -1,6 +1,13 @@
 package t5
 
-var myBooty = `S00E000004598B4E0A93E8A3FE93738F
+import (
+	"log"
+	"strings"
+
+	"github.com/roffe/gocan/cmd/cantool/pkg/ui/srec"
+)
+
+var MyBooty = `S00E000004598B4E0A93E8A3FE93738F
 S12350004EB8500C4EB8507A4EED0004207C00FFFA0410FC007F0810000367FA33FC040543
 S123502000FFFA4833FC040500FFFA5033FC040500FFFA5433FC303000FFFA5233FC50309C
 S123504000FFFA560279FFBF00FFFC140079001000FFFC1402798FDF00FFFC16007900505A
@@ -65,5 +72,15 @@ S10457EB00B9
 S9035000AC`
 
 func (t *Client) UploadBootLoader() error {
+	sr := srec.NewSrec()
+	r := strings.NewReader(MyBooty)
+	if err := sr.Parse(r); err != nil {
+		return err
+	}
+
+	for _, rec := range sr.Records {
+		log.Println(rec.String())
+	}
+
 	return nil
 }

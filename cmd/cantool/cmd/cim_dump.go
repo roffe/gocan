@@ -26,11 +26,7 @@ var cimDump = &cobra.Command{
 		ctx, cancel := context.WithCancel(cmd.Context())
 		defer cancel()
 
-		adapter, port, baudrate, err := getAdapterOpts()
-		if err != nil {
-			return err
-		}
-		c, err := initCAN(ctx, adapter, port, baudrate)
+		c, err := initCAN(ctx)
 		if err != nil {
 			return err
 		}
@@ -66,7 +62,7 @@ var cimDump = &cobra.Command{
 			return err
 		}
 		time.Sleep(3 * time.Millisecond)
-		d := f.GetData()
+		d := f.Data()
 		resp := convertSeedCIM(int(d[3])<<8 | int(d[4]))
 
 		log.Println("SecurityAccess (sendKey)")
@@ -76,7 +72,7 @@ var cimDump = &cobra.Command{
 			log.Println(err)
 			return os.ErrDeadlineExceeded
 		}
-		d2 := f2.GetData()
+		d2 := f2.Data()
 		if d2[1] != 0x67 && d2[2] == 0x02 {
 			log.Println("sec access failed")
 			return err
@@ -167,7 +163,7 @@ func readRange(ctx context.Context, c *gocan.Client, start, length, maxlen uint3
 				}
 				fs = ff
 				// $7F $23 $78
-				d := ff.GetData()
+				d := ff.Data()
 				if d[1] == 0x7f {
 					if d[2] == 0x23 && d[3] == 0x78 { // plez retry
 						ff2, err := c.Poll(ctx, 200*time.Millisecond, 0x645)
@@ -191,7 +187,7 @@ func readRange(ctx context.Context, c *gocan.Client, start, length, maxlen uint3
 
 		if leftThisRound <= 3 {
 			for i := 0; i <= 2; i++ {
-				out.WriteByte(fs.GetData()[5+i])
+				out.WriteByte(fs.Data()[5+i])
 				curOffset++
 				leftThisRound--
 				if leftThisRound == 0 {
@@ -201,10 +197,10 @@ func readRange(ctx context.Context, c *gocan.Client, start, length, maxlen uint3
 		}
 
 		if leftThisRound > 3 {
-			out.WriteByte(fs.GetData()[6])
+			out.WriteByte(fs.Data()[6])
 			curOffset++
 			leftThisRound--
-			out.WriteByte(fs.GetData()[7])
+			out.WriteByte(fs.Data()[7])
 			curOffset++
 			leftThisRound--
 
@@ -217,7 +213,7 @@ func readRange(ctx context.Context, c *gocan.Client, start, length, maxlen uint3
 					return nil, fmt.Errorf("failed to read additional data: %v", err)
 				}
 				for i := 1; i < 8; i++ {
-					out.WriteByte(f2.GetData()[i])
+					out.WriteByte(f2.Data()[i])
 					curOffset++
 					leftThisRound--
 					if leftThisRound == 0 {
