@@ -46,6 +46,7 @@ const (
 type Client struct {
 	c              *gocan.Client
 	defaultTimeout time.Duration
+	bootloaded     bool
 }
 
 func New(c *gocan.Client) *Client {
@@ -57,34 +58,40 @@ func New(c *gocan.Client) *Client {
 }
 
 func (t *Client) DetermineECU(ctx context.Context) (ECUType, error) {
+	if !t.bootloaded {
+		t.UploadBootLoader(ctx)
+	}
 	footer, err := t.GetECUFooter(ctx)
 	if err != nil {
 		return UnknownECU, fmt.Errorf("failed to get ECU footer: %v", err)
 	}
 	chip, err := t.GetChipTypes(ctx)
 	if err != nil {
-		return UnknownECU, fmt.Errorf("failed to get chiptypes: %v", err)
+		return UnknownECU, fmt.Errorf("failed to get chip types: %v", err)
 	}
 
-	flashsize := "256 kB"
+	var flashsize string
 
-	romoffset := getIdentifierFromFooter(footer, ROMoffset)
+	romoffset := GetIdentifierFromFooter(footer, ROMoffset)
 
 	switch chip[5] {
-	case 0xB8: // Intel/CSI/OnSemi 28F512
-	case 0x5D: // Atmel 29C512
-	case 0x25: // AMD 28F512
+	case 0xB8, // Intel/CSI/OnSemi 28F512
+		0x5D, // Atmel 29C512
+		0x25: // AMD 28F512
 		flashsize = "128 kB"
-	case 0xD5: // Atmel 29C010
-	case 0xB5: // SST 39F010
-	case 0xB4: // Intel/CSI/OnSemi 28F010
-	case 0xA7: // AMD 28F010
-	case 0xA4: // AMIC 29F010
-	case 0x20: // AMD/ST 29F010
+	case 0xD5, // Atmel 29C010
+		0xB5, // SST 39F010
+		0xB4, // Intel/CSI/OnSemi 28F010
+		0xA7, // AMD 28F010
+		0xA4, // AMIC 29F010
+		0x20: // AMD/ST 29F010
+		flashsize = "256 kB"
 	default:
 		flashsize = "Unknown"
-
 	}
+
+	//	log.Printf("chip: %X", chip)
+
 	var returnECU ECUType
 	switch flashsize {
 	case "128 kB":
@@ -109,21 +116,20 @@ func (t *Client) DetermineECU(ctx context.Context) (ECUType, error) {
 			returnECU = UnknownECU
 		}
 	}
-
-	log.Println("Part Number:", getIdentifierFromFooter(footer, Partnumber))
-	log.Println("Software ID:", getIdentifierFromFooter(footer, SoftwareID))
-	log.Println("SW Version:", getIdentifierFromFooter(footer, Dataname))
-	log.Println("Engine Type:", getIdentifierFromFooter(footer, EngineType))
-	log.Println("IMMO Code:", getIdentifierFromFooter(footer, ImmoCode))
-	log.Println("Other Info:", getIdentifierFromFooter(footer, Unknown))
+	log.Println("Part Number:", GetIdentifierFromFooter(footer, Partnumber))
+	log.Println("Software ID:", GetIdentifierFromFooter(footer, SoftwareID))
+	log.Println("SW Version:", GetIdentifierFromFooter(footer, Dataname))
+	log.Println("Engine Type:", GetIdentifierFromFooter(footer, EngineType))
+	log.Println("IMMO Code:", GetIdentifierFromFooter(footer, ImmoCode))
+	log.Println("Other Info:", GetIdentifierFromFooter(footer, Unknown))
 	log.Println("ROM Start: 0x" + romoffset)
-	log.Println("Code End: 0x" + getIdentifierFromFooter(footer, CodeEnd))
-	log.Println("ROM End: 0x" + getIdentifierFromFooter(footer, ROMend))
+	log.Println("Code End: 0x" + GetIdentifierFromFooter(footer, CodeEnd))
+	log.Println("ROM End: 0x" + GetIdentifierFromFooter(footer, ROMend))
 
 	return returnECU, nil
 }
 
-func getIdentifierFromFooter(footer []byte, identifier ECUIdentifier) string {
+func GetIdentifierFromFooter(footer []byte, identifier ECUIdentifier) string {
 
 	var result strings.Builder
 
@@ -161,7 +167,6 @@ func (t *Client) GetChipTypes(ctx context.Context) ([]byte, error) {
 }
 
 func (t *Client) GetECUFooter(ctx context.Context) ([]byte, error) {
-	log.Println("Getting footer from ECU")
 	footer := make([]byte, 0x80)
 	var address uint32 = (0x7FF80 + 5)
 

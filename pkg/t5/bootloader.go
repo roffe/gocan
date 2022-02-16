@@ -115,11 +115,11 @@ func (t *Client) UploadBootLoader(ctx context.Context) error {
 
 		switch rec.Srectype {
 		case "S0":
-			if err := t.SendBootloaderAddressCommand(ctx, 0, 0); err != nil {
+			if err := t.sendBootloaderAddressCommand(ctx, 0, 0); err != nil {
 				return err
 			}
 		case "S1":
-			if err := t.SendBootloaderAddressCommand(ctx, rec.Address, rec.Length-3); err != nil {
+			if err := t.sendBootloaderAddressCommand(ctx, rec.Address, rec.Length-3); err != nil {
 				return err
 			}
 
@@ -160,7 +160,7 @@ func (t *Client) UploadBootLoader(ctx context.Context) error {
 			}
 
 		case "S9":
-			if err := t.SendBootVectorAddressSRAM(rec.Address); err != nil {
+			if err := t.sendBootVectorAddressSRAM(rec.Address); err != nil {
 				return fmt.Errorf("failed to SBVAC")
 			}
 		}
@@ -168,10 +168,11 @@ func (t *Client) UploadBootLoader(ctx context.Context) error {
 	time.Sleep(10 * time.Millisecond)
 	fmt.Println()
 	log.Printf("upload took: %s", time.Since(start).Round(time.Millisecond).String())
+	t.bootloaded = true
 	return nil
 }
 
-func (t *Client) SendBootloaderAddressCommand(ctx context.Context, address uint32, len byte) error {
+func (t *Client) sendBootloaderAddressCommand(ctx context.Context, address uint32, len byte) error {
 	payload := []byte{0xA5, byte(address >> 24), byte(address >> 16), byte(address >> 8), byte(address), len, 0x00, 0x00}
 	f, err := t.c.SendAndPoll(
 		ctx,
@@ -189,12 +190,16 @@ func (t *Client) SendBootloaderAddressCommand(ctx context.Context, address uint3
 	return nil
 }
 
-func (t *Client) SendBootVectorAddressSRAM(address uint32) error {
+func (t *Client) sendBootVectorAddressSRAM(address uint32) error {
 	data := []byte{0xC1, byte(address >> 24), byte(address >> 16), byte(address >> 8), byte(address), 0x00, 0x00, 0x00}
 	return t.c.SendFrame(0x5, data, model.OptFrameType(model.Outgoing))
 }
 
 func (t *Client) ResetECU(ctx context.Context) error {
+	if !t.bootloaded {
+		t.UploadBootLoader(ctx)
+	}
+	log.Println("resetting ECU")
 	frame := model.NewFrame(0x5, []byte{0xC2, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, model.ResponseRequired)
 	resp, err := t.c.SendAndPoll(ctx, frame, 150*time.Millisecond, 0xC)
 	if err != nil {

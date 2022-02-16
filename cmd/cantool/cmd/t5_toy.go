@@ -2,7 +2,7 @@ package cmd
 
 import (
 	"log"
-	"time"
+	"os"
 
 	"github.com/roffe/gocan/pkg/t5"
 	"github.com/spf13/cobra"
@@ -35,18 +35,23 @@ var t5toyCmd = &cobra.Command{
 			}()
 		*/
 
-		if err := tr.UploadBootLoader(ctx); err != nil {
-			log.Println(err)
-		}
+		/*
+			d, err := tr.DetermineECU(ctx)
+			if err != nil {
+				return err
+			}
 
-		time.Sleep(5 * time.Millisecond)
+			log.Println(d)
+		*/
 
-		d, err := tr.DetermineECU(ctx)
+		dump, err := tr.DumpECU(ctx)
 		if err != nil {
 			return err
 		}
 
-		log.Println(d)
+		if err := os.WriteFile("dump.bin", dump, 0644); err != nil {
+			log.Printf("failed to write dump file: %v", err)
+		}
 
 		if err := tr.ResetECU(ctx); err != nil {
 			return err
