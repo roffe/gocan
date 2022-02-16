@@ -11,3 +11,10 @@ func OptFrameType(frameType CANFrameType) FrameOpt {
 		}
 	}
 }
+
+func OptResponseRequired(f CANFrame) {
+	switch t := f.(type) {
+	case *Frame:
+		t.frameType = ResponseRequired
+	}
+}

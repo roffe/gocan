@@ -173,7 +173,7 @@ outer:
 				t.Ack(d[0]&0xBF, model.OptFrameType(model.Outgoing))
 				break outer
 			} else {
-				t.Ack(d[0]&0xBF, model.OptFrameType(model.OutResponseRequired))
+				t.Ack(d[0] & 0xBF)
 			}
 		}
 	}

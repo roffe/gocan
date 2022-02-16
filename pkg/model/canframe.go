@@ -13,5 +13,5 @@ type CANFrameType int
 const (
 	Incoming CANFrameType = iota
 	Outgoing
-	OutResponseRequired
+	ResponseRequired
 )

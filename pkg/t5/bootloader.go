@@ -1,10 +1,19 @@
 package t5
 
 import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"io"
 	"log"
 	"strings"
+	"time"
 
+	"github.com/k0kubun/go-ansi"
 	"github.com/roffe/gocan/cmd/cantool/pkg/ui/srec"
+	"github.com/roffe/gocan/pkg/model"
+	"github.com/schollz/progressbar/v3"
 )
 
 var MyBooty = `S00E000004598B4E0A93E8A3FE93738F
@@ -71,16 +80,129 @@ S10A5764000000000000003A
 S10457EB00B9
 S9035000AC`
 
-func (t *Client) UploadBootLoader() error {
+func (t *Client) UploadBootLoader(ctx context.Context) error {
+	start := time.Now()
+	bar := progressbar.NewOptions(1884,
+		progressbar.OptionSetWriter(ansi.NewAnsiStdout()),
+		progressbar.OptionEnableColorCodes(true),
+		progressbar.OptionShowBytes(true),
+		progressbar.OptionSetWidth(20),
+		progressbar.OptionSetDescription("[cyan][1/1][reset] uploading bootloader"),
+		progressbar.OptionSetTheme(progressbar.Theme{
+			Saucer:        "[green]=[reset]",
+			SaucerHead:    "[green]>[reset]",
+			SaucerPadding: " ",
+			BarStart:      "[",
+			BarEnd:        "]",
+		}))
+	defer func() {
+		bar.Finish()
+	}()
+
 	sr := srec.NewSrec()
 	r := strings.NewReader(MyBooty)
 	if err := sr.Parse(r); err != nil {
 		return err
 	}
-
 	for _, rec := range sr.Records {
-		log.Println(rec.String())
-	}
+		ccrc, err := rec.CalcChecksum()
+		if err != nil {
+			return fmt.Errorf("failed to calculate srec crc: %v", err)
+		}
+		if rec.Checksum != ccrc {
+			return fmt.Errorf("srecord CRC: %X does not match calculated CRC: %X", rec.Checksum, ccrc)
+		}
 
+		switch rec.Srectype {
+		case "S0":
+			if err := t.SendBootloaderAddressCommand(ctx, 0, 0); err != nil {
+				return err
+			}
+		case "S1":
+			if err := t.SendBootloaderAddressCommand(ctx, rec.Address, rec.Length-3); err != nil {
+				return err
+			}
+
+			r := bytes.NewReader(rec.Data)
+			framecount := int(1 + (rec.Length-3)/7)
+			seq := byte(0x00)
+			for frame := 0; frame < framecount; frame++ {
+				payload := make([]byte, 8)
+				payload[0] = seq
+				bs := 0
+				for i := 1; i < 8; i++ {
+					b, err := r.ReadByte()
+					if err != nil {
+						if err == io.EOF {
+							break
+						}
+						return err
+					}
+					bs++
+					payload[i] = b
+				}
+
+				resp, err := t.c.SendAndPoll(
+					ctx,
+					model.NewFrame(0x5, payload, model.ResponseRequired),
+					150*time.Millisecond,
+					0xC,
+				)
+				if err != nil {
+					return err
+				}
+				data := resp.Data()
+				if resp.Len() != 8 || data[0] != byte(frame*7) || data[1] != 0x00 {
+					return fmt.Errorf("failed to write bootloader data")
+				}
+				bar.Add(bs)
+				seq += 7
+			}
+
+		case "S9":
+			if err := t.SendBootVectorAddressSRAM(rec.Address); err != nil {
+				return fmt.Errorf("failed to SBVAC")
+			}
+		}
+	}
+	time.Sleep(10 * time.Millisecond)
+	fmt.Println()
+	log.Printf("upload took: %s", time.Since(start).Round(time.Millisecond).String())
+	return nil
+}
+
+func (t *Client) SendBootloaderAddressCommand(ctx context.Context, address uint32, len byte) error {
+	payload := []byte{0xA5, byte(address >> 24), byte(address >> 16), byte(address >> 8), byte(address), len, 0x00, 0x00}
+	f, err := t.c.SendAndPoll(
+		ctx,
+		model.NewFrame(0x5, payload, model.ResponseRequired),
+		150*time.Millisecond,
+		0xC,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to SBLAC: %v", err)
+	}
+	data := f.Data()
+	if f.Len() != 8 || data[0] != 0xA5 || data[1] != 0x00 {
+		return fmt.Errorf("invalid response to SBLAC")
+	}
+	return nil
+}
+
+func (t *Client) SendBootVectorAddressSRAM(address uint32) error {
+	data := []byte{0xC1, byte(address >> 24), byte(address >> 16), byte(address >> 8), byte(address), 0x00, 0x00, 0x00}
+	return t.c.SendFrame(0x5, data, model.OptFrameType(model.Outgoing))
+}
+
+func (t *Client) ResetECU(ctx context.Context) error {
+	frame := model.NewFrame(0x5, []byte{0xC2, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, model.ResponseRequired)
+	resp, err := t.c.SendAndPoll(ctx, frame, 150*time.Millisecond, 0xC)
+	if err != nil {
+		return fmt.Errorf("failed to reset ECU: %v", err)
+	}
+	data := resp.Data()
+	if data[0] != 0xC2 || data[1] != 0x00 || data[2] != 0x08 {
+		return errors.New("invalid response to reset ECU")
+	}
 	return nil
 }

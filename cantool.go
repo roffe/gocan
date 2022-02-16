@@ -38,7 +38,7 @@ func (c *Client) SendFrame(identifier uint32, data []byte, opts ...model.FrameOp
 	var b = make([]byte, 8)
 	copy(b, data)
 
-	frame := model.NewFrame(identifier, b, model.OutResponseRequired)
+	frame := model.NewFrame(identifier, b, model.ResponseRequired)
 
 	for _, o := range opts {
 		o(frame)
