@@ -6,14 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"strings"
 	"time"
 
-	"github.com/k0kubun/go-ansi"
-	"github.com/roffe/gocan/cmd/cantool/pkg/ui/srec"
+	"github.com/roffe/gocan/pkg/bar"
 	"github.com/roffe/gocan/pkg/model"
-	"github.com/schollz/progressbar/v3"
+	"github.com/roffe/gocan/pkg/srec"
 )
 
 var MyBooty = `S00E000004598B4E0A93E8A3FE93738F
@@ -82,21 +80,13 @@ S9035000AC`
 
 func (t *Client) UploadBootLoader(ctx context.Context) error {
 	start := time.Now()
-	bar := progressbar.NewOptions(1884,
-		progressbar.OptionSetWriter(ansi.NewAnsiStdout()),
-		progressbar.OptionEnableColorCodes(true),
-		progressbar.OptionShowBytes(true),
-		progressbar.OptionSetWidth(20),
-		progressbar.OptionSetDescription("[cyan][1/1][reset] uploading bootloader"),
-		progressbar.OptionSetTheme(progressbar.Theme{
-			Saucer:        "[green]=[reset]",
-			SaucerHead:    "[green]>[reset]",
-			SaucerPadding: " ",
-			BarStart:      "[",
-			BarEnd:        "]",
-		}))
+
+	bar := bar.New(1884, "uploading bootloader")
 	defer func() {
-		bar.Finish()
+		if !bar.IsFinished() {
+			bar.Finish()
+			fmt.Println()
+		}
 	}()
 
 	sr := srec.NewSrec()
@@ -152,8 +142,15 @@ func (t *Client) UploadBootLoader(ctx context.Context) error {
 					return err
 				}
 				data := resp.Data()
+				if data[0] == 0x1C && data[1] == 0x01 && data[2] == 0x00 {
+					bar.Finish()
+					fmt.Println(" bootloader already running")
+					t.bootloaded = true
+					return nil
+				}
+
 				if resp.Len() != 8 || data[0] != byte(frame*7) || data[1] != 0x00 {
-					return fmt.Errorf("failed to write bootloader data")
+					return fmt.Errorf("failed to upload bootloader: %X", data)
 				}
 				bar.Add(bs)
 				seq += 7
@@ -165,9 +162,8 @@ func (t *Client) UploadBootLoader(ctx context.Context) error {
 			}
 		}
 	}
-	time.Sleep(10 * time.Millisecond)
-	fmt.Println()
-	log.Printf("upload took: %s", time.Since(start).Round(time.Millisecond).String())
+	bar.Finish()
+	fmt.Printf(" took: %s\n", time.Since(start).Round(time.Millisecond).String())
 	t.bootloaded = true
 	return nil
 }
@@ -195,19 +191,14 @@ func (t *Client) sendBootVectorAddressSRAM(address uint32) error {
 	return t.c.SendFrame(0x5, data, model.OptFrameType(model.Outgoing))
 }
 
-func (t *Client) ResetECU(ctx context.Context) error {
-	if !t.bootloaded {
-		t.UploadBootLoader(ctx)
-	}
-	log.Println("resetting ECU")
-	frame := model.NewFrame(0x5, []byte{0xC2, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, model.ResponseRequired)
+func (t *Client) sendBootloaderDataCommand(ctx context.Context, data []byte, length byte) error {
+	frame := model.NewFrame(0x5, data, model.ResponseRequired)
 	resp, err := t.c.SendAndPoll(ctx, frame, 150*time.Millisecond, 0xC)
 	if err != nil {
-		return fmt.Errorf("failed to reset ECU: %v", err)
+		return fmt.Errorf("failed SBLDC: %v", err)
 	}
-	data := resp.Data()
-	if data[0] != 0xC2 || data[1] != 0x00 || data[2] != 0x08 {
-		return errors.New("invalid response to reset ECU")
+	if resp.Data()[1] != 0x00 {
+		return errors.New("failed to write")
 	}
 	return nil
 }

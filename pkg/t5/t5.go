@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"strings"
 	"time"
 
 	"github.com/roffe/gocan"
@@ -57,103 +56,12 @@ func New(c *gocan.Client) *Client {
 	return t
 }
 
-func (t *Client) DetermineECU(ctx context.Context) (ECUType, error) {
-	if !t.bootloaded {
-		t.UploadBootLoader(ctx)
-	}
-	footer, err := t.GetECUFooter(ctx)
-	if err != nil {
-		return UnknownECU, fmt.Errorf("failed to get ECU footer: %v", err)
-	}
-	chip, err := t.GetChipTypes(ctx)
-	if err != nil {
-		return UnknownECU, fmt.Errorf("failed to get chip types: %v", err)
-	}
-
-	var flashsize string
-
-	romoffset := GetIdentifierFromFooter(footer, ROMoffset)
-
-	switch chip[5] {
-	case 0xB8, // Intel/CSI/OnSemi 28F512
-		0x5D, // Atmel 29C512
-		0x25: // AMD 28F512
-		flashsize = "128 kB"
-	case 0xD5, // Atmel 29C010
-		0xB5, // SST 39F010
-		0xB4, // Intel/CSI/OnSemi 28F010
-		0xA7, // AMD 28F010
-		0xA4, // AMIC 29F010
-		0x20: // AMD/ST 29F010
-		flashsize = "256 kB"
-	default:
-		flashsize = "Unknown"
-	}
-
-	//	log.Printf("chip: %X", chip)
-
-	var returnECU ECUType
-	switch flashsize {
-	case "128 kB":
-		switch romoffset {
-		case "060000":
-			log.Println("This is a Trionic 5.2 ECU with 128 kB of FLASH")
-			returnECU = T52ECU
-		default:
-			log.Println("!!! ERROR !!! This is a Trionic 5.2 ECU running an unknown firmware")
-			returnECU = UnknownECU
-		}
-	case "256 kB":
-		switch romoffset {
-		case "040000":
-			log.Println("This is a Trionic 5.5 ECU with 256 kB of FLASH")
-			returnECU = T55ECU
-		case "060000":
-			log.Println("This is a Trionic 5.5 ECU with a T5.2 BIN")
-			returnECU = T55AST52
-		default:
-			log.Println("!!! ERROR !!! This is a Trionic 5.5 ECU running an unknown firmware")
-			returnECU = UnknownECU
-		}
-	}
-	log.Println("Part Number:", GetIdentifierFromFooter(footer, Partnumber))
-	log.Println("Software ID:", GetIdentifierFromFooter(footer, SoftwareID))
-	log.Println("SW Version:", GetIdentifierFromFooter(footer, Dataname))
-	log.Println("Engine Type:", GetIdentifierFromFooter(footer, EngineType))
-	log.Println("IMMO Code:", GetIdentifierFromFooter(footer, ImmoCode))
-	log.Println("Other Info:", GetIdentifierFromFooter(footer, Unknown))
-	log.Println("ROM Start: 0x" + romoffset)
-	log.Println("Code End: 0x" + GetIdentifierFromFooter(footer, CodeEnd))
-	log.Println("ROM End: 0x" + GetIdentifierFromFooter(footer, ROMend))
-
-	return returnECU, nil
-}
-
-func GetIdentifierFromFooter(footer []byte, identifier ECUIdentifier) string {
-
-	var result strings.Builder
-
-	offset := len(footer) - 0x05 //  avoid the stored checksum
-	for offset > 0 {
-		length := int(footer[offset])
-		offset--
-		search := ECUIdentifier(footer[offset])
-		offset--
-		if identifier == search {
-			for i := 0; i < length; i++ {
-				result.WriteByte(footer[offset])
-				offset--
-			}
-			return result.String()
-		}
-		offset -= length
-	}
-	log.Printf("error getting identifier %X", identifier)
-	return ""
-
-}
+var chipTypes []byte
 
 func (t *Client) GetChipTypes(ctx context.Context) ([]byte, error) {
+	if len(chipTypes) > 0 {
+		return chipTypes, nil
+	}
 	frame := model.NewFrame(0x5, []byte{0xC9, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, model.ResponseRequired)
 	resp, err := t.c.SendAndPoll(ctx, frame, 150*time.Millisecond, 0xC)
 	if err != nil {
@@ -163,38 +71,8 @@ func (t *Client) GetChipTypes(ctx context.Context) ([]byte, error) {
 	if d[0] != 0xC9 || d[1] != 0x00 {
 		return nil, errors.New("invalid GetChipTypes response")
 	}
-	return d[2:], nil
-}
-
-func (t *Client) GetECUFooter(ctx context.Context) ([]byte, error) {
-	footer := make([]byte, 0x80)
-	var address uint32 = (0x7FF80 + 5)
-
-	for i := 0; i < (0x80 / 6); i++ {
-		b, err := t.ReadMemoryByAddress(ctx, address)
-		if err != nil {
-			return nil, err
-		}
-
-		//log.Printf("data: %X", b)
-		for j := 0; j < 6; j++ {
-			footer[(i*6)+j] = b[j]
-		}
-		address += 6
-	}
-
-	//log.Printf("foot: %X", footer)
-
-	slatten, err := t.ReadMemoryByAddress(ctx, 0x7FFFF)
-	if err != nil {
-		return nil, err
-	}
-	//	log.Printf("slatt: %X", slatten)
-	for j := 2; j < 6; j++ {
-		footer[(0x80-6)+j] = slatten[j]
-	}
-	//log.Printf("ff: %X", footer)
-	return footer, nil
+	chipTypes = d[2:]
+	return chipTypes, nil
 }
 
 func (t *Client) ReadMemoryByAddress(ctx context.Context, address uint32) ([]byte, error) {
@@ -202,11 +80,28 @@ func (t *Client) ReadMemoryByAddress(ctx context.Context, address uint32) ([]byt
 	frame := model.NewFrame(0x5, p, model.ResponseRequired)
 	resp, err := t.c.SendAndPoll(ctx, frame, 150*time.Millisecond, 0xC)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read memory by address: %v", err)
 	}
 	data := resp.Data()[2:]
 	reverse(data)
 	return data, nil
+}
+
+func (t *Client) ResetECU(ctx context.Context) error {
+	if !t.bootloaded {
+		t.UploadBootLoader(ctx)
+	}
+	log.Println("Resetting ECU")
+	frame := model.NewFrame(0x5, []byte{0xC2, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, model.ResponseRequired)
+	resp, err := t.c.SendAndPoll(ctx, frame, 150*time.Millisecond, 0xC)
+	if err != nil {
+		return fmt.Errorf("failed to reset ECU: %v", err)
+	}
+	data := resp.Data()
+	if data[0] != 0xC2 || data[1] != 0x00 || data[2] != 0x08 {
+		return errors.New("invalid response to reset ECU")
+	}
+	return nil
 }
 
 func reverse(s []byte) {

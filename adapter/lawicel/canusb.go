@@ -315,6 +315,11 @@ func decodeStatus(b []byte) error {
 	return nil
 }
 
+func checkBitSet(n, k int) bool {
+	v := n & (1 << (k - 1))
+	return v == 1
+}
+
 func (*Canusb) decodeFrame(buff []byte) (*model.Frame, error) {
 	idBytes, err := hex.DecodeString(fmt.Sprintf("%08s", buff[1:4]))
 	if err != nil {
@@ -341,9 +346,4 @@ func (*Canusb) decodeFrame(buff []byte) (*model.Frame, error) {
 		data,
 		model.Incoming,
 	), nil
-}
-
-func checkBitSet(n, k int) bool {
-	v := n & (1 << (k - 1))
-	return v == 1
 }

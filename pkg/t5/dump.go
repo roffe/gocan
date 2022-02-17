@@ -1,13 +1,13 @@
 package t5
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log"
 	"time"
 
-	"github.com/k0kubun/go-ansi"
-	"github.com/schollz/progressbar/v3"
+	"github.com/roffe/gocan/pkg/bar"
 )
 
 func (t *Client) DumpECU(ctx context.Context) ([]byte, error) {
@@ -17,43 +17,25 @@ func (t *Client) DumpECU(ctx context.Context) ([]byte, error) {
 		}
 	}
 
-	log.Println("Start ECU dump")
 	ecutype, err := t.DetermineECU(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	var start uint32 = 0x40000
-
-	if ecutype == T52ECU || ecutype == T55AST52 {
-		start = 0x60000
-	}
-
+	start := getstartAddress(ecutype)
 	length := 0x80000 - start
 	buffer := make([]byte, length)
 
-	//	buff := bytes.NewBuffer(nil)
-
-	log.Println("Downloading flash from ECU")
 	startTime := time.Now()
-	bar := progressbar.NewOptions(int(length),
-		progressbar.OptionSetWriter(ansi.NewAnsiStdout()),
-		progressbar.OptionEnableColorCodes(true),
-		progressbar.OptionShowBytes(true),
-		progressbar.OptionSetWidth(20),
-		progressbar.OptionSetDescription("[cyan][1/1][reset] dumping ECU"),
-		progressbar.OptionSetTheme(progressbar.Theme{
-			Saucer:        "[green]=[reset]",
-			SaucerHead:    "[green]>[reset]",
-			SaucerPadding: " ",
-			BarStart:      "[",
-			BarEnd:        "]",
-		}))
+
+	bar := bar.New(int(length), "reading ECU")
 	defer func() {
-		bar.Finish()
-		fmt.Println()
-		log.Printf("ecu dump took: %s", time.Since(startTime).Round(time.Millisecond).String())
+		if !bar.IsFinished() {
+			bar.Finish()
+			fmt.Println()
+		}
 	}()
+
 	address := start + 5
 	for i := 0; i < int(length/6); i++ {
 		b, err := t.ReadMemoryByAddress(ctx, address)
@@ -67,6 +49,7 @@ func (t *Client) DumpECU(ctx context.Context) ([]byte, error) {
 		address += 6
 	}
 
+	// Get the leftover bytes
 	if (length % 6) > 0 {
 		b, err := t.ReadMemoryByAddress(ctx, start+length-1)
 		if err != nil {
@@ -77,5 +60,33 @@ func (t *Client) DumpECU(ctx context.Context) ([]byte, error) {
 			bar.Add(1)
 		}
 	}
+
+	bar.Finish()
+	fmt.Printf(" took: %s\n", time.Since(startTime).Round(time.Millisecond).String())
+
+	checksum, err := t.GetECUChecksum(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	calculated, err := t.CalculateBinChecksum(buffer)
+	if err != nil {
+		return nil, err
+	}
+
+	if !bytes.Equal(checksum, calculated) {
+		log.Println("!!! Dumped bin and calculated checksum from ECU does not match !!!")
+		log.Printf("ECU reported checksum: %X, calculated: %X", checksum, calculated)
+	}
+
 	return buffer, nil
+}
+
+func getstartAddress(ecutype ECUType) uint32 {
+	switch ecutype {
+	case T52ECU, T55AST52:
+		return 0x60000
+	default:
+		return 0x40000
+	}
 }

@@ -138,8 +138,7 @@ func (h *Hub) deliver(poll *Poll, frame model.CANFrame) {
 	default:
 		poll.errcount++
 	}
-	if poll.errcount > 100 { // after 100 failed delieveries you are gone
-		//log.Println("major slacker this one")
+	if poll.errcount > 100 {
 		delete(h.pollers, poll)
 	}
 }

@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"log"
+	"os"
 
 	"github.com/spf13/cobra"
 )
@@ -28,8 +29,12 @@ const (
 )
 
 func init() {
-	//	log.SetFlags(0)
-	log.SetFlags(log.Lshortfile | log.LstdFlags | log.Lmicroseconds)
+	switch os.Getenv("DEBUG") {
+	case "true":
+		log.SetFlags(log.Lshortfile | log.LstdFlags)
+	default:
+		log.SetFlags(0)
+	}
 
 	pf := rootCmd.PersistentFlags()
 	pf.StringP(flagPort, "p", "*", "com-port, * = print available")
