@@ -11,7 +11,7 @@ import (
 // t5Cmd represents the t5 command
 var t5dumpCmd = &cobra.Command{
 	Use:   "dump <file>",
-	Short: "Dump ECU to file",
+	Short: "dump ECU to file",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()

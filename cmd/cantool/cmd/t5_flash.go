@@ -9,7 +9,7 @@ import (
 
 var t5flashCmd = &cobra.Command{
 	Use:   "flash <filename>",
-	Short: "flash ECU",
+	Short: "flash binary to ECU",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()

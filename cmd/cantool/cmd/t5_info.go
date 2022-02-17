@@ -8,7 +8,7 @@ import (
 // t5Cmd represents the t5 command
 var t5infoCmd = &cobra.Command{
 	Use:   "info",
-	Short: "Print ECU info",
+	Short: "print ECU info",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
