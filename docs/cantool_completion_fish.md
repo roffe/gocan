@@ -1,4 +1,4 @@
-## t7 completion fish
+## cantool completion fish
 
 Generate the autocompletion script for fish
 
@@ -8,17 +8,17 @@ Generate the autocompletion script for the fish shell.
 
 To load completions in your current shell session:
 
-	t7 completion fish | source
+	cantool completion fish | source
 
 To load completions for every new session, execute once:
 
-	t7 completion fish > ~/.config/fish/completions/t7.fish
+	cantool completion fish > ~/.config/fish/completions/cantool.fish
 
 You will need to start a new shell for this setup to take effect.
 
 
 ```
-t7 completion fish [flags]
+cantool completion fish [flags]
 ```
 
 ### Options
@@ -33,11 +33,12 @@ t7 completion fish [flags]
 ```
   -a, --adapter string   what adapter to use (default "canusb")
   -b, --baudrate int     baudrate (default 115200)
+  -c, --canrate string   CAN rate in kbit/s, shorts: pbus = 500 (default), ibus = 47.619, t5 = 615.384 (default "500")
   -d, --debug            debug mode
   -p, --port string      com-port, * = print available (default "*")
 ```
 
 ### SEE ALSO
 
-* [t7 completion](t7_completion.md)	 - Generate the autocompletion script for the specified shell
+* [cantool completion](cantool_completion.md)	 - Generate the autocompletion script for the specified shell
 

@@ -1,4 +1,4 @@
-## t7 t7
+## cantool t7
 
 Trionic 7 ECU related commands
 
@@ -17,14 +17,15 @@ commands related to erasing, writing and dumping flash memory
 ```
   -a, --adapter string   what adapter to use (default "canusb")
   -b, --baudrate int     baudrate (default 115200)
+  -c, --canrate string   CAN rate in kbit/s, shorts: pbus = 500 (default), ibus = 47.619, t5 = 615.384 (default "500")
   -d, --debug            debug mode
   -p, --port string      com-port, * = print available (default "*")
 ```
 
 ### SEE ALSO
 
-* [t7](t7.md)	 - T7 swish army tool
-* [t7 t7 dump](t7_t7_dump.md)	 - dump binary from ECU
-* [t7 t7 flash](t7_t7_flash.md)	 - flash binary to ecu
-* [t7 t7 info](t7_t7_info.md)	 - print ECU info
+* [cantool](cantool.md)	 - CANbus swish army tool
+* [cantool t7 dump](cantool_t7_dump.md)	 - dump binary from ECU
+* [cantool t7 flash](cantool_t7_flash.md)	 - flash binary to ecu
+* [cantool t7 info](cantool_t7_info.md)	 - print ECU info
 

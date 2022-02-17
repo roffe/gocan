@@ -1,15 +1,15 @@
-## t7 ledenabler
+## cantool t5 toy
 
-led enabler for 9-3
+Trionic 5 toy
 
 ```
-t7 ledenabler [flags]
+cantool t5 toy [flags]
 ```
 
 ### Options
 
 ```
-  -h, --help   help for ledenabler
+  -h, --help   help for toy
 ```
 
 ### Options inherited from parent commands
@@ -17,11 +17,12 @@ t7 ledenabler [flags]
 ```
   -a, --adapter string   what adapter to use (default "canusb")
   -b, --baudrate int     baudrate (default 115200)
+  -c, --canrate string   CAN rate in kbit/s, shorts: pbus = 500 (default), ibus = 47.619, t5 = 615.384 (default "500")
   -d, --debug            debug mode
   -p, --port string      com-port, * = print available (default "*")
 ```
 
 ### SEE ALSO
 
-* [t7](t7.md)	 - T7 swish army tool
+* [cantool t5](cantool_t5.md)	 - Trionic 5 ECU related commands
 

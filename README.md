@@ -1,26 +1,34 @@
-# CANUSB
+# CANTOOL
 
-Golang implementation of the [Lawicel Ascii API](http://www.can232.com/docs/canusb_manual.pdf) for [CANUSB](https://lawicel-shop.se/elektronik/kommunikation/can/lawicel-canusb-adapter-1m-usb-cable/) adapter running in VCP mode
+[Docs](docs/cantool.md)
+
+Golang linux/windows/osx Trionic 5/7 ecu flasher
+
+Supported adapters:
+* OBDLinx SX ( not fully tested )
+* [CANUSB](https://lawicel-shop.se/elektronik/kommunikation/can/lawicel-canusb-adapter-1m-usb-cable/) adapter running in VCP mode using [Lawicel ascii api](http://www.can232.com/docs/canusb_manual.pdf)
+
+Most code is based on [TrionicCANFlasher](https://txsuite.org/)
 
 Thanks to [TrionicTuning](https://www.trionictuning.com/), [Chriva](https://www.trionictuning.com/forum/memberlist.php?mode=viewprofile&u=3231) and [Tomi Liljemark](https://pikkupossu.1g.fi/tomi/tomi.html)
 
-## Example tool using the library for Trionic7 ECU dumping and flashing
-
-[Docs](docs/t7.md)
+## Example
 
 ```go
-$go run ./cmd/cantool/main.go -p com3 -b 921600 ecu info
-port: COM3
-   USB ID      0403:6001
-   USB serial  LW5ZEIRKA
-   H/W version V1011
-   H/W serial  NY657
-VIN: YS3DE55H4**********
-Box HW part number: 5382536  
-Immo Code: 8610QH1*********
-Software Saab part number: 5383930
-ECU Software version: EC0XY3RC.48H
-Engine type: 9-3 B205E EC2000 EU
-Tester info: SAAB_PROD_EOL
-Software date: 021220
+go run .\cmd\cantool\main.go -p com3 -b 2000000 -a canusb -c t5 t5 info
+uploading bootloader 100% [====================] (1.793 kB/s) took: 1.029s
+------------------------------
+This is a Trionic 5.5 ECU with 256 kB of FLASH
+----- ECU info ---------------
+Part Number:  4780656
+Software ID:  4782934
+SW Version:   A554X24L.18C
+Engine Type:  B204LM 900    ROFFE ST2
+IMMO Code:    ******
+Other Info:   LX1
+ROM Start:    0x040000
+Code End:     0x076D39
+ROM End:      0x07FFFF
+------------------------------
+Resetting ECU
 ```

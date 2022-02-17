@@ -1,15 +1,15 @@
-## t7 t7 flash
+## cantool ledenabler
 
-flash binary to ecu
+led enabler for 9-3
 
 ```
-t7 t7 flash <filename> [flags]
+cantool ledenabler [flags]
 ```
 
 ### Options
 
 ```
-  -h, --help   help for flash
+  -h, --help   help for ledenabler
 ```
 
 ### Options inherited from parent commands
@@ -17,11 +17,12 @@ t7 t7 flash <filename> [flags]
 ```
   -a, --adapter string   what adapter to use (default "canusb")
   -b, --baudrate int     baudrate (default 115200)
+  -c, --canrate string   CAN rate in kbit/s, shorts: pbus = 500 (default), ibus = 47.619, t5 = 615.384 (default "500")
   -d, --debug            debug mode
   -p, --port string      com-port, * = print available (default "*")
 ```
 
 ### SEE ALSO
 
-* [t7 t7](t7_t7.md)	 - Trionic 7 ECU related commands
+* [cantool](cantool.md)	 - CANbus swish army tool
 

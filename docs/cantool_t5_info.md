@@ -1,11 +1,15 @@
-## t7 can
+## cantool t5 info
 
-CAN related commands
+Print ECU info
+
+```
+cantool t5 info [flags]
+```
 
 ### Options
 
 ```
-  -h, --help   help for can
+  -h, --help   help for info
 ```
 
 ### Options inherited from parent commands
@@ -13,12 +17,12 @@ CAN related commands
 ```
   -a, --adapter string   what adapter to use (default "canusb")
   -b, --baudrate int     baudrate (default 115200)
+  -c, --canrate string   CAN rate in kbit/s, shorts: pbus = 500 (default), ibus = 47.619, t5 = 615.384 (default "500")
   -d, --debug            debug mode
   -p, --port string      com-port, * = print available (default "*")
 ```
 
 ### SEE ALSO
 
-* [t7](t7.md)	 - T7 swish army tool
-* [t7 can monitor](t7_can_monitor.md)	 - Monitor the CANbus for frames
+* [cantool t5](cantool_t5.md)	 - Trionic 5 ECU related commands
 
