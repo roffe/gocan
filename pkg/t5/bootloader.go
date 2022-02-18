@@ -117,9 +117,8 @@ func (t *Client) UploadBootLoader(ctx context.Context) error {
 			framecount := int(1 + (rec.Length-3)/7)
 			seq := byte(0x00)
 			for frame := 0; frame < framecount; frame++ {
-				payload := make([]byte, 8)
-				payload[0] = seq
 				bs := 0
+				payload := []byte{seq, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
 				for i := 1; i < 8; i++ {
 					b, err := r.ReadByte()
 					if err != nil {

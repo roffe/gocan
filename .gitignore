@@ -1,5 +1,7 @@
 *.bin
 *.md5
+*.ram
+*.RAM
 tmp
 tmp/*
 dump

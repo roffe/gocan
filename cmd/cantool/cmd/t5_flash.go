@@ -26,6 +26,10 @@ var t5flashCmd = &cobra.Command{
 			return err
 		}
 
+		if err := tr.PrintECUInfo(ctx); err != nil {
+			return err
+		}
+
 		ecutype, err := tr.DetermineECU(ctx)
 		if err != nil {
 			return err
