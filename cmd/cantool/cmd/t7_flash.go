@@ -35,7 +35,7 @@ var flashCmd = &cobra.Command{
 		log.Printf("loaded %d bytes from %s\n", n, filepath.Base(filename))
 
 		log.Println("\nECU Info:")
-		if err := tr.Info(ctx); err != nil {
+		if err := tr.PrintECUInfo(ctx); err != nil {
 			log.Println("/!\\", err)
 			return err
 		}

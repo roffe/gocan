@@ -25,10 +25,10 @@ var readCMD = &cobra.Command{
 
 		tr := t7.New(c)
 		log.Println("\nECU Info:")
-		if err := tr.Info(ctx); err != nil {
-			log.Println("/!\\", err)
+		if err := tr.PrintECUInfo(ctx); err != nil {
 			return err
 		}
+
 		log.Println("Continue?")
 		confirm := yesNo()
 		if !confirm {

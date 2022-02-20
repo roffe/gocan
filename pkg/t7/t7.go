@@ -36,33 +36,59 @@ func (t *Client) Ack(val byte, opts ...model.FrameOpt) {
 	t.c.SendFrame(0x266, ack, opts...)
 }
 
+type T7Header struct {
+	Desc string
+	ID   uint16
+}
+
+type T7HeaderResult struct {
+	T7Header
+	Value string
+}
+
+func (t *T7HeaderResult) String() string {
+	return t.Desc + " " + t.Value
+}
+
+var T7Headers = []T7Header{
+	{"VIN:", 0x90},
+	{"Box HW part number:", 0x91},
+	{"Immo Code:", 0x92},
+	{"Software Saab part number:", 0x94},
+	{"ECU Software version:", 0x95},
+	{"Engine type:", 0x97},
+	{"Tester info:", 0x98},
+	{"Software date:", 0x99},
+}
+
 // Print out some Trionic7 info
-func (t *Client) Info(ctx context.Context) error {
+func (t *Client) Info(ctx context.Context) ([]T7HeaderResult, error) {
 	if err := t.DataInitialization(ctx); err != nil {
+		return nil, err
+	}
+	var out []T7HeaderResult
+	for _, d := range T7Headers {
+		h, err := t.GetHeader(ctx, byte(d.ID))
+		if err != nil {
+			return nil, fmt.Errorf("info failed: %v", err)
+		}
+		a := T7HeaderResult{Value: h}
+		a.Desc = d.Desc
+		a.ID = d.ID
+		out = append(out, a)
+	}
+	time.Sleep(30 * time.Millisecond)
+	return out, nil
+}
+
+func (t *Client) PrintECUInfo(ctx context.Context) error {
+	res, err := t.Info(ctx)
+	if err != nil {
 		return err
 	}
-	data := []struct {
-		name string
-		id   uint16
-	}{
-		{"VIN:", 0x90},
-		{"Box HW part number:", 0x91},
-		{"Immo Code:", 0x92},
-		{"Software Saab part number:", 0x94},
-		{"ECU Software version:", 0x95},
-		{"Engine type:", 0x97},
-		{"Tester info:", 0x98},
-		{"Software date:", 0x99},
+	for _, r := range res {
+		log.Println(r.Desc, r.Value)
 	}
-
-	for _, d := range data {
-		h, err := t.GetHeader(ctx, byte(d.id))
-		if err != nil {
-			return fmt.Errorf("info failed: %v", err)
-		}
-		log.Println(d.name, h)
-	}
-	time.Sleep(50 * time.Millisecond)
 	return nil
 }
 

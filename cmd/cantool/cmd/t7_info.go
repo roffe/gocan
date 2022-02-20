@@ -25,7 +25,7 @@ var infoCmd = &cobra.Command{
 		defer c.Close()
 
 		tr := t7.New(c)
-		if err := tr.Info(ctx); err != nil {
+		if err := tr.PrintECUInfo(ctx); err != nil {
 			return err
 		}
 
