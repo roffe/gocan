@@ -41,3 +41,11 @@ func (t *Client) ResetECU(ctx context.Context) error {
 func (t *Client) DumpECU(ctx context.Context) ([]byte, error) {
 	return nil, nil
 }
+
+func (t *Client) FlashECU(ctx context.Context, bin []byte) error {
+	return nil
+}
+
+func (t *Client) EraseECU(ctx context.Context) error {
+	return nil
+}

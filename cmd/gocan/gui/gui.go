@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -86,7 +85,8 @@ func Run(ctx context.Context) {
 	}
 
 	mw.ecuList = widget.NewSelect([]string{"Trionic 5", "Trionic 7", "Trionic 8"}, func(s string) {
-		state.ecuType = ecu.Type(mw.ecuList.SelectedIndex())
+		state.ecuType = ecu.Type(mw.ecuList.SelectedIndex() + 1)
+		log.Println(state.ecuType.String())
 		switch state.ecuType {
 		case ecu.Trionic5:
 			state.canRate = t5.PBusRate
@@ -194,72 +194,6 @@ func speeds() []string {
 		out = append(out, strconv.Itoa(ll))
 	}
 	return out
-}
-
-func ecuFlash() {
-	if !checkSelections() {
-		return
-	}
-	filename, err := sdialog.File().Filter("Select Bin", "bin").Load()
-	if err != nil {
-		output(err.Error())
-		return
-	}
-
-	f, err := os.ReadFile(filename)
-	if err != nil {
-		output(err.Error())
-		return
-	}
-
-	output("flash " + strconv.Itoa(len(f)) + ":" + filename)
-}
-
-func ecuDump() {
-	if !checkSelections() {
-		return
-	}
-	ok := sdialog.Message("%s", "Do you want to continue?").Title("Are you sure?").YesNo()
-	if ok {
-		output("dump: " + state.ecuType.String())
-	}
-}
-
-func ecuInfo() {
-	if !checkSelections() {
-		return
-	}
-
-	mw.progressBar.Show()
-	disableButtons()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	go func() {
-		defer enableButtons()
-		defer cancel()
-		c, err := initCAN(ctx)
-		if err != nil {
-			log.Println(err)
-			return
-		}
-		defer c.Close()
-		tr, err := ecu.New(c, state.ecuType)
-		if err != nil {
-			output(err.Error())
-			return
-		}
-
-		val, err := tr.Info(ctx)
-		if err != nil {
-			output(err.Error())
-			return
-		}
-		mw.progressBar.Value += 50
-		mw.progressBar.Refresh()
-		for _, v := range val {
-			output(v.String())
-		}
-		output("")
-	}()
 }
 
 func disableButtons() {

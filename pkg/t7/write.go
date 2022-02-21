@@ -58,7 +58,7 @@ var offsets = []struct {
 }
 
 // Flash the ECU
-func (t *Client) Flash(ctx context.Context, bin []byte) error {
+func (t *Client) FlashECU(ctx context.Context, bin []byte) error {
 	if err := t.DataInitialization(ctx); err != nil {
 		return err
 	}

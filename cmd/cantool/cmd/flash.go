@@ -1,18 +1,16 @@
 package cmd
 
 import (
+	"os"
+
 	"github.com/roffe/gocan/pkg/ecu"
 	"github.com/spf13/cobra"
 )
 
-func init() {
-	rootCmd.AddCommand(infoCmd)
-}
-
-var infoCmd = &cobra.Command{
-	Use:   "info",
-	Short: "print ECU info",
-	Args:  cobra.NoArgs,
+var flashCmd = &cobra.Command{
+	Use:   "flash <filename>",
+	Short: "flash binary to ECU",
+	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 		c, err := initCAN(ctx)
@@ -26,7 +24,20 @@ var infoCmd = &cobra.Command{
 			return err
 		}
 
+		bin, err := os.ReadFile(args[0])
+		if err != nil {
+			return err
+		}
+
 		if err := tr.PrintECUInfo(ctx); err != nil {
+			return err
+		}
+
+		if err := tr.EraseECU(ctx); err != nil {
+			return err
+		}
+
+		if err := tr.FlashECU(ctx, bin); err != nil {
 			return err
 		}
 
@@ -36,4 +47,8 @@ var infoCmd = &cobra.Command{
 
 		return nil
 	},
+}
+
+func init() {
+	rootCmd.AddCommand(flashCmd)
 }

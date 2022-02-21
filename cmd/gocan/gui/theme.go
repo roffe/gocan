@@ -73,13 +73,13 @@ func (gocanTheme) Size(s fyne.ThemeSizeName) float32 {
 	case theme.SizeNameInlineIcon:
 		return 20
 	case theme.SizeNamePadding:
-		return 1
+		return 3
 	case theme.SizeNameScrollBar:
 		return 16
 	case theme.SizeNameScrollBarSmall:
 		return 3
 	case theme.SizeNameSeparatorThickness:
-		return 1
+		return 0
 	case theme.SizeNameText:
 		return 14
 	case theme.SizeNameInputBorder:

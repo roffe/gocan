@@ -9,8 +9,14 @@ import (
 	"github.com/roffe/gocan/pkg/bar"
 )
 
-func (t *Client) FlashECU(ctx context.Context, ecutype ECUType, bin []byte) error {
+func (t *Client) FlashECU(ctx context.Context, bin []byte) error {
 	var bytesRead uint32
+
+	ecutype, err := t.DetermineECU(ctx)
+	if err != nil {
+		return err
+	}
+
 	start := getstartAddress(ecutype)
 
 	bar := bar.New(len(bin), "flashing ECU")

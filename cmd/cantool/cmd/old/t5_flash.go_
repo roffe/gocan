@@ -30,16 +30,11 @@ var t5flashCmd = &cobra.Command{
 			return err
 		}
 
-		ecutype, err := tr.DetermineECU(ctx)
-		if err != nil {
-			return err
-		}
-
 		if err := tr.EraseECU(ctx); err != nil {
 			return err
 		}
 
-		if err := tr.FlashECU(ctx, ecutype, bin); err != nil {
+		if err := tr.FlashECU(ctx, bin); err != nil {
 			return err
 		}
 

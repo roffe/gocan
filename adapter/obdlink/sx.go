@@ -177,7 +177,11 @@ func (cu *SX) sendManager(ctx context.Context) {
 					out = fmt.Sprintf("STPX h:%03X,d:%X,r:0\r", v.Identifier(), v.Data())
 					break
 				}
-				out = fmt.Sprintf("STPX h:%03X,d:%X,r:1\r", v.Identifier(), v.Data())
+				if v.GetTimeout() != 0 {
+					out = fmt.Sprintf("STPX h:%03X,d:%X,t:%d,r:1\r", v.Identifier(), v.Data(), v.GetTimeout().Milliseconds())
+				} else {
+					out = fmt.Sprintf("STPX h:%03X,d:%X,r:1\r", v.Identifier(), v.Data())
+				}
 			}
 			//log.Println(out)
 			_, err := cu.port.Write([]byte(out))

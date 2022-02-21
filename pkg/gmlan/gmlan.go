@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/roffe/gocan"
+	"github.com/roffe/gocan/pkg/model"
 )
 
 type Client struct {
@@ -42,9 +43,11 @@ func (cl *Client) WriteDataByIdentifier(ctx context.Context, canID uint32, ident
 	}
 	payload := []byte{0x10, byte(len(data) + 2), 0x3B, identifier}
 	payload = append(payload, firstPart...)
-	cl.c.SendFrame(canID, payload)
-	log.Printf("%X\n", payload)
-	resp, err := cl.c.Poll(ctx, 100*time.Millisecond, canID+0x400)
+	//cl.c.SendFrame(canID, payload)
+	//log.Printf("%X\n", payload)
+	//resp, err := cl.c.Poll(ctx, 100*time.Millisecond, canID+0x400)
+	frame := model.NewFrame(canID, payload, model.ResponseRequired)
+	resp, err := cl.c.SendAndPoll(ctx, frame, 150*time.Millisecond, canID+0x400)
 	if err != nil {
 		return err
 	}
@@ -93,11 +96,12 @@ func (cl *Client) ReadDataByIdentifier(ctx context.Context, canID uint32, identi
 	}
 	d := resp.Data()
 	if d[3] == 0x78 {
-		resp, err = cl.c.Poll(ctx, 150*time.Millisecond, canID+0x400)
+		resp2, err := cl.c.Poll(ctx, 150*time.Millisecond, canID+0x400)
 		if err != nil {
 			return nil, err
 		}
-		out.Write(d[4:])
+		d2 := resp2.Data()
+		out.Write(d2[4:])
 	} else {
 		out.Write(d[4:])
 	}

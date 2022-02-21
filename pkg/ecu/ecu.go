@@ -25,6 +25,8 @@ type Client interface {
 	PrintECUInfo(context.Context) error
 	ResetECU(context.Context) error
 	DumpECU(context.Context) ([]byte, error)
+	FlashECU(context.Context, []byte) error
+	EraseECU(context.Context) error
 }
 
 func TypeFromString(s string) Type {

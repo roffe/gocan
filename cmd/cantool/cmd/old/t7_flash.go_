@@ -49,12 +49,12 @@ var t7flashCmd = &cobra.Command{
 		}
 
 		if erase {
-			if err := tr.Erase(ctx); err != nil {
+			if err := tr.EraseECU(ctx); err != nil {
 				return err
 			}
 		}
 
-		if err := tr.Flash(ctx, bin); err != nil {
+		if err := tr.FlashECU(ctx, bin); err != nil {
 			return err
 		}
 		return nil

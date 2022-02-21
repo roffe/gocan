@@ -166,12 +166,12 @@ func calcAcceptanceFilters(idList ...uint32) (string, string) {
 		mask = ^uint32(0)
 	} else {
 		for _, canID := range idList {
-			if canID == 0x00 {
-				log.Println("Found illegal id: ", canID)
-				code = 0
-				mask = 0
-				break
-			}
+			//if canID == 0x00 {
+			//	log.Println("Found illegal id: ", canID)
+			//	code = 0
+			//	mask = 0
+			//	break
+			//}
 			code &= (canID & 0x7FF) << 5
 			mask |= (canID & 0x7FF) << 5
 		}

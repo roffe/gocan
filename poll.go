@@ -34,6 +34,7 @@ func waitForFrame(ctx context.Context, timeout time.Duration, p *Poll, identifie
 }
 
 func (c *Client) SendAndPoll(ctx context.Context, frame *model.Frame, timeout time.Duration, identifiers ...uint32) (model.CANFrame, error) {
+	frame.SetTimeout(timeout)
 	p := newPoller(OneOff, 1, identifiers...)
 	c.hub.register <- p
 	defer func() {

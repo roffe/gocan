@@ -11,7 +11,7 @@ import (
 	"github.com/schollz/progressbar/v3"
 )
 
-func (t *Client) Erase(ctx context.Context) error {
+func (t *Client) EraseECU(ctx context.Context) error {
 	ok, err := t.KnockKnock(ctx)
 	if err != nil || !ok {
 		return fmt.Errorf("failed to autenticate: %v", err)

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/fatih/color"
 )
@@ -13,6 +14,7 @@ type Frame struct {
 	len        int
 	data       []byte
 	frameType  CANFrameType
+	timeout    time.Duration
 }
 
 func NewFrame(identifier uint32, data []byte, frameType CANFrameType) *Frame {
@@ -38,6 +40,14 @@ func (f *Frame) Data() []byte {
 
 func (f *Frame) Type() CANFrameType {
 	return f.frameType
+}
+
+func (f *Frame) SetTimeout(t time.Duration) {
+	f.timeout = t
+}
+
+func (f *Frame) GetTimeout() time.Duration {
+	return f.timeout
 }
 
 var (
