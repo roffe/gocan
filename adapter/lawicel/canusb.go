@@ -126,7 +126,6 @@ func (cu *Canusb) SetCANrate(rate float64) error {
 }
 
 func (cu *Canusb) SetCANfilter(ids ...uint32) {
-	log.Println(ids)
 	cu.canCode, cu.canMask = calcAcceptanceFilters(ids...)
 }
 

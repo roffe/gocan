@@ -1,38 +1,36 @@
 package cmd
 
 import (
-	"context"
-	"time"
-
-	"github.com/roffe/gocan/pkg/t7"
+	"github.com/roffe/gocan/pkg/ecu"
 	"github.com/spf13/cobra"
 )
 
-// ecuCmd represents the ecu command
+func init() {
+	rootCmd.AddCommand(infoCmd)
+}
+
 var infoCmd = &cobra.Command{
 	Use:   "info",
 	Short: "print ECU info",
-	Long:  `Connect to the ECU over CAN and print the info from it`,
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx, cancel := context.WithTimeout(cmd.Context(), 15*time.Second)
-		defer cancel()
-
+		ctx := cmd.Context()
 		c, err := initCAN(ctx)
 		if err != nil {
 			return err
 		}
 		defer c.Close()
 
-		tr := t7.New(c)
+		tr, err := ecu.New(c, getECUType())
+		if err != nil {
+			return err
+		}
 		if err := tr.PrintECUInfo(ctx); err != nil {
 			return err
 		}
-
+		if err := tr.ResetECU(ctx); err != nil {
+			return err
+		}
 		return nil
 	},
-}
-
-func init() {
-	t7Cmd.AddCommand(infoCmd)
 }

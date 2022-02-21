@@ -1,15 +1,20 @@
 package cmd
 
 import (
+	"log"
 	"os"
 
-	"github.com/roffe/gocan/pkg/t5"
+	"github.com/roffe/gocan/pkg/ecu"
 	"github.com/spf13/cobra"
 )
 
-var t5flashCmd = &cobra.Command{
-	Use:   "flash <filename>",
-	Short: "flash binary to ECU",
+func init() {
+	rootCmd.AddCommand(dumpCmd)
+}
+
+var dumpCmd = &cobra.Command{
+	Use:   "dump <file>",
+	Short: "dump ECU to file",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
@@ -19,9 +24,7 @@ var t5flashCmd = &cobra.Command{
 		}
 		defer c.Close()
 
-		tr := t5.New(c)
-
-		bin, err := os.ReadFile(args[0])
+		tr, err := ecu.New(c, getECUType())
 		if err != nil {
 			return err
 		}
@@ -30,17 +33,13 @@ var t5flashCmd = &cobra.Command{
 			return err
 		}
 
-		ecutype, err := tr.DetermineECU(ctx)
+		bin, err := tr.DumpECU(ctx)
 		if err != nil {
 			return err
 		}
 
-		if err := tr.EraseECU(ctx); err != nil {
-			return err
-		}
-
-		if err := tr.FlashECU(ctx, ecutype, bin); err != nil {
-			return err
+		if err := os.WriteFile(args[0], bin, 0644); err != nil {
+			log.Printf("failed to write dump file: %v", err)
 		}
 
 		if err := tr.ResetECU(ctx); err != nil {
@@ -49,8 +48,4 @@ var t5flashCmd = &cobra.Command{
 
 		return nil
 	},
-}
-
-func init() {
-	t5Cmd.AddCommand(t5flashCmd)
 }

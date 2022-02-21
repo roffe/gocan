@@ -13,7 +13,7 @@ var t5toyCmd = &cobra.Command{
 	Short: "Trionic 5 toy",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		c, err := initCAN(ctx, 0xC)
+		c, err := initCAN(ctx)
 		if err != nil {
 			return err
 		}

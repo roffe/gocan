@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 	"time"
 
 	"github.com/avast/retry-go"
@@ -14,24 +13,16 @@ import (
 	"github.com/schollz/progressbar/v3"
 )
 
-func (t *Client) ReadECU(ctx context.Context, filename string) error {
+func (t *Client) DumpECU(ctx context.Context) ([]byte, error) {
 	ok, err := t.KnockKnock(ctx)
 	if err != nil || !ok {
-		return fmt.Errorf("failed to authenticate: %v", err)
+		return nil, fmt.Errorf("failed to authenticate: %v", err)
 	}
-	b, err := t.readECU(ctx, 0, 0x80000)
+	bin, err := t.readECU(ctx, 0, 0x80000)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	f, err := os.Create(filename)
-	if err != nil {
-		return fmt.Errorf("failed to create file: %v", err)
-	}
-	defer f.Close()
-	if _, err := f.Write(b); err != nil {
-		return err
-	}
-	return nil
+	return bin, nil
 }
 
 func (t *Client) readECU(ctx context.Context, addr, length int) ([]byte, error) {

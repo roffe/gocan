@@ -16,7 +16,3 @@ type Adapter interface {
 	Send(model.CANFrame) error
 	Close() error
 }
-
-type Trionic interface {
-	Info(context.Context) ([]model.HeaderResult, error)
-}

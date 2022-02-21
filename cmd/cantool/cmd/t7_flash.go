@@ -11,7 +11,7 @@ import (
 )
 
 // ecuCmd represents the ecu command
-var flashCmd = &cobra.Command{
+var t7flashCmd = &cobra.Command{
 	Use:   "flash <filename>",
 	Short: "flash binary to ecu",
 	Args:  cobra.ExactArgs(1),
@@ -62,5 +62,5 @@ var flashCmd = &cobra.Command{
 }
 
 func init() {
-	t7Cmd.AddCommand(flashCmd)
+	t7Cmd.AddCommand(t7flashCmd)
 }

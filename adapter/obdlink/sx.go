@@ -30,13 +30,17 @@ STPX h:240, d:40A1021A99000000
 
 */
 
+//var canIDS = []uint32{0x005, 0x006, 0x00c, 0x00}
+
 type SX struct {
-	port       serial.Port
-	portName   string
-	portRate   int
-	canRate    string
-	send, recv chan model.CANFrame
-	close      chan struct{}
+	port         serial.Port
+	portName     string
+	portRate     int
+	canrate      string
+	protocol     string
+	send, recv   chan model.CANFrame
+	close        chan struct{}
+	filter, mask string
 }
 
 func NewSX() *SX {
@@ -64,28 +68,36 @@ func (cu *SX) Init(ctx context.Context) error {
 	time.Sleep(1100 * time.Millisecond)
 	p.ResetInputBuffer()
 	var cmds = []string{
-		"ATE0", // turn off echo
-		"ATS0", // turn of spaces
-		"STIX", // show extended firmware info
-		"ATR0",
-		cu.canRate, // Set canbus protocol 33
-		"ATCAF0",   // Automatic formatting of
-		"ATH1",     // Headers on
-		"ATAT0",    // Set adaptive timing mode, Adaptive timing on, aggressive mode. This option may increase throughput on slower connections, at the expense of slightly increasing the risk of missing frames.
-		"ATCF200",  // code
-		"ATCM781",  // mask
+		"ATE0",      // turn off echo
+		"ATS0",      // turn of spaces
+		cu.protocol, // Set canbus protocol
+		"ATH1",      // Headers on
+		"ATAT2",     // Set adaptive timing mode, Adaptive timing on, aggressive mode. This option may increase throughput on slower connections, at the expense of slightly increasing the risk of missing frames.
+		"ATCAF0",    // Automatic formatting of
+		cu.canrate,  // Set CANrate
+		"ATAL",      // Allow long messages
+		"ATCFC0",    //Turn automatic CAN flow control off
+		"ATAR",      // Automatically set the receive address.
+		"ATCSM0",    //Turn CAN silent monitoring on
+		cu.filter,   // code
+		cu.mask,     // mask
 	}
 	p.SetReadTimeout(5 * time.Millisecond)
 	for _, c := range cmds {
-		_, err := p.Write([]byte(c + "\r"))
+		if c == "" {
+			continue
+		}
+		//log.Println(c)
+		out := []byte(c + "\r")
+		_, err := p.Write(out)
 		if err != nil {
 			log.Println(err)
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(150 * time.Millisecond)
 		p.ResetInputBuffer()
 	}
 
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(150 * time.Millisecond)
 	p.ResetInputBuffer()
 
 	go cu.recvManager(ctx)
@@ -107,7 +119,10 @@ func (cu *SX) SetPortRate(rate int) error {
 func (cu *SX) SetCANrate(rate float64) error {
 	switch rate {
 	case 500:
-		cu.canRate = "STP33"
+		cu.protocol = "STP33"
+	case 615.384:
+		cu.protocol = "STP33"
+		cu.canrate = "STCTR 8101FC"
 	default:
 		return fmt.Errorf("unhandled canbus rate: %f", rate)
 	}
@@ -115,7 +130,15 @@ func (cu *SX) SetCANrate(rate float64) error {
 }
 
 func (cu *SX) SetCANfilter(ids ...uint32) {
-	log.Println(ids)
+	var filt uint32 = 0xFFF
+	var mask uint32 = 0x000
+	for _, id := range ids {
+		filt &= id
+		mask |= id
+	}
+	mask = (^mask & 0x7FF) | filt
+	cu.filter = fmt.Sprintf("ATCF%03X", filt)
+	cu.mask = fmt.Sprintf("ATCM%03X", mask)
 }
 
 func (cu *SX) Chan() <-chan model.CANFrame {
@@ -151,11 +174,12 @@ func (cu *SX) sendManager(ctx context.Context) {
 				out = fmt.Sprintf("%s\r", v.String())
 			default:
 				if v.Type() == model.Outgoing {
-					out = fmt.Sprintf("STPX h:%X,d:%X,r:0\r", v.Identifier(), v.Data())
+					out = fmt.Sprintf("STPX h:%03X,d:%X,r:0\r", v.Identifier(), v.Data())
 					break
 				}
-				out = fmt.Sprintf("STPX h:%X,d:%X,r:1\r", v.Identifier(), v.Data())
+				out = fmt.Sprintf("STPX h:%03X,d:%X,r:1\r", v.Identifier(), v.Data())
 			}
+			//log.Println(out)
 			_, err := cu.port.Write([]byte(out))
 			if err != nil {
 				log.Printf("failed to write to com port: %q, %v\n", out, err)
@@ -212,6 +236,9 @@ func (cu *SX) recvManager(ctx context.Context) {
 					continue
 				}
 				switch buff.String() {
+				case "CAN ERROR":
+					log.Println("CAN ERROR")
+					buff.Reset()
 				case "STOPPED":
 					buff.Reset()
 				case "?":

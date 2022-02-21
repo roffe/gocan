@@ -2,7 +2,6 @@ package gui
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -16,9 +15,10 @@ import (
 	"fyne.io/fyne/v2/data/binding"
 	flayout "fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
-	"github.com/roffe/gocan"
+	"github.com/roffe/gocan/pkg/ecu"
 	"github.com/roffe/gocan/pkg/t5"
 	"github.com/roffe/gocan/pkg/t7"
+	"github.com/roffe/gocan/pkg/t8"
 	sdialog "github.com/sqweek/dialog"
 	"go.bug.st/serial/enumerator"
 )
@@ -41,7 +41,7 @@ type mainWindow struct {
 }
 
 type appState struct {
-	ecuType   string
+	ecuType   ecu.Type
 	canRate   float64
 	adapter   string
 	port      string
@@ -86,14 +86,14 @@ func Run(ctx context.Context) {
 	}
 
 	mw.ecuList = widget.NewSelect([]string{"Trionic 5", "Trionic 7", "Trionic 8"}, func(s string) {
-		state.ecuType = s
-		switch s {
-		case "Trionic 5":
+		state.ecuType = ecu.Type(mw.ecuList.SelectedIndex())
+		switch state.ecuType {
+		case ecu.Trionic5:
 			state.canRate = t5.PBusRate
-		case "Trionic 7":
+		case ecu.Trionic7:
 			state.canRate = t7.PBusRate
-		case "Trionic 8":
-			state.canRate = 500
+		case ecu.Trionic8:
+			state.canRate = t8.PBusRate
 		}
 
 	})
@@ -146,17 +146,6 @@ func Run(ctx context.Context) {
 	}()
 
 	w.ShowAndRun()
-}
-
-func getClient(c *gocan.Client, s string) (gocan.Trionic, error) {
-	switch strings.ToLower(s) {
-	case "trionic 5":
-		return t5.New(c), nil
-	case "trionic 7":
-		return t7.New(c), nil
-	default:
-		return nil, errors.New("unknown ECU")
-	}
 }
 
 func checkSelections() bool {
@@ -232,7 +221,7 @@ func ecuDump() {
 	}
 	ok := sdialog.Message("%s", "Do you want to continue?").Title("Are you sure?").YesNo()
 	if ok {
-		output("dump: " + state.ecuType)
+		output("dump: " + state.ecuType.String())
 	}
 }
 
@@ -253,7 +242,7 @@ func ecuInfo() {
 			return
 		}
 		defer c.Close()
-		tr, err := getClient(c, state.ecuType)
+		tr, err := ecu.New(c, state.ecuType)
 		if err != nil {
 			output(err.Error())
 			return

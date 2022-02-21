@@ -16,7 +16,7 @@ var t5sramDumpCmd = &cobra.Command{
 	Short: "dump SRAM",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		c, err := initCAN(ctx, 0xC)
+		c, err := initCAN(ctx)
 		if err != nil {
 			return err
 		}
