@@ -2,8 +2,12 @@
 *.md5
 *.ram
 *.RAM
+*.exe
+*.zip
 tmp
 tmp/*
 dump
 dump/*
+bin
+bin/*
 canlog.log

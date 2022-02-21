@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"log"
+
+	"github.com/roffe/gocan/pkg/model"
 )
 
 func (t *Client) DetermineECU(ctx context.Context) (ECUType, error) {
@@ -64,25 +66,49 @@ func (t *Client) DetermineECU(ctx context.Context) (ECUType, error) {
 	return UnknownECU, errors.New("!!! ERROR !!! this is a unknown ECU")
 }
 
-func (t *Client) PrintECUInfo(ctx context.Context) error {
+var T5Headers = []model.Header{
+	{Desc: "Part Number", ID: 0x01},
+	{Desc: "Software ID", ID: 0x02},
+	{Desc: "SW Version", ID: 0x03},
+	{Desc: "Engine Type", ID: 0x04},
+	{Desc: "IMMO Code", ID: 0x05},
+	{Desc: "Other Info", ID: 0x06},
+	{Desc: "ROM Start", ID: 0xFD},
+	{Desc: "Code End", ID: 0xFC},
+	{Desc: "ROM End", ID: 0xFE},
+}
+
+func (t *Client) Info(ctx context.Context) ([]model.HeaderResult, error) {
 	footer, err := t.GetECUFooter(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	var out []model.HeaderResult
+	for _, d := range T5Headers {
+		h := GetIdentifierFromFooter(footer, d.ID)
+		a := model.HeaderResult{Value: h}
+		a.Desc = d.Desc
+		a.ID = d.ID
+		out = append(out, a)
+	}
+	return out, nil
+}
+
+func (t *Client) PrintECUInfo(ctx context.Context) error {
+	res, err := t.Info(ctx)
 	if err != nil {
 		return err
 	}
-	log.Println("------------------------------")
+
+	log.Println("----- ECU info ---------------")
 	if err := t.printECUType(ctx); err != nil {
 		return err
 	}
-	log.Println("----- ECU info ---------------")
-	log.Println("Part Number:  " + GetIdentifierFromFooter(footer, Partnumber))
-	log.Println("Software ID:  " + GetIdentifierFromFooter(footer, SoftwareID))
-	log.Println("SW Version:   " + GetIdentifierFromFooter(footer, Dataname))
-	log.Println("Engine Type:  " + GetIdentifierFromFooter(footer, EngineType))
-	log.Println("IMMO Code:    " + GetIdentifierFromFooter(footer, ImmoCode))
-	log.Println("Other Info:   " + GetIdentifierFromFooter(footer, Unknown))
-	log.Println("ROM Start:    0x" + GetIdentifierFromFooter(footer, ROMoffset))
-	log.Println("Code End:     0x" + GetIdentifierFromFooter(footer, CodeEnd))
-	log.Println("ROM End:      0x" + GetIdentifierFromFooter(footer, ROMend))
+
+	for _, r := range res {
+		log.Println(r.Desc, r.Value)
+	}
 	log.Println("------------------------------")
 	return nil
 }

@@ -152,6 +152,8 @@ func (cu *Canusb) Send(frame model.CANFrame) error {
 }
 
 func (cu *Canusb) Close() error {
+	cu.close <- struct{}{}
+	time.Sleep(10 * time.Millisecond)
 	cu.port.Write([]byte("C\r"))
 	cu.port.Write([]byte("\r\r\r"))
 	return cu.port.Close()
@@ -182,7 +184,6 @@ func calcAcceptanceFilters(idList ...uint32) (string, string) {
 }
 
 func (cu *Canusb) sendManager(ctx context.Context) {
-outer:
 	for {
 		select {
 		case v := <-cu.send:
@@ -198,15 +199,15 @@ outer:
 				log.Printf("failed to write to com port: %q, %v\n", string(b), err)
 			}
 		case <-ctx.Done():
-			break outer
+			return
 		case <-cu.close:
-			break outer
+			return
 
 		}
 	}
-	if err := cu.Close(); err != nil {
-		log.Println("port close error: ", err)
-	}
+	//if err := cu.Close(); err != nil {
+	//	log.Println("port close error: ", err)
+	//}
 }
 
 func (cu *Canusb) recvManager(ctx context.Context) {
@@ -223,7 +224,8 @@ func (cu *Canusb) recvManager(ctx context.Context) {
 			if strings.Contains(err.Error(), "Port has been closed") && ctx.Err() != nil {
 				break
 			}
-			log.Fatalf("failed to read com port: %v", err)
+			log.Printf("failed to read com port: %v", err)
+			return
 		}
 		if n == 0 {
 			continue
@@ -243,12 +245,12 @@ func (cu *Canusb) recvManager(ctx context.Context) {
 				switch by[0] {
 				case 'F':
 					if err := decodeStatus(by); err != nil {
-						log.Fatal("CAN status error", err)
+						log.Println("CAN status error", err)
 					}
 				case 't':
 					f, err := cu.decodeFrame(by)
 					if err != nil {
-						log.Fatalf("failed to decode frame: %q\n", buff.String())
+						log.Printf("failed to decode frame: %q\n", buff.String())
 						continue
 					}
 					select {
@@ -263,9 +265,9 @@ func (cu *Canusb) recvManager(ctx context.Context) {
 				case 0x07:
 					//log.Println("received error response")
 				case 'V':
-					log.Println("H/W version", buff.String())
+					//log.Println("H/W version", buff.String())
 				case 'N':
-					log.Println("H/W serial ", buff.String())
+					//log.Println("H/W serial ", buff.String())
 				default:
 					log.Printf("COM>> %q\n", buff.String())
 				}

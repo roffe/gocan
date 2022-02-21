@@ -43,13 +43,13 @@ func (t *Client) GetECUFooter(ctx context.Context) ([]byte, error) {
 	return footer, nil
 }
 
-func GetIdentifierFromFooter(footer []byte, identifier ECUIdentifier) string {
+func GetIdentifierFromFooter(footer []byte, identifier byte) string {
 	var result strings.Builder
 	offset := len(footer) - 0x05 //  avoid the stored checksum
 	for offset > 0 {
 		length := int(footer[offset])
 		offset--
-		search := ECUIdentifier(footer[offset])
+		search := footer[offset]
 		offset--
 		if identifier == search {
 			for i := 0; i < length; i++ {

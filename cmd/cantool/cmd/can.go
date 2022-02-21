@@ -31,7 +31,7 @@ func initCAN(ctx context.Context, filters ...uint32) (*gocan.Client, error) {
 	switch strings.ToLower(adapter) {
 	case "canusb":
 		dev = lawicel.NewCanusb()
-	case "sx":
+	case "sx", "obdlinksx":
 		dev = obdlink.NewSX()
 	default:
 		return nil, fmt.Errorf("unknown adapter %q", adapter)

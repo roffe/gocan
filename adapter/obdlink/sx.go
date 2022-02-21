@@ -109,7 +109,7 @@ func (cu *SX) SetCANrate(rate float64) error {
 	case 500:
 		cu.canRate = "STP33"
 	default:
-		log.Fatalf("unhandled canbus rate: %f", rate)
+		return fmt.Errorf("unhandled canbus rate: %f", rate)
 	}
 	return nil
 }
@@ -141,7 +141,6 @@ type token struct{}
 var sendMutex = make(chan token, 1)
 
 func (cu *SX) sendManager(ctx context.Context) {
-outer:
 	for {
 		select {
 		case v := <-cu.send:
@@ -162,14 +161,14 @@ outer:
 				log.Printf("failed to write to com port: %q, %v\n", out, err)
 			}
 		case <-ctx.Done():
-			break outer
+			return
 		case <-cu.close:
-			break outer
+			return
 		}
 	}
-	if err := cu.Close(); err != nil {
-		log.Println("port close error: ", err)
-	}
+	//if err := cu.Close(); err != nil {
+	//	log.Println("port close error: ", err)
+	//}
 }
 
 func (cu *SX) recvManager(ctx context.Context) {
@@ -186,7 +185,8 @@ func (cu *SX) recvManager(ctx context.Context) {
 			if strings.Contains(err.Error(), "Port has been closed") && ctx.Err() != nil {
 				break
 			}
-			log.Fatalf("failed to read com port: %v", err)
+			log.Printf("failed to read com port: %v", err)
+			return
 		}
 		if n == 0 {
 			continue

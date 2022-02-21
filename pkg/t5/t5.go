@@ -28,18 +28,16 @@ const (
 	T55AST52
 )
 
-type ECUIdentifier byte
-
 const (
-	Partnumber ECUIdentifier = 0x01
-	SoftwareID ECUIdentifier = 0x02
-	Dataname   ECUIdentifier = 0x03 // SW Version
-	EngineType ECUIdentifier = 0x04
-	ImmoCode   ECUIdentifier = 0x05
-	Unknown    ECUIdentifier = 0x06
-	ROMend     ECUIdentifier = 0xFC // Always 07FFFF
-	ROMoffset  ECUIdentifier = 0xFD // T5.5 = 040000, T5.2 = 020000
-	CodeEnd    ECUIdentifier = 0xFE
+	Partnumber byte = 0x01
+	SoftwareID byte = 0x02
+	Dataname   byte = 0x03 // SW Version
+	EngineType byte = 0x04
+	ImmoCode   byte = 0x05
+	Unknown    byte = 0x06
+	ROMend     byte = 0xFC // Always 07FFFF
+	ROMoffset  byte = 0xFD // T5.5 = 040000, T5.2 = 020000
+	CodeEnd    byte = 0xFE
 )
 
 type Client struct {

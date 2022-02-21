@@ -26,6 +26,7 @@ const (
 	flagDebug    = "debug"
 	flagAdapter  = "adapter"
 	flagCANRate  = "canrate"
+	flagECUType  = "ecuType"
 )
 
 func init() {

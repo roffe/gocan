@@ -12,6 +12,8 @@ Most code is based on [TrionicCANFlasher](https://txsuite.org/)
 
 Thanks to [TrionicTuning](https://www.trionictuning.com/), [Chriva](https://www.trionictuning.com/forum/memberlist.php?mode=viewprofile&u=3231) and [Tomi Liljemark](https://pikkupossu.1g.fi/tomi/tomi.html)
 
+experimental GUI made with Fyne, **I do not recommend this framework unless you are exceptionelly depraved & masochistic and like to get insulted by their community members for asking questions**
+
 ## Example
 
 ```go
