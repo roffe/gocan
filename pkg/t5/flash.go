@@ -7,9 +7,10 @@ import (
 	"time"
 
 	"github.com/roffe/gocan/pkg/bar"
+	"github.com/roffe/gocan/pkg/model"
 )
 
-func (t *Client) FlashECU(ctx context.Context, bin []byte) error {
+func (t *Client) FlashECU(ctx context.Context, bin []byte, callback model.ProgressCallback) error {
 	var bytesRead uint32
 
 	ecutype, err := t.DetermineECU(ctx)
@@ -70,6 +71,9 @@ func (t *Client) FlashECU(ctx context.Context, bin []byte) error {
 		}
 		bytesRead += 0x80
 		bar.Set(int(bytesRead))
+		if callback != nil {
+			callback(float64(bytesRead))
+		}
 	}
 	bar.Finish()
 	fmt.Printf(" took: %s\n", time.Since(startTime).Round(time.Millisecond).String())

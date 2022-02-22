@@ -42,7 +42,7 @@ func (t *Client) DumpECU(ctx context.Context) ([]byte, error) {
 	return nil, nil
 }
 
-func (t *Client) FlashECU(ctx context.Context, bin []byte) error {
+func (t *Client) FlashECU(ctx context.Context, bin []byte, callback model.ProgressCallback) error {
 	return nil
 }
 

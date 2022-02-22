@@ -37,7 +37,7 @@ var flashCmd = &cobra.Command{
 			return err
 		}
 
-		if err := tr.FlashECU(ctx, bin); err != nil {
+		if err := tr.FlashECU(ctx, bin, nil); err != nil {
 			return err
 		}
 

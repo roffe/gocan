@@ -58,7 +58,7 @@ var offsets = []struct {
 }
 
 // Flash the ECU
-func (t *Client) FlashECU(ctx context.Context, bin []byte) error {
+func (t *Client) FlashECU(ctx context.Context, bin []byte, callback model.ProgressCallback) error {
 	if err := t.DataInitialization(ctx); err != nil {
 		return err
 	}
@@ -136,6 +136,9 @@ func (t *Client) FlashECU(ctx context.Context, bin []byte) error {
 			left -= writeBytes
 		}
 		bar.Set(binPos)
+		if callback != nil {
+			callback(float64(binPos))
+		}
 	}
 
 	t.c.SendFrame(0x240, []byte{0x40, 0xA1, 0x01, 0x37, 0x00, 0x00, 0x00, 0x00}) // end data transfer mode

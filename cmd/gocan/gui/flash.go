@@ -32,8 +32,10 @@ func ecuFlash() {
 		return
 	}
 
-	output("Writing " + strconv.Itoa(len(bin)) + " bytes" + filename)
+	output("Flashing " + strconv.Itoa(len(bin)) + " bytes")
+	mw.progressBar.SetValue(0)
 	mw.progressBar.Max = float64(len(bin))
+	mw.progressBar.Refresh()
 	mw.progressBar.Show()
 
 	go func() {
@@ -51,7 +53,11 @@ func ecuFlash() {
 			return
 		}
 
-		if err := tr.FlashECU(ctx, bin); err != nil {
+		cb := func(n float64) {
+			mw.progressBar.SetValue(n)
+		}
+
+		if err := tr.FlashECU(ctx, bin, cb); err != nil {
 			output(err.Error())
 			return
 		}
