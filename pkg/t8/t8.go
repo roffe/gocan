@@ -26,7 +26,7 @@ func New(c *gocan.Client) *Client {
 	return t
 }
 
-func (t *Client) Info(ctx context.Context) ([]model.HeaderResult, error) {
+func (t *Client) Info(ctx context.Context, callback model.ProgressCallback) ([]model.HeaderResult, error) {
 	return nil, nil
 }
 
@@ -34,11 +34,11 @@ func (t *Client) PrintECUInfo(ctx context.Context) error {
 	return nil
 }
 
-func (t *Client) ResetECU(ctx context.Context) error {
+func (t *Client) ResetECU(ctx context.Context, callback model.ProgressCallback) error {
 	return nil
 }
 
-func (t *Client) DumpECU(ctx context.Context) ([]byte, error) {
+func (t *Client) DumpECU(ctx context.Context, callback model.ProgressCallback) ([]byte, error) {
 	return nil, nil
 }
 
@@ -46,6 +46,6 @@ func (t *Client) FlashECU(ctx context.Context, bin []byte, callback model.Progre
 	return nil
 }
 
-func (t *Client) EraseECU(ctx context.Context) error {
+func (t *Client) EraseECU(ctx context.Context, callback model.ProgressCallback) error {
 	return nil
 }

@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/roffe/gocan/pkg/bar"
 	"github.com/roffe/gocan/pkg/model"
 	"github.com/roffe/gocan/pkg/srec"
 )
@@ -78,22 +77,21 @@ S10A5764000000000000003A
 S10457EB00B9
 S9035000AC`
 
-func (t *Client) UploadBootLoader(ctx context.Context) error {
+func (t *Client) UploadBootLoader(ctx context.Context, callback model.ProgressCallback) error {
 	start := time.Now()
 
-	bar := bar.New(1884, "uploading bootloader")
-	defer func() {
-		if !bar.IsFinished() {
-			bar.Finish()
-			fmt.Println()
-		}
-	}()
+	if callback != nil {
+		callback(-float64(1884))
+		callback("Uploading bootloader")
+	}
 
 	sr := srec.NewSrec()
 	r := strings.NewReader(MyBooty)
 	if err := sr.Parse(r); err != nil {
 		return err
 	}
+	var progress float64 = 0
+
 	for _, rec := range sr.Records {
 		ccrc, err := rec.CalcChecksum()
 		if err != nil {
@@ -117,7 +115,6 @@ func (t *Client) UploadBootLoader(ctx context.Context) error {
 			framecount := int(1 + (rec.Length-3)/7)
 			seq := byte(0x00)
 			for frame := 0; frame < framecount; frame++ {
-				bs := 0
 				payload := []byte{seq, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
 				for i := 1; i < 8; i++ {
 					b, err := r.ReadByte()
@@ -127,8 +124,8 @@ func (t *Client) UploadBootLoader(ctx context.Context) error {
 						}
 						return err
 					}
-					bs++
 					payload[i] = b
+					progress++
 				}
 
 				resp, err := t.c.SendAndPoll(
@@ -142,8 +139,10 @@ func (t *Client) UploadBootLoader(ctx context.Context) error {
 				}
 				data := resp.Data()
 				if data[0] == 0x1C && data[1] == 0x01 && data[2] == 0x00 {
-					bar.Finish()
-					fmt.Println(" bootloader already running")
+					if callback != nil {
+						callback("Bootloader already running")
+					}
+					fmt.Println("bootloader already running")
 					t.bootloaded = true
 					return nil
 				}
@@ -151,7 +150,9 @@ func (t *Client) UploadBootLoader(ctx context.Context) error {
 				if resp.Len() != 8 || data[0] != byte(frame*7) || data[1] != 0x00 {
 					return fmt.Errorf("failed to upload bootloader: %X", data)
 				}
-				bar.Add(bs)
+				if callback != nil {
+					callback(progress)
+				}
 				seq += 7
 			}
 
@@ -161,8 +162,10 @@ func (t *Client) UploadBootLoader(ctx context.Context) error {
 			}
 		}
 	}
-	bar.Finish()
-	fmt.Printf(" took: %s\n", time.Since(start).Round(time.Millisecond).String())
+	//fmt.Printf("took: %s\n", time.Since(start).Round(time.Millisecond).String())
+	if callback != nil {
+		callback(fmt.Sprintf("Done, took: %s\n", time.Since(start).Round(time.Millisecond).String()))
+	}
 	t.bootloaded = true
 	return nil
 }

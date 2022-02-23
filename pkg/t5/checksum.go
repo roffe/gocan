@@ -14,7 +14,7 @@ import (
 
 func (t *Client) GetECUChecksum(ctx context.Context) ([]byte, error) {
 	if !t.bootloaded {
-		if err := t.UploadBootLoader(ctx); err != nil {
+		if err := t.UploadBootLoader(ctx, nil); err != nil {
 			return nil, err
 		}
 	}

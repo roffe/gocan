@@ -3,19 +3,22 @@ package t5
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/roffe/gocan/pkg/model"
 )
 
-func (t *Client) EraseECU(ctx context.Context) error {
+func (t *Client) EraseECU(ctx context.Context, callback model.ProgressCallback) error {
+	startTime := time.Now()
 	if !t.bootloaded {
-		if err := t.UploadBootLoader(ctx); err != nil {
+		if err := t.UploadBootLoader(ctx, callback); err != nil {
 			return err
 		}
 	}
-	log.Println("Erasing FLASH...")
+	if callback != nil {
+		callback(-float64(100))
+		callback("Erasing FLASH...")
+	}
 	cmd := []byte{0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
 	frame := model.NewFrame(0x005, cmd, model.ResponseRequired)
 	resp, err := t.c.SendAndPoll(ctx, frame, 20*time.Second, 0xC)
@@ -24,7 +27,10 @@ func (t *Client) EraseECU(ctx context.Context) error {
 	}
 	data := resp.Data()
 	if data[0] == 0xC0 && data[1] == 0x00 {
-		log.Println("FLASH erased...")
+		if callback != nil {
+			callback(fmt.Sprintf("FLASH erased, took: %s\n", time.Since(startTime).Round(time.Millisecond).String()))
+			callback(float64(100))
+		}
 		return nil
 	}
 

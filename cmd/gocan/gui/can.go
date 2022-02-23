@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/roffe/gocan"
 	"github.com/roffe/gocan/adapter/lawicel"
@@ -12,6 +13,8 @@ import (
 )
 
 func initCAN(ctx context.Context, filters ...uint32) (*gocan.Client, error) {
+	startTime := time.Now()
+	output("Init adapter")
 
 	var dev gocan.Adapter
 	switch strings.ToLower(state.adapter) {
@@ -47,6 +50,8 @@ func initCAN(ctx context.Context, filters ...uint32) (*gocan.Client, error) {
 	if err := dev.Init(ctx); err != nil {
 		return nil, err
 	}
+
+	output(fmt.Sprintf("Done, took: %s\n", time.Since(startTime).Round(time.Millisecond).String()))
 
 	return gocan.New(ctx, dev, filters)
 }

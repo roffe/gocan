@@ -42,9 +42,11 @@ func initCAN(ctx context.Context) (*gocan.Client, error) {
 	if err := dev.SetPort(port); err != nil {
 		return nil, err
 	}
+
 	if err := dev.SetPortRate(baudrate); err != nil {
 		return nil, err
 	}
+
 	if err := dev.SetCANrate(canrate); err != nil {
 		return nil, err
 	}

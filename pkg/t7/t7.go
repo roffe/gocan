@@ -37,18 +37,18 @@ func (t *Client) Ack(val byte, opts ...model.FrameOpt) {
 }
 
 var T7Headers = []model.Header{
-	{Desc: "VIN:", ID: 0x90},
-	{Desc: "Box HW part number:", ID: 0x91},
-	{Desc: "Immo Code:", ID: 0x92},
-	{Desc: "Software Saab part number:", ID: 0x94},
+	{Desc: "VIN", ID: 0x90},
+	{Desc: "Box HW part number", ID: 0x91},
+	{Desc: "Immo Code", ID: 0x92},
+	{Desc: "Software Saab part number", ID: 0x94},
 	{Desc: "ECU Software version:", ID: 0x95},
-	{Desc: "Engine type:", ID: 0x97},
-	{Desc: "Tester info:", ID: 0x98},
-	{Desc: "Software date:", ID: 0x99},
+	{Desc: "Engine type", ID: 0x97},
+	{Desc: "Tester info", ID: 0x98},
+	{Desc: "Software date", ID: 0x99},
 }
 
 // Print out some Trionic7 info
-func (t *Client) Info(ctx context.Context) ([]model.HeaderResult, error) {
+func (t *Client) Info(ctx context.Context, callback model.ProgressCallback) ([]model.HeaderResult, error) {
 	if err := t.DataInitialization(ctx); err != nil {
 		return nil, err
 	}
@@ -68,7 +68,7 @@ func (t *Client) Info(ctx context.Context) ([]model.HeaderResult, error) {
 }
 
 func (t *Client) PrintECUInfo(ctx context.Context) error {
-	res, err := t.Info(ctx)
+	res, err := t.Info(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -170,23 +170,29 @@ func (t *Client) GetHeader(ctx context.Context, id byte) (string, error) {
 	return string(answer), nil
 }
 
-func (t *Client) KnockKnock(ctx context.Context) (bool, error) {
+func (t *Client) KnockKnock(ctx context.Context, callback model.ProgressCallback) (bool, error) {
 	if err := t.DataInitialization(ctx); err != nil {
 		return false, err
 	}
 	for i := 0; i < 3; i++ {
 		ok, err := t.letMeIn(ctx, i)
 		if err != nil {
-			fmt.Printf("failed to auth %d: %v\n", i, err)
+			if callback != nil {
+				callback(fmt.Sprintf("Failed to obtain security access %d: %v\n", i, err))
+			}
 			continue
 		}
 		if ok {
-			log.Printf("authentication successfull with method %d 🥳🎉", i)
+			if callback != nil {
+				callback(fmt.Sprintf("Obtained security access %d", i))
+			}
 			return true, nil
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	log.Println("/!\\ authentication failure 😞👎🏻")
+	if callback != nil {
+		callback("/!\\ Failed to obtain security access")
+	}
 	return false, nil
 }
 

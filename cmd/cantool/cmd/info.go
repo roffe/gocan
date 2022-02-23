@@ -30,7 +30,7 @@ var infoCmd = &cobra.Command{
 			return err
 		}
 
-		if err := tr.ResetECU(ctx); err != nil {
+		if err := tr.ResetECU(ctx, nil); err != nil {
 			return err
 		}
 

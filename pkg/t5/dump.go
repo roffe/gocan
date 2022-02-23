@@ -7,12 +7,12 @@ import (
 	"log"
 	"time"
 
-	"github.com/roffe/gocan/pkg/bar"
+	"github.com/roffe/gocan/pkg/model"
 )
 
-func (t *Client) DumpECU(ctx context.Context) ([]byte, error) {
+func (t *Client) DumpECU(ctx context.Context, callback model.ProgressCallback) ([]byte, error) {
 	if !t.bootloaded {
-		if err := t.UploadBootLoader(ctx); err != nil {
+		if err := t.UploadBootLoader(ctx, callback); err != nil {
 			return nil, err
 		}
 	}
@@ -24,17 +24,15 @@ func (t *Client) DumpECU(ctx context.Context) ([]byte, error) {
 
 	start := getstartAddress(ecutype)
 	length := 0x80000 - start
+
+	if callback != nil {
+		callback(-float64(length))
+		callback("Dumping ECU")
+	}
+
 	buffer := make([]byte, length)
-
 	startTime := time.Now()
-
-	bar := bar.New(int(length), "reading ECU")
-	defer func() {
-		if !bar.IsFinished() {
-			bar.Finish()
-			fmt.Println()
-		}
-	}()
+	progress := 0
 
 	address := start + 5
 	for i := 0; i < int(length/6); i++ {
@@ -44,9 +42,12 @@ func (t *Client) DumpECU(ctx context.Context) ([]byte, error) {
 		}
 		for j := 0; j < 6; j++ {
 			buffer[(i*6)+j] = b[j]
-			bar.Add(1)
+			progress++
 		}
 		address += 6
+		if callback != nil {
+			callback(float64(progress))
+		}
 	}
 
 	// Get the leftover bytes
@@ -57,12 +58,19 @@ func (t *Client) DumpECU(ctx context.Context) ([]byte, error) {
 		}
 		for j := (6 - (length % 6)); j < 6; j++ {
 			buffer[length-6+j] = b[j]
-			bar.Add(1)
+			progress++
+		}
+		if callback != nil {
+			callback(float64(progress))
 		}
 	}
 
-	bar.Finish()
-	fmt.Printf(" took: %s\n", time.Since(startTime).Round(time.Millisecond).String())
+	if callback != nil {
+		callback(float64(length))
+		callback(fmt.Sprintf("Done, took: %s\n", time.Since(startTime).Round(time.Millisecond).String()))
+	}
+
+	//fmt.Printf("took: %s\n", time.Since(startTime).Round(time.Millisecond).String())
 
 	checksum, err := t.GetECUChecksum(ctx)
 	if err != nil {

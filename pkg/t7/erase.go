@@ -8,11 +8,12 @@ import (
 	"time"
 
 	"github.com/k0kubun/go-ansi"
+	"github.com/roffe/gocan/pkg/model"
 	"github.com/schollz/progressbar/v3"
 )
 
-func (t *Client) EraseECU(ctx context.Context) error {
-	ok, err := t.KnockKnock(ctx)
+func (t *Client) EraseECU(ctx context.Context, callback model.ProgressCallback) error {
+	ok, err := t.KnockKnock(ctx, callback)
 	if err != nil || !ok {
 		return fmt.Errorf("failed to autenticate: %v", err)
 	}

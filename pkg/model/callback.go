@@ -1,3 +1,3 @@
 package model
 
-type ProgressCallback func(n float64)
+type ProgressCallback func(interface{})

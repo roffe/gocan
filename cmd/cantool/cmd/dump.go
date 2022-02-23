@@ -33,7 +33,7 @@ var dumpCmd = &cobra.Command{
 			return err
 		}
 
-		bin, err := tr.DumpECU(ctx)
+		bin, err := tr.DumpECU(ctx, nil)
 		if err != nil {
 			return err
 		}
@@ -42,7 +42,7 @@ var dumpCmd = &cobra.Command{
 			log.Printf("failed to write dump file: %v", err)
 		}
 
-		if err := tr.ResetECU(ctx); err != nil {
+		if err := tr.ResetECU(ctx, nil); err != nil {
 			return err
 		}
 

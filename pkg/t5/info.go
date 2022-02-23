@@ -8,12 +8,70 @@ import (
 	"github.com/roffe/gocan/pkg/model"
 )
 
-func (t *Client) DetermineECU(ctx context.Context) (ECUType, error) {
+func (t *Client) Info(ctx context.Context, callback model.ProgressCallback) ([]model.HeaderResult, error) {
 	if !t.bootloaded {
-		if err := t.UploadBootLoader(ctx); err != nil {
-			return UnknownECU, err
+		if err := t.UploadBootLoader(ctx, callback); err != nil {
+			return nil, err
 		}
 	}
+	footer, err := t.GetECUFooter(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	var out []model.HeaderResult
+	for _, d := range T5Headers {
+		h := GetIdentifierFromFooter(footer, d.ID)
+		a := model.HeaderResult{Value: h}
+		a.Desc = d.Desc
+		a.ID = d.ID
+		out = append(out, a)
+	}
+	return out, nil
+}
+
+func (t *Client) PrintECUInfo(ctx context.Context) error {
+	res, err := t.Info(ctx, nil)
+	if err != nil {
+		return err
+	}
+
+	log.Println("----- ECU info ---------------")
+	if err := t.printECUType(ctx); err != nil {
+		return err
+	}
+
+	for _, r := range res {
+		log.Println(r.Desc, r.Value)
+	}
+	log.Println("------------------------------")
+	return nil
+}
+
+func (t *Client) printECUType(ctx context.Context) error {
+	typ, err := t.DetermineECU(ctx)
+	if err != nil {
+		return err
+	}
+	switch typ {
+	case T52ECU:
+		log.Println("This is a Trionic 5.2 ECU with 128 kB of FLASH")
+	case T55AST52:
+		log.Println("This is a Trionic 5.5 ECU with a T5.2 BIN")
+	case T55ECU:
+		log.Println("This is a Trionic 5.5 ECU with 256 kB of FLASH")
+	default:
+		return errors.New("printECUType: unknown ECU")
+	}
+	return nil
+}
+
+func (t *Client) DetermineECU(ctx context.Context) (ECUType, error) {
+	//if !t.bootloaded {
+	//	if err := t.UploadBootLoader(ctx); err != nil {
+	//		return UnknownECU, err
+	//	}
+	//}
 
 	footer, err := t.GetECUFooter(ctx)
 	if err != nil {
@@ -76,57 +134,4 @@ var T5Headers = []model.Header{
 	{Desc: "ROM Start", ID: 0xFD},
 	{Desc: "Code End", ID: 0xFC},
 	{Desc: "ROM End", ID: 0xFE},
-}
-
-func (t *Client) Info(ctx context.Context) ([]model.HeaderResult, error) {
-	footer, err := t.GetECUFooter(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	var out []model.HeaderResult
-	for _, d := range T5Headers {
-		h := GetIdentifierFromFooter(footer, d.ID)
-		a := model.HeaderResult{Value: h}
-		a.Desc = d.Desc
-		a.ID = d.ID
-		out = append(out, a)
-	}
-	return out, nil
-}
-
-func (t *Client) PrintECUInfo(ctx context.Context) error {
-	res, err := t.Info(ctx)
-	if err != nil {
-		return err
-	}
-
-	log.Println("----- ECU info ---------------")
-	if err := t.printECUType(ctx); err != nil {
-		return err
-	}
-
-	for _, r := range res {
-		log.Println(r.Desc, r.Value)
-	}
-	log.Println("------------------------------")
-	return nil
-}
-
-func (t *Client) printECUType(ctx context.Context) error {
-	typ, err := t.DetermineECU(ctx)
-	if err != nil {
-		return err
-	}
-	switch typ {
-	case T52ECU:
-		log.Println("This is a Trionic 5.2 ECU with 128 kB of FLASH")
-	case T55AST52:
-		log.Println("This is a Trionic 5.5 ECU with a T5.2 BIN")
-	case T55ECU:
-		log.Println("This is a Trionic 5.5 ECU with 256 kB of FLASH")
-	default:
-		return errors.New("printECUType: unknown ECU")
-	}
-	return nil
 }

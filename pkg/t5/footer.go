@@ -10,9 +10,11 @@ import (
 var ecuFooter []byte
 
 func (t *Client) GetECUFooter(ctx context.Context) ([]byte, error) {
-	if !t.bootloaded {
-		t.UploadBootLoader(ctx)
-	}
+	//if !t.bootloaded {
+	//	if err := t.UploadBootLoader(ctx); err != nil {
+	//		return err
+	//	}
+	//}
 	if len(ecuFooter) > 0 {
 		return ecuFooter, nil
 	}

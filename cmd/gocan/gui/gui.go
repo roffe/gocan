@@ -12,7 +12,7 @@ import (
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/data/binding"
-	flayout "fyne.io/fyne/v2/layout"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 	"github.com/roffe/gocan/pkg/ecu"
 	"github.com/roffe/gocan/pkg/t5"
@@ -26,15 +26,16 @@ type mainWindow struct {
 	app    fyne.App
 	window fyne.Window
 
-	log      *widget.List
-	infoBTN  *widget.Button
-	dumpBTN  *widget.Button
-	flashBTN *widget.Button
+	log *widget.List
 
 	ecuList     *widget.Select
 	adapterList *widget.Select
 	portList    *widget.Select
 	speedList   *widget.Select
+
+	infoBTN  *widget.Button
+	dumpBTN  *widget.Button
+	flashBTN *widget.Button
 
 	progressBar *widget.ProgressBar
 }
@@ -48,9 +49,9 @@ type appState struct {
 }
 
 var (
-	mw      *mainWindow
-	logData []string
-	state   *appState
+	mw       *mainWindow
+	listData = binding.NewStringList()
+	state    *appState
 )
 
 func init() {
@@ -58,7 +59,7 @@ func init() {
 }
 
 func Run(ctx context.Context) {
-	a := app.New()
+	a := app.NewWithID("GoCANFlasher")
 	a.Settings().SetTheme(&gocanTheme{})
 
 	w := a.NewWindow("GoCANFlasher")
@@ -67,26 +68,36 @@ func Run(ctx context.Context) {
 	mw = &mainWindow{
 		app:    a,
 		window: w,
-		log: widget.NewList(
-			func() int {
-				return len(logData)
-			},
+
+		log: widget.NewListWithData(
+			listData,
 			func() fyne.CanvasObject {
-				return widget.NewLabel("template")
+				w := widget.NewLabel("")
+				w.TextStyle.Monospace = true
+				return w
 			},
-			func(i widget.ListItemID, o fyne.CanvasObject) {
-				o.(*widget.Label).SetText(logData[i])
+			func(item binding.DataItem, obj fyne.CanvasObject) {
+				i := item.(binding.String)
+				txt, err := i.Get()
+				if err != nil {
+					panic(err)
+				}
+				//obj.(*widget.Entry).SetText(txt)
+				obj.(*widget.Label).SetText(txt)
+				//obj.(*widget.RichText).ParseMarkdown(txt)
 			},
 		),
 
 		infoBTN:  widget.NewButton("Info", ecuInfo),
 		dumpBTN:  widget.NewButton("Dump", ecuDump),
 		flashBTN: widget.NewButton("Flash", ecuFlash),
+
+		progressBar: widget.NewProgressBar(),
 	}
 
 	mw.ecuList = widget.NewSelect([]string{"Trionic 5", "Trionic 7", "Trionic 8"}, func(s string) {
-		state.ecuType = ecu.Type(mw.ecuList.SelectedIndex() + 1)
-		log.Println(state.ecuType.String())
+		index := mw.ecuList.SelectedIndex()
+		state.ecuType = ecu.Type(index + 1)
 		switch state.ecuType {
 		case ecu.Trionic5:
 			state.canRate = t5.PBusRate
@@ -95,20 +106,28 @@ func Run(ctx context.Context) {
 		case ecu.Trionic8:
 			state.canRate = t8.PBusRate
 		}
+		a.Preferences().SetFloat("canrate", state.canRate)
+		a.Preferences().SetInt("ecu", index)
 
 	})
+
 	mw.adapterList = widget.NewSelect(adapters(), func(s string) {
 		state.adapter = s
+		a.Preferences().SetString("adapter", s)
 	})
+
 	mw.portList = widget.NewSelect(ports(), func(s string) {
 		state.port = s
+		a.Preferences().SetString("port", s)
 	})
+
 	mw.speedList = widget.NewSelect(speeds(), func(s string) {
 		speed, err := strconv.Atoi(s)
 		if err != nil {
 			output("failed to set port speed: " + err.Error())
 		}
 		state.portSpeed = speed
+		a.Preferences().SetString("portSpeed", s)
 	})
 
 	mw.ecuList.PlaceHolder = "Select ECU"
@@ -116,33 +135,45 @@ func Run(ctx context.Context) {
 	mw.portList.PlaceHolder = "Select Port"
 	mw.speedList.PlaceHolder = "Select Speed"
 
-	progress := binding.NewFloat()
-	mw.progressBar = widget.NewProgressBarWithData(progress)
-	mw.progressBar.Max = 100
-	mw.progressBar.Hide()
+	left := container.New(layout.NewMaxLayout(), mw.log)
 
-	left := container.New(flayout.NewMaxLayout(), mw.log)
-	widget.NewToolbar()
+	bus := widget.NewCheck("PBus", func(b bool) {
+		log.Printf("%t", b)
+	})
+	bus.Checked = true
+
 	right := container.NewVBox(
-		mw.infoBTN,
-		mw.dumpBTN,
-		mw.flashBTN,
-		widget.NewSeparator(),
+		widget.NewLabel(""),
 		mw.ecuList,
+		//bus,
 		mw.adapterList,
 		mw.portList,
 		mw.speedList,
-		widget.NewSeparator(),
-		mw.progressBar,
+
+		layout.NewSpacer(),
+		mw.infoBTN,
+		mw.dumpBTN,
+		mw.flashBTN,
 	)
 
 	split := container.NewHSplit(left, right)
-	split.Offset = 0.7
-	w.SetContent(split)
+	split.Offset = 0.8
+
+	view := container.NewVSplit(split, mw.progressBar)
+	view.Offset = 1
+
+	w.SetContent(view)
 
 	go func() {
 		<-ctx.Done()
 		w.Close()
+	}()
+
+	loadPreferences()
+
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		output("Done detecting ports")
 	}()
 
 	w.ShowAndRun()
@@ -150,11 +181,9 @@ func Run(ctx context.Context) {
 
 func checkSelections() bool {
 	var out strings.Builder
-
 	if mw.ecuList.SelectedIndex() < 0 {
 		out.WriteString("ECU type\n")
 	}
-
 	if mw.adapterList.SelectedIndex() < 0 {
 		out.WriteString("Adapter\n")
 	}
@@ -165,26 +194,33 @@ func checkSelections() bool {
 		out.WriteString("Speed\n")
 	}
 	if out.Len() > 0 {
-		sdialog.Message("Please set the following options:\n%s", out.String()).
-			Title("error").
-			Error()
+		sdialog.Message("Please set the following options:\n%s", out.String()).Title("error").Error()
 		return false
 	}
 	return true
 }
 
+func loadPreferences() {
+	state.canRate = mw.app.Preferences().FloatWithFallback("canrate", 500)
+	mw.ecuList.SetSelectedIndex(mw.app.Preferences().IntWithFallback("ecu", 0))
+	mw.adapterList.SetSelected(mw.app.Preferences().StringWithFallback("adapter", "Canusb"))
+	mw.portList.SetSelected(mw.app.Preferences().String("port"))
+	mw.speedList.SetSelected(mw.app.Preferences().StringWithFallback("portSpeed", "115200"))
+}
+
 func output(s string) {
-	text := "\n"
+	var text string
 	if s != "" {
 		text = fmt.Sprintf("%s - %s\n", time.Now().Format("15:04:05.000"), s)
 	}
-	logData = append(logData, text)
+	//logData = append(logData, text)
+	listData.Append(text)
 	mw.log.Refresh()
 	mw.log.ScrollToBottom()
 }
 
 func adapters() []string {
-	return []string{"CanUSB", "OBDLinkSX"}
+	return []string{"Canusb", "OBDLinkSX"}
 }
 
 func speeds() []string {
@@ -212,18 +248,18 @@ func ports() []string {
 	var portsList []string
 	ports, err := enumerator.GetDetailedPortsList()
 	if err != nil {
-		log.Fatal(err)
+		output(err.Error())
+		return []string{}
 	}
 	if len(ports) == 0 {
 		output("No serial ports found!")
-		return nil
+		return []string{}
 	}
 	for _, port := range ports {
 		output(fmt.Sprintf("Found port: %s", port.Name))
 		if port.IsUSB {
 			output(fmt.Sprintf("  USB ID     %s:%s", port.VID, port.PID))
 			output(fmt.Sprintf("  USB serial %s", port.SerialNumber))
-			output("")
 			portsList = append(portsList, port.Name)
 		}
 	}

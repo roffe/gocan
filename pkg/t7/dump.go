@@ -4,50 +4,42 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/avast/retry-go"
-	"github.com/k0kubun/go-ansi"
 	"github.com/roffe/gocan/pkg/model"
-	"github.com/schollz/progressbar/v3"
 )
 
-func (t *Client) DumpECU(ctx context.Context) ([]byte, error) {
-	ok, err := t.KnockKnock(ctx)
+func (t *Client) DumpECU(ctx context.Context, callback model.ProgressCallback) ([]byte, error) {
+	ok, err := t.KnockKnock(ctx, callback)
 	if err != nil || !ok {
 		return nil, fmt.Errorf("failed to authenticate: %v", err)
 	}
-	bin, err := t.readECU(ctx, 0, 0x80000)
-	if err != nil {
-		return nil, err
-	}
-	return bin, nil
-}
+	//	bin, err := t.readECU(ctx, 0, 0x80000)
+	//	if err != nil {
+	//		return nil, err
+	//	}
+	//	return bin, nil
+	//}
+	//
+	//func (t *Client) readECU(ctx context.Context, addr, length int) ([]byte, error) {
+	//
+	//addr := 0
 
-func (t *Client) readECU(ctx context.Context, addr, length int) ([]byte, error) {
+	length := 0x80000
+	if callback != nil {
+		callback(-float64(length))
+		callback("Dumping ECU")
+	}
+
 	start := time.Now()
 	var readPos int
 	out := bytes.NewBuffer([]byte{})
 
-	bar := progressbar.NewOptions(length,
-		progressbar.OptionSetWriter(ansi.NewAnsiStdout()),
-		progressbar.OptionEnableColorCodes(true),
-		progressbar.OptionShowBytes(true),
-		progressbar.OptionSetWidth(20),
-		progressbar.OptionSetDescription("[cyan][1/1][reset] dumping ECU"),
-		progressbar.OptionSetTheme(progressbar.Theme{
-			Saucer:        "[green]=[reset]",
-			SaucerHead:    "[green]>[reset]",
-			SaucerPadding: " ",
-			BarStart:      "[",
-			BarEnd:        "]",
-		}))
-
-	defer bar.Finish()
-	bar.RenderBlank()
 	for readPos < length {
-		bar.Set(out.Len())
+		if callback != nil {
+			callback(float64(out.Len()))
+		}
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
@@ -68,7 +60,7 @@ func (t *Client) readECU(ctx context.Context, addr, length int) ([]byte, error) 
 			},
 				retry.Context(ctx),
 				retry.OnRetry(func(n uint, err error) {
-					log.Printf("retry #%d %v\n", n, err)
+					callback(fmt.Sprintf("retry #%d %v\n", n, err))
 				}),
 				retry.Attempts(5),
 			)
@@ -78,14 +70,15 @@ func (t *Client) readECU(ctx context.Context, addr, length int) ([]byte, error) 
 			readPos += readLength
 		}
 	}
-	bar.Set(out.Len())
-	bar.Close()
-	fmt.Println()
 
 	if err := t.endDownloadMode(ctx); err != nil {
 		return nil, err
 	}
-	log.Println(" download done, took:", time.Since(start).Round(time.Second).String())
+
+	if callback != nil {
+		callback(float64(out.Len()))
+		callback(fmt.Sprintf("Done, took: %s", time.Since(start).Round(time.Second).String()))
+	}
 
 	return out.Bytes(), nil
 }
@@ -172,8 +165,10 @@ outer:
 }
 
 func (t *Client) endDownloadMode(ctx context.Context) error {
-	t.c.SendFrame(0x240, []byte{0x40, 0xA1, 0x01, 0x82, 0x00, 0x00, 0x00, 0x00})
-	f, err := t.c.Poll(ctx, t.defaultTimeout, 0x258)
+	frame := model.NewFrame(0x240, []byte{0x40, 0xA1, 0x01, 0x82, 0x00, 0x00, 0x00, 0x00}, model.ResponseRequired)
+	f, err := t.c.SendAndPoll(ctx, frame, t.defaultTimeout, 0x258)
+	//t.c.SendFrame(0x240, []byte{0x40, 0xA1, 0x01, 0x82, 0x00, 0x00, 0x00, 0x00})
+	//f, err := t.c.Poll(ctx, t.defaultTimeout, 0x258)
 	if err != nil {
 		return fmt.Errorf("end download mode: %v", err)
 	}

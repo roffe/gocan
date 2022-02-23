@@ -6,13 +6,17 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/roffe/gocan/pkg/bar"
 	"github.com/roffe/gocan/pkg/model"
 )
 
 func (t *Client) FlashECU(ctx context.Context, bin []byte, callback model.ProgressCallback) error {
-	var bytesRead uint32
+	if !t.bootloaded {
+		if err := t.UploadBootLoader(ctx, callback); err != nil {
+			return err
+		}
+	}
 
+	var bytesRead uint32
 	ecutype, err := t.DetermineECU(ctx)
 	if err != nil {
 		return err
@@ -20,13 +24,14 @@ func (t *Client) FlashECU(ctx context.Context, bin []byte, callback model.Progre
 
 	start := getstartAddress(ecutype)
 
-	bar := bar.New(len(bin), "flashing ECU")
-	defer func() {
-		if !bar.IsFinished() {
-			bar.Finish()
-			fmt.Println()
-		}
-	}()
+	if err := t.EraseECU(ctx, callback); err != nil {
+		return err
+	}
+
+	if callback != nil {
+		callback(-float64(len(bin)))
+		callback("Flashing ECU")
+	}
 
 	r := bytes.NewReader(bin)
 	startTime := time.Now()
@@ -70,12 +75,15 @@ func (t *Client) FlashECU(ctx context.Context, bin []byte, callback model.Progre
 			}
 		}
 		bytesRead += 0x80
-		bar.Set(int(bytesRead))
+
 		if callback != nil {
 			callback(float64(bytesRead))
 		}
 	}
-	bar.Finish()
-	fmt.Printf(" took: %s\n", time.Since(startTime).Round(time.Millisecond).String())
+
+	if callback != nil {
+		callback(fmt.Sprintf("Done, took: %s\n", time.Since(startTime).Round(time.Millisecond).String()))
+	}
+
 	return nil
 }

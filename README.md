@@ -1,4 +1,4 @@
-# CANTOOL
+# goCAN
 
 [Docs](docs/cantool.md)
 
@@ -17,7 +17,7 @@ experimental GUI made with Fyne, **I do not recommend this framework unless you 
 ## Example
 
 ```go
-go run .\cmd\cantool\main.go -p com3 -b 2000000 -a canusb -c t5 t5 info
+go run .\cmd\cantool\main.go -p com3 -b 2000000 -a canusb -c t5 -t t5 info
 uploading bootloader 100% [====================] (1.793 kB/s) took: 1.029s
 ------------------------------
 This is a Trionic 5.5 ECU with 256 kB of FLASH
