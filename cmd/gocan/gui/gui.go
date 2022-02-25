@@ -3,7 +3,6 @@ package gui
 import (
 	"context"
 	"fmt"
-	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -30,12 +29,13 @@ type mainWindow struct {
 
 	ecuList     *widget.Select
 	adapterList *widget.Select
-	portList    *widget.Select
+	portList    *widget.SelectEntry
 	speedList   *widget.Select
 
-	infoBTN  *widget.Button
-	dumpBTN  *widget.Button
-	flashBTN *widget.Button
+	refreshBTN *widget.Button
+	infoBTN    *widget.Button
+	dumpBTN    *widget.Button
+	flashBTN   *widget.Button
 
 	progressBar *widget.ProgressBar
 }
@@ -46,6 +46,7 @@ type appState struct {
 	adapter   string
 	port      string
 	portSpeed int
+	portList  []string
 }
 
 var (
@@ -87,10 +88,10 @@ func Run(ctx context.Context) {
 				//obj.(*widget.RichText).ParseMarkdown(txt)
 			},
 		),
-
-		infoBTN:  widget.NewButton("Info", ecuInfo),
-		dumpBTN:  widget.NewButton("Dump", ecuDump),
-		flashBTN: widget.NewButton("Flash", ecuFlash),
+		refreshBTN: widget.NewButton("Refresh Ports", refreshPorts),
+		infoBTN:    widget.NewButton("Info", ecuInfo),
+		dumpBTN:    widget.NewButton("Dump", ecuDump),
+		flashBTN:   widget.NewButton("Flash", ecuFlash),
 
 		progressBar: widget.NewProgressBar(),
 	}
@@ -116,10 +117,13 @@ func Run(ctx context.Context) {
 		a.Preferences().SetString("adapter", s)
 	})
 
-	mw.portList = widget.NewSelect(ports(), func(s string) {
+	state.portList = ports()
+
+	mw.portList = widget.NewSelectEntry(state.portList)
+	mw.portList.OnChanged = func(s string) {
 		state.port = s
 		a.Preferences().SetString("port", s)
-	})
+	}
 
 	mw.speedList = widget.NewSelect(speeds(), func(s string) {
 		speed, err := strconv.Atoi(s)
@@ -137,11 +141,6 @@ func Run(ctx context.Context) {
 
 	left := container.New(layout.NewMaxLayout(), mw.log)
 
-	bus := widget.NewCheck("PBus", func(b bool) {
-		log.Printf("%t", b)
-	})
-	bus.Checked = true
-
 	right := container.NewVBox(
 		widget.NewLabel(""),
 		mw.ecuList,
@@ -154,6 +153,7 @@ func Run(ctx context.Context) {
 		mw.infoBTN,
 		mw.dumpBTN,
 		mw.flashBTN,
+		mw.refreshBTN,
 	)
 
 	split := container.NewHSplit(left, right)
@@ -179,6 +179,11 @@ func Run(ctx context.Context) {
 	w.ShowAndRun()
 }
 
+func refreshPorts() {
+	mw.portList.SetOptions(ports())
+	mw.portList.Refresh()
+}
+
 func checkSelections() bool {
 	var out strings.Builder
 	if mw.ecuList.SelectedIndex() < 0 {
@@ -187,9 +192,10 @@ func checkSelections() bool {
 	if mw.adapterList.SelectedIndex() < 0 {
 		out.WriteString("Adapter\n")
 	}
-	if mw.portList.SelectedIndex() < 0 {
-		out.WriteString("Port\n")
-	}
+
+	//if mw.portList.SelectedIndex() < 0 {
+	//	out.WriteString("Port\n")
+	//}
 	if mw.speedList.SelectedIndex() < 0 {
 		out.WriteString("Speed\n")
 	}
@@ -204,7 +210,9 @@ func loadPreferences() {
 	state.canRate = mw.app.Preferences().FloatWithFallback("canrate", 500)
 	mw.ecuList.SetSelectedIndex(mw.app.Preferences().IntWithFallback("ecu", 0))
 	mw.adapterList.SetSelected(mw.app.Preferences().StringWithFallback("adapter", "Canusb"))
-	mw.portList.SetSelected(mw.app.Preferences().String("port"))
+	state.port = mw.app.Preferences().String("port")
+	mw.portList.PlaceHolder = state.port
+	mw.portList.Refresh()
 	mw.speedList.SetSelected(mw.app.Preferences().StringWithFallback("portSpeed", "115200"))
 }
 

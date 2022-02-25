@@ -58,7 +58,7 @@ func (t *Client) Info(ctx context.Context, callback model.ProgressCallback) ([]m
 	for _, d := range T7Headers {
 		h, err := t.GetHeader(ctx, byte(d.ID))
 		if err != nil {
-			return nil, fmt.Errorf("info failed: %v", err)
+			return nil, fmt.Errorf("ECU info failed: %v", err)
 		}
 		a := model.HeaderResult{Value: h}
 		a.Desc = d.Desc
@@ -105,14 +105,12 @@ func (t *Client) DataInitialization(ctx context.Context) error {
 			return nil
 		},
 		retry.Context(ctx),
-		retry.Attempts(3),
-		retry.OnRetry(func(n uint, err error) {
-			log.Printf("DataInitialization retry #%d: %s\n", n, err.Error())
-		}),
-		retry.Delay(100*time.Millisecond),
+		retry.Attempts(10),
+		retry.LastErrorOnly(true),
+		retry.Delay(250*time.Millisecond),
 	)
 	if err != nil {
-		return errors.New("datainitialization failed")
+		return fmt.Errorf("/!\\Datainitialization failed: %v", err)
 	}
 	return nil
 }

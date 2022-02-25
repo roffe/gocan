@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/avast/retry-go"
 	"github.com/roffe/gocan/pkg/frame"
 	"github.com/roffe/gocan/pkg/model"
 	"github.com/roffe/gocan/pkg/srec"
@@ -104,11 +105,28 @@ func (t *Client) UploadBootLoader(ctx context.Context, callback model.ProgressCa
 
 		switch rec.Srectype {
 		case "S0":
-			if err := t.sendBootloaderAddressCommand(ctx, 0, 0); err != nil {
+
+			err := retry.Do(func() error {
+				return t.sendBootloaderAddressCommand(ctx, 0, 0)
+			},
+				retry.Context(ctx),
+				retry.LastErrorOnly(true),
+				retry.Attempts(3),
+			)
+			if err != nil {
 				return err
 			}
+
 		case "S1":
-			if err := t.sendBootloaderAddressCommand(ctx, rec.Address, rec.Length-3); err != nil {
+
+			err := retry.Do(func() error {
+				return t.sendBootloaderAddressCommand(ctx, rec.Address, rec.Length-3)
+			},
+				retry.Context(ctx),
+				retry.LastErrorOnly(true),
+				retry.Attempts(3),
+			)
+			if err != nil {
 				return err
 			}
 

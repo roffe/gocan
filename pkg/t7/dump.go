@@ -16,18 +16,16 @@ func (t *Client) DumpECU(ctx context.Context, callback model.ProgressCallback) (
 	if err != nil || !ok {
 		return nil, fmt.Errorf("failed to authenticate: %v", err)
 	}
-	//	bin, err := t.readECU(ctx, 0, 0x80000)
-	//	if err != nil {
-	//		return nil, err
-	//	}
-	//	return bin, nil
-	//}
-	//
-	//func (t *Client) readECU(ctx context.Context, addr, length int) ([]byte, error) {
-	//
-	//addr := 0
+	bin, err := t.readECU(ctx, 0, 0x80000, callback)
+	if err != nil {
+		return nil, err
+	}
+	return bin, nil
+}
 
-	length := 0x80000
+func (t *Client) readECU(ctx context.Context, addr, length int, callback model.ProgressCallback) ([]byte, error) {
+	//addr := 0
+	//length := 0x80000
 	if callback != nil {
 		callback(-float64(length))
 		callback("Dumping ECU")
@@ -60,10 +58,8 @@ func (t *Client) DumpECU(ctx context.Context, callback model.ProgressCallback) (
 				return nil
 			},
 				retry.Context(ctx),
-				retry.OnRetry(func(n uint, err error) {
-					callback(fmt.Sprintf("retry #%d %v\n", n, err))
-				}),
-				retry.Attempts(5),
+				retry.Attempts(3),
+				retry.LastErrorOnly(true),
 			)
 			if err != nil {
 				return nil, fmt.Errorf("failed to read memory by address, pos: 0x%X, length: 0x%X", readPos, readLength)
@@ -115,60 +111,54 @@ func (t *Client) recvData(ctx context.Context, length int) ([]byte, error) {
 	out := bytes.NewBuffer([]byte{})
 outer:
 	for receivedBytes < length {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		default:
-			f, err := t.c.Poll(ctx, t.defaultTimeout, 0x258)
-			if err != nil {
-				return nil, err
+		f, err := t.c.Poll(ctx, t.defaultTimeout, 0x258)
+		if err != nil {
+			return nil, err
+		}
+		d := f.Data()
+		if d[0]&0x40 == 0x40 {
+			payloadLeft = int(d[2]) - 2 // subtract two non-payload bytes
+
+			if payloadLeft > 0 && receivedBytes < length {
+				out.WriteByte(d[5])
+				receivedBytes++
+				payloadLeft--
 			}
-			d := f.Data()
-			if d[0]&0x40 == 0x40 {
-				payloadLeft = int(d[2]) - 2 // subtract two non-payload bytes
-				if payloadLeft > 0 && receivedBytes < length {
-					out.WriteByte(d[5])
+			if payloadLeft > 0 && receivedBytes < length {
+				out.WriteByte(d[6])
+				receivedBytes++
+				payloadLeft--
+			}
+			if payloadLeft > 0 && receivedBytes < length {
+				out.WriteByte(d[7])
+				receivedBytes++
+				payloadLeft--
+			}
+		} else {
+			for i := 0; i < 6; i++ {
+				if receivedBytes < length {
+					out.WriteByte(d[2+i])
 					receivedBytes++
 					payloadLeft--
-				}
-				if payloadLeft > 0 && receivedBytes < length {
-					out.WriteByte(d[6])
-					receivedBytes++
-					payloadLeft--
-				}
-				if payloadLeft > 0 && receivedBytes < length {
-					out.WriteByte(d[7])
-					receivedBytes++
-					payloadLeft--
-				}
-			} else {
-				for i := 0; i < 6; i++ {
-					if receivedBytes < length {
-						out.WriteByte(d[2+i])
-						receivedBytes++
-						payloadLeft--
-						if payloadLeft == 0 {
-							break
-						}
+					if payloadLeft == 0 {
+						break
 					}
 				}
 			}
-			if d[0] == 0x80 || d[0] == 0xC0 {
-				t.Ack(d[0], frame.Outgoing)
-				break outer
-			} else {
-				t.Ack(d[0], frame.ResponseRequired)
-			}
+		}
+		if d[0] == 0x80 || d[0] == 0xC0 {
+			t.Ack(d[0], frame.Outgoing)
+			break outer
+		} else {
+			t.Ack(d[0], frame.ResponseRequired)
 		}
 	}
 	return out.Bytes(), nil
 }
 
 func (t *Client) endDownloadMode(ctx context.Context) error {
-	f := frame.New(0x240, []byte{0x40, 0xA1, 0x01, 0x82, 0x00, 0x00, 0x00, 0x00}, frame.ResponseRequired)
-	resp, err := t.c.SendAndPoll(ctx, f, t.defaultTimeout, 0x258)
-	//t.c.SendFrame(0x240, []byte{0x40, 0xA1, 0x01, 0x82, 0x00, 0x00, 0x00, 0x00})
-	//f, err := t.c.Poll(ctx, t.defaultTimeout, 0x258)
+	frameData := frame.New(0x240, []byte{0x40, 0xA1, 0x01, 0x82, 0x00, 0x00, 0x00, 0x00}, frame.ResponseRequired)
+	resp, err := t.c.SendAndPoll(ctx, frameData, t.defaultTimeout, 0x258)
 	if err != nil {
 		return fmt.Errorf("end download mode: %v", err)
 	}

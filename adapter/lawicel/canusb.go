@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"log"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/albenik/bcd"
@@ -25,6 +24,7 @@ type Canusb struct {
 	canCode, canMask string
 	send, recv       chan frame.CANFrame
 	close            chan struct{}
+	closed           bool
 }
 
 func NewCanusb() *Canusb {
@@ -62,6 +62,7 @@ func (cu *Canusb) Init(ctx context.Context) error {
 	for _, c := range cmds {
 		_, err := p.Write([]byte(c + "\r"))
 		if err != nil {
+			p.Close()
 			return err
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -97,7 +98,6 @@ func (cu *Canusb) SetCANrate(rate float64) error {
 	case 20:
 		cu.canRate = "S1"
 	case 33:
-		//cu.canRate = "s8b2f"
 		cu.canRate = "s0e1c"
 	case 47.619:
 		cu.canRate = "scb9a"
@@ -132,10 +132,6 @@ func (cu *Canusb) Read(data []byte) (int, error) {
 	return cu.port.Read(data)
 }
 
-func (cu *Canusb) Write(data []byte) (int, error) {
-	return cu.port.Write(data)
-}
-
 func (cu *Canusb) Chan() <-chan frame.CANFrame {
 	return cu.recv
 }
@@ -150,10 +146,14 @@ func (cu *Canusb) Send(frame frame.CANFrame) error {
 }
 
 func (cu *Canusb) Close() error {
+	cu.closed = true
 	cu.close <- struct{}{}
 	time.Sleep(100 * time.Millisecond)
 	cu.port.Write([]byte("C\r"))
 	cu.port.Write([]byte("\r\r\r"))
+	time.Sleep(10 * time.Millisecond)
+	cu.port.ResetInputBuffer()
+	cu.port.ResetOutputBuffer()
 	return cu.port.Close()
 }
 
@@ -165,12 +165,6 @@ func calcAcceptanceFilters(idList ...uint32) (string, string) {
 		mask = ^uint32(0)
 	} else {
 		for _, canID := range idList {
-			//if canID == 0x00 {
-			//	log.Println("Found illegal id: ", canID)
-			//	code = 0
-			//	mask = 0
-			//	break
-			//}
 			code &= (canID & 0x7FF) << 5
 			mask |= (canID & 0x7FF) << 5
 		}
@@ -201,7 +195,6 @@ func (cu *Canusb) sendManager(ctx context.Context) {
 			if err != nil {
 				log.Printf("failed to write to com port: %q, %v\n", string(b), err)
 			}
-			//			log.Println(">>", v.String()) //debug
 		case <-ctx.Done():
 			return
 		case <-cu.close:
@@ -221,78 +214,80 @@ func (cu *Canusb) recvManager(ctx context.Context) {
 		}
 		n, err := cu.port.Read(readBuffer)
 		if err != nil {
-			if strings.Contains(err.Error(), "Port has been closed") && ctx.Err() != nil {
-				break
+			if !cu.closed {
+				log.Printf("failed to read com port: %v", err)
 			}
-			log.Printf("failed to read com port: %v", err)
 			return
 		}
 		if n == 0 {
 			continue
 		}
+		cu.parse(ctx, n, readBuffer, buff)
 
-		for _, b := range readBuffer[:n] {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-			if b == 0x0D {
-				if buff.Len() == 0 {
-					continue
-				}
-				by := buff.Bytes()
-				switch by[0] {
-				case 'F':
-					if err := decodeStatus(by); err != nil {
-						log.Println("CAN status error", err)
-					}
-					select {
-					case <-sendMutex:
-					default:
-					}
-				case 't':
-					f, err := cu.decodeFrame(by)
-					if err != nil {
-						log.Printf("failed to decode frame: %q\n", buff.String())
-						continue
-					}
-					select {
-					case cu.recv <- f:
-					default:
-						log.Println("dropped frame")
-					}
-					//log.Println("<<", f.String()) //debug
-					buff.Reset()
+	}
+}
 
-				case 'z':
-					select {
-					case <-sendMutex:
-					default:
-					}
-					//fmt.Println("ok")
-				case 0x07:
-					//log.Println("received error response")
-				case 'V':
-					select {
-					case <-sendMutex:
-					default:
-					}
-					//log.Println("H/W version", buff.String())
-				case 'N':
-					select {
-					case <-sendMutex:
-					default:
-					}
-					//log.Println("H/W serial ", buff.String())
-				default:
-					log.Printf("COM>> %q\n", buff.String())
-				}
-				buff.Reset()
+func (cu *Canusb) parse(ctx context.Context, n int, readBuffer []byte, buff *bytes.Buffer) {
+	for _, b := range readBuffer[:n] {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		if b == 0x0D {
+			if buff.Len() == 0 {
 				continue
 			}
-			buff.WriteByte(b)
+			by := buff.Bytes()
+			switch by[0] {
+			case 'F':
+				if err := decodeStatus(by); err != nil {
+					log.Println("CAN status error", err)
+				}
+				select {
+				case <-sendMutex:
+				default:
+				}
+			case 't':
+				f, err := cu.decodeFrame(by)
+				if err != nil {
+					log.Printf("failed to decode frame: %q\n", buff.String())
+					continue
+				}
+				select {
+				case cu.recv <- f:
+				default:
+					log.Println("dropped frame")
+				}
+				buff.Reset()
+
+			case 'z':
+				select {
+				case <-sendMutex:
+				default:
+				}
+				//fmt.Println("ok")
+			case 0x07:
+				//log.Println("received error response")
+			case 'V':
+				select {
+				case <-sendMutex:
+				default:
+				}
+				//log.Println("H/W version", buff.String())
+			case 'N':
+				select {
+				case <-sendMutex:
+				default:
+				}
+				//log.Println("H/W serial ", buff.String())
+			default:
+				log.Printf("COM>> %q\n", buff.String())
+			}
+			buff.Reset()
+			continue
 		}
+		buff.WriteByte(b)
 	}
 }
 

@@ -2,7 +2,6 @@ package gui
 
 import (
 	"context"
-	"log"
 	"time"
 
 	"github.com/roffe/gocan/pkg/ecu"
@@ -21,7 +20,7 @@ func ecuInfo() {
 
 		c, err := initCAN(ctx)
 		if err != nil {
-			log.Println(err)
+			output(err.Error())
 			return
 		}
 		defer c.Close()

@@ -2,20 +2,9 @@ package gocan
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"time"
 
 	"github.com/roffe/gocan/pkg/frame"
 )
-
-type PollType int
-
-type Poll struct {
-	errcount    uint16
-	identifiers []uint32
-	callback    chan frame.CANFrame
-}
 
 type Hub struct {
 	pollers    map[*Poll]bool
@@ -24,34 +13,25 @@ type Hub struct {
 	incoming   <-chan frame.CANFrame
 }
 
-func newPoller(bufferSize int, identifiers ...uint32) *Poll {
-	return &Poll{
-		identifiers: identifiers,
-		callback:    make(chan frame.CANFrame, bufferSize),
-	}
-}
-
-func waitForFrame(ctx context.Context, timeout time.Duration, p *Poll, identifiers ...uint32) (frame.CANFrame, error) {
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case f := <-p.callback:
-		if f == nil {
-			return nil, errors.New("got nil frame from poller")
-		}
-		return f, nil
-	case <-time.After(timeout):
-		return nil, fmt.Errorf("timeout waiting for frame 0x%03X", identifiers)
-
-	}
-}
-
 func newHub(incoming <-chan frame.CANFrame) *Hub {
 	return &Hub{
 		pollers:    make(map[*Poll]bool),
 		register:   make(chan *Poll, 10),
 		unregister: make(chan *Poll, 10),
 		incoming:   incoming,
+	}
+}
+
+type Poll struct {
+	errcount    uint16
+	identifiers []uint32
+	callback    chan frame.CANFrame
+}
+
+func newPoller(bufferSize int, identifiers ...uint32) *Poll {
+	return &Poll{
+		identifiers: identifiers,
+		callback:    make(chan frame.CANFrame, bufferSize),
 	}
 }
 

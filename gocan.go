@@ -2,6 +2,8 @@ package gocan
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/roffe/gocan/pkg/frame"
@@ -59,7 +61,7 @@ func (c *Client) SendString(str string) error {
 	return c.Send(frame.NewRawCommand(str))
 }
 
-// Send and wait up to <timeout> for a answer
+// Send and wait up to <timeout> for a answer on given identifiers
 func (c *Client) SendAndPoll(ctx context.Context, frame *frame.Frame, timeout time.Duration, identifiers ...uint32) (frame.CANFrame, error) {
 	frame.SetTimeout(timeout)
 	p := newPoller(1, identifiers...)
@@ -90,4 +92,19 @@ func (c *Client) Poll(ctx context.Context, timeout time.Duration, identifiers ..
 		c.hub.unregister <- p
 	}()
 	return waitForFrame(ctx, timeout, p, identifiers...)
+}
+
+func waitForFrame(ctx context.Context, timeout time.Duration, p *Poll, identifiers ...uint32) (frame.CANFrame, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case f := <-p.callback:
+		if f == nil {
+			return nil, errors.New("got nil frame from poller")
+		}
+		return f, nil
+	case <-time.After(timeout):
+		return nil, fmt.Errorf("timeout waiting for frame 0x%03X", identifiers)
+
+	}
 }

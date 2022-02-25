@@ -2,7 +2,7 @@ package t7
 
 import (
 	"context"
-	"encoding/hex"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"log"
@@ -10,6 +10,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/avast/retry-go"
 	"github.com/roffe/gocan/pkg/frame"
 	"github.com/roffe/gocan/pkg/model"
 )
@@ -49,10 +50,9 @@ var t7offsets = []struct {
 	binpos int
 	offset int
 	end    int
-	delay  time.Duration
 }{
-	{0x000000, 0x000000, 0x07B000, 0},
-	{0x07FF00, 0x07FF00, 0x080000, 10 * time.Nanosecond},
+	{0x000000, 0x000000, 0x07B000},
+	{0x07FF00, 0x07FF00, 0x080000},
 }
 
 // Flash the ECU
@@ -83,31 +83,68 @@ func (t *Client) FlashECU(ctx context.Context, bin []byte, callback model.Progre
 	start := time.Now()
 	for _, o := range t7offsets {
 		binPos := o.binpos
-		if err := t.writeJump(ctx, o.offset, o.end-binPos); err != nil {
-			return err
-		}
-		for binPos < o.end {
-			left := o.end - binPos
-			var writeBytes int
-			if left >= 0xF0 {
-				writeBytes = 0xF0
-			} else {
-				writeBytes = left
-			}
-			if err := t.writeRange(ctx, binPos, binPos+writeBytes, bin, o.delay); err != nil {
+		// --
+		err := retry.Do(func() error {
+			if err := t.writeJump(ctx, o.offset, o.end-binPos); err != nil {
 				return err
 			}
-			binPos += writeBytes
-			left -= writeBytes
+			for binPos < o.end {
+				left := o.end - binPos
+				var writeBytes int
+				if left >= 0xF0 {
+					writeBytes = 0xF0
+				} else {
+					writeBytes = left
+				}
+				if err := t.writeRange(ctx, binPos, binPos+writeBytes, bin); err != nil {
+					return err
+				}
+				binPos += writeBytes
+				left -= writeBytes
+				if callback != nil {
+					callback(float64(binPos))
+				}
+			}
 			if callback != nil {
 				callback(float64(binPos))
 			}
+			return nil
+		},
+			retry.Context(ctx),
+			retry.Attempts(3),
+			retry.LastErrorOnly(true),
+		)
+		if err != nil {
+			return err
 		}
-		if callback != nil {
-			callback(float64(binPos))
-		}
-	}
+		//--
 
+		/*
+			if err := t.writeJump(ctx, o.offset, o.end-binPos); err != nil {
+				return err
+			}
+			for binPos < o.end {
+				left := o.end - binPos
+				var writeBytes int
+				if left >= 0xF0 {
+					writeBytes = 0xF0
+				} else {
+					writeBytes = left
+				}
+				if err := t.writeRange(ctx, binPos, binPos+writeBytes, bin); err != nil {
+					return err
+				}
+				binPos += writeBytes
+				left -= writeBytes
+				if callback != nil {
+					callback(float64(binPos))
+				}
+			}
+			if callback != nil {
+				callback(float64(binPos))
+			}
+		*/
+	}
 	end, err := t.c.SendAndPoll(ctx, frame.New(0x240, []byte{0x40, 0xA1, 0x01, 0x37, 0x00, 0x00, 0x00, 0x00}, frame.ResponseRequired), t.defaultTimeout, 0x258)
 	if err != nil {
 		return fmt.Errorf("error waiting for data transfer exit reply: %v", err)
@@ -128,32 +165,22 @@ func (t *Client) FlashECU(ctx context.Context, bin []byte, callback model.Progre
 
 // send request "Download - tool to module" to Trionic"
 func (t *Client) writeJump(ctx context.Context, offset, length int) error {
-	jumpMsg := []byte{0x41, 0xA1, 0x08, 0x34, 0x00, 0x00, 0x00, 0x00}
-	jumpMsg2 := []byte{0x00, 0xA1, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
+	ob := make([]byte, 4)
+	binary.BigEndian.PutUint32(ob, uint32(offset))
 
-	offsetBytes, err := hex.DecodeString(fmt.Sprintf("%06X", offset))
-	if err != nil {
-		return err
-	}
+	lb := make([]byte, 4)
+	binary.BigEndian.PutUint32(lb, uint32(length))
 
-	lengthBytes, err := hex.DecodeString(fmt.Sprintf("%06X", length))
-	if err != nil {
-		return err
-	}
-
-	for k := 4; k < 7; k++ {
-		jumpMsg[k] = offsetBytes[k-4]
-	}
-
-	for k := 2; k < 5; k++ {
-		jumpMsg2[k] = lengthBytes[k-2]
-	}
+	jumpMsg := []byte{0x41, 0xA1, 0x08, 0x34, ob[1], ob[2], ob[3], ob[4]}
+	jumpMsg2 := []byte{0x00, 0xA1, lb[1], lb[2], lb[3], lb[4], 0x00, 0x00}
 
 	t.c.SendFrame(0x240, jumpMsg, frame.Outgoing)
+
 	f, err := t.c.SendAndPoll(ctx, frame.New(0x240, jumpMsg2, frame.ResponseRequired), t.defaultTimeout, 0x258)
 	if err != nil {
 		return fmt.Errorf("failed to enable request download")
 	}
+
 	d := f.Data()
 	t.Ack(d[0], frame.Outgoing)
 
@@ -163,7 +190,7 @@ func (t *Client) writeJump(ctx context.Context, offset, length int) error {
 	return nil
 }
 
-func (t *Client) writeRange(ctx context.Context, start, end int, bin []byte, delay time.Duration) error {
+func (t *Client) writeRange(ctx context.Context, start, end int, bin []byte) error {
 	length := end - start
 	binPos := start
 	rows := int(math.Floor(float64((length + 3)) / 6.0))
@@ -181,19 +208,15 @@ func (t *Client) writeRange(ctx context.Context, start, end int, bin []byte, del
 			data[0] |= 0x40
 			data[2] = byte(length + 1) // length
 			data[3] = 0x36             // Data Transfer
-			data[4] = bin[binPos]
-			binPos++
-			data[5] = bin[binPos]
-			binPos++
-			data[6] = bin[binPos]
-			binPos++
-			data[7] = bin[binPos]
-			binPos++
+			for fq := 4; fq < 8; fq++ {
+				data[fq] = bin[binPos]
+				binPos++
+			}
 			first = false
 		} else if i == 0 {
 			left := end - binPos
 			if left > 6 {
-				log.Fatal("sequence is fucked, tell roffe") // this should never happend
+				return fmt.Errorf("sequence is fucked, tell roffe") // this should never happend
 			}
 			for i := 0; i < left; i++ {
 				data[2+i] = bin[binPos]
@@ -212,11 +235,7 @@ func (t *Client) writeRange(ctx context.Context, start, end int, bin []byte, del
 			}
 		}
 		if i > 0 {
-			//t.c.SendFrame(0x240, data, frame.OptFrameType(frame.Outgoing))
-			//if delay > 0 {
-			//	time.Sleep(delay)
-			//}
-			t.c.Send(frame.New(0x240, data, frame.Outgoing))
+			t.c.SendFrame(0x240, data, frame.Outgoing)
 			continue
 		}
 		t.c.SendFrame(0x240, data, frame.ResponseRequired)
@@ -226,11 +245,12 @@ func (t *Client) writeRange(ctx context.Context, start, end int, bin []byte, del
 	if err != nil {
 		return fmt.Errorf("error writing 0x%X - 0x%X was at pos 0x%X: %v", start, end, binPos, err)
 	}
+
 	// Send acknowledgement
 	d := resp.Data()
 	t.Ack(d[0], frame.Outgoing)
+
 	if d[3] != 0x76 {
-		//log.Println(f2.String())
 		return fmt.Errorf("ECU did not confirm write")
 	}
 	return nil

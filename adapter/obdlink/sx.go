@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"strings"
 	"time"
@@ -14,23 +15,6 @@ import (
 	"github.com/roffe/gocan/pkg/frame"
 	"go.bug.st/serial"
 )
-
-/*
-ATZ
-STP33
-ATCAF0
-ATH1
-
-ATSH sätt header, CAN ID som saker ska skickas till
-
-ATCF200 // acceptance Code
-ATCM781 // acceptance Mask
-STPX h:220, d:3F81001102400000
-STPX h:240, d:40A1021A99000000
-
-*/
-
-//var canIDS = []uint32{0x005, 0x006, 0x00c, 0x00}
 
 type SX struct {
 	port         serial.Port
@@ -40,6 +24,7 @@ type SX struct {
 	protocol     string
 	send, recv   chan frame.CANFrame
 	close        chan struct{}
+	closed       bool
 	filter, mask string
 }
 
@@ -81,16 +66,32 @@ func (cu *SX) Init(ctx context.Context) error {
 	p.Write([]byte("ATI\r"))
 	p.ResetInputBuffer()
 	p.Write([]byte("ATZ\r"))
-	readbuff := make([]byte, 1)
+	p.SetReadTimeout(5 * time.Millisecond)
+
+	readbuff := make([]byte, 2)
+	buff := bytes.NewBuffer(nil)
+	s := time.Now()
 	for read := 0; read < 8; {
+		if time.Since(s) > 3*time.Second {
+			p.Close()
+			return fmt.Errorf("Init timeout")
+		}
 		n, err := p.Read(readbuff)
 		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			p.Close()
 			return err
 		}
 		if n == 0 {
 			continue
 		}
 		read++
+		buff.Write(readbuff[:n])
+		if strings.Contains(buff.String(), "ELM") {
+			break
+		}
 
 	}
 
@@ -167,7 +168,11 @@ func (cu *SX) Send(frame frame.CANFrame) error {
 }
 
 func (cu *SX) Close() error {
+	cu.closed = true
 	cu.close <- token{}
+	time.Sleep(100 * time.Millisecond)
+	cu.port.ResetInputBuffer()
+	cu.port.ResetOutputBuffer()
 	return cu.port.Close()
 }
 
@@ -195,21 +200,16 @@ func (cu *SX) sendManager(ctx context.Context) {
 					out = fmt.Sprintf("STPX h:%03X,d:%X,r:1\r", v.Identifier(), v.Data())
 				}
 			}
-			//log.Println(out)
 			_, err := cu.port.Write([]byte(out))
 			if err != nil {
 				log.Printf("failed to write to com port: %q, %v\n", out, err)
 			}
-			// log.Println(">>", v.String()) // debug
 		case <-ctx.Done():
 			return
 		case <-cu.close:
 			return
 		}
 	}
-	//if err := cu.Close(); err != nil {
-	//	log.Println("port close error: ", err)
-	//}
 }
 
 func (cu *SX) recvManager(ctx context.Context) {
@@ -223,10 +223,9 @@ func (cu *SX) recvManager(ctx context.Context) {
 		}
 		n, err := cu.port.Read(readBuffer)
 		if err != nil {
-			if strings.Contains(err.Error(), "Port has been closed") && ctx.Err() != nil {
-				break
+			if !cu.closed {
+				log.Printf("failed to read com port: %v", err)
 			}
-			log.Printf("failed to read com port: %v", err)
 			return
 		}
 		if n == 0 {
@@ -286,7 +285,6 @@ func (cu *SX) recvManager(ctx context.Context) {
 }
 
 func (*SX) decodeFrame(buff []byte) (frame.CANFrame, error) {
-	//received := time.Now()
 	idBytes, err := hex.DecodeString(fmt.Sprintf("%08s", buff[0:3]))
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode identifier: %v", err)
@@ -296,18 +294,9 @@ func (*SX) decodeFrame(buff []byte) (frame.CANFrame, error) {
 		return nil, fmt.Errorf("failed to decode frame body: %v", err)
 	}
 
-	//length := uint8(len(data))
-
 	return frame.New(
 		binary.BigEndian.Uint32(idBytes),
 		data,
 		frame.Incoming,
 	), nil
-
-	//return &frame.Frame{
-	//	Time:       received,
-	//	Identifier: binary.BigEndian.Uint32(idBytes),
-	//	Len:        length,
-	//	Data:       data,
-	//}, nil
 }

@@ -28,6 +28,7 @@ require (
 	github.com/mattn/go-colorable v0.1.12 // indirect
 	github.com/nsf/termbox-go v1.1.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
+	github.com/ropnop/go-clr v0.0.0-20200805161622-a9381fbe4fcd // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/sqweek/dialog v0.0.0-20211002065838-9a201b55ab91 // indirect
