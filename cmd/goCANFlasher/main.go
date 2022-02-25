@@ -7,7 +7,7 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
-	"github.com/roffe/gocan/cmd/gocan/gui"
+	"github.com/roffe/gocan/cmd/goCANFlasher/gui"
 )
 
 //go:embed trionicCanFlasher.png

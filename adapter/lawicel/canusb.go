@@ -49,7 +49,7 @@ func (cu *Canusb) Init(ctx context.Context) error {
 	cu.port = p
 
 	var cmds = []string{
-		"\r\r",     // Empty buffer
+		"\r", "\r", "\r", "\r", // Empty buffer
 		"V",        // Get Version number of both CANUSB hardware and software
 		"N",        // Get Serial number of the CANUSB
 		"Z0",       // Sets Time Stamp OFF for received frames

@@ -62,7 +62,7 @@ func (t *Client) FlashECU(ctx context.Context, bin []byte, callback model.Progre
 			bin[0], bin[1], bin[2], bin[3])
 	}
 
-	if err := t.DataInitialization(ctx); err != nil {
+	if err := t.DataInitialization(ctx, callback); err != nil {
 		return err
 	}
 

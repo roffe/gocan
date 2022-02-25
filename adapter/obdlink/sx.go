@@ -16,6 +16,8 @@ import (
 	"go.bug.st/serial"
 )
 
+var Debug bool
+
 type SX struct {
 	port         serial.Port
 	portName     string
@@ -65,10 +67,12 @@ func (cu *SX) Init(ctx context.Context) error {
 	}
 	p.Write([]byte("ATI\r"))
 	p.ResetInputBuffer()
+	p.Write([]byte("ATI\r"))
+	p.ResetInputBuffer()
 	p.Write([]byte("ATZ\r"))
-	p.SetReadTimeout(5 * time.Millisecond)
 
-	readbuff := make([]byte, 2)
+	p.SetReadTimeout(5 * time.Millisecond)
+	readbuff := make([]byte, 4)
 	buff := bytes.NewBuffer(nil)
 	s := time.Now()
 	for read := 0; read < 8; {
@@ -100,7 +104,6 @@ func (cu *SX) Init(ctx context.Context) error {
 		if c == "" {
 			continue
 		}
-		//log.Println(c)
 		out := []byte(c + "\r")
 		_, err := p.Write(out)
 		if err != nil {

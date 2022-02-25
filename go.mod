@@ -9,7 +9,7 @@ require (
 	github.com/jroimartin/gocui v0.5.0
 	github.com/manifoldco/promptui v0.9.0
 	github.com/spf13/cobra v1.3.0
-	go.bug.st/serial v1.3.3
+	go.bug.st/serial v1.3.5
 )
 
 require (
