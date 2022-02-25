@@ -2,6 +2,7 @@ package gocan
 
 import (
 	"context"
+	"time"
 
 	"github.com/roffe/gocan/pkg/frame"
 )
@@ -56,4 +57,37 @@ func (c *Client) SendFrame(identifier uint32, data []byte, t frame.CANFrameType)
 // SendString is used to bypass the frame parser and send raw commands to the CANUSB adapter
 func (c *Client) SendString(str string) error {
 	return c.Send(frame.NewRawCommand(str))
+}
+
+// Send and wait up to <timeout> for a answer
+func (c *Client) SendAndPoll(ctx context.Context, frame *frame.Frame, timeout time.Duration, identifiers ...uint32) (frame.CANFrame, error) {
+	frame.SetTimeout(timeout)
+	p := newPoller(1, identifiers...)
+
+	c.hub.register <- p
+	defer func() {
+		c.hub.unregister <- p
+	}()
+
+	if err := c.device.Send(frame); err != nil {
+		return nil, err
+	}
+	return waitForFrame(ctx, timeout, p, identifiers...)
+}
+
+// Subscribe to CAN identifiers and return a message channel
+func (c *Client) Subscribe(ctx context.Context, identifiers ...uint32) chan frame.CANFrame {
+	p := newPoller(100, identifiers...)
+	c.hub.register <- p
+	return p.callback
+}
+
+// Poll for a certain CAN identifier for up to <timeout>
+func (c *Client) Poll(ctx context.Context, timeout time.Duration, identifiers ...uint32) (frame.CANFrame, error) {
+	p := newPoller(1, identifiers...)
+	c.hub.register <- p
+	defer func() {
+		c.hub.unregister <- p
+	}()
+	return waitForFrame(ctx, timeout, p, identifiers...)
 }
