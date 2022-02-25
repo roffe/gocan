@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/roffe/gocan/pkg/frame"
 	"github.com/roffe/gocan/pkg/model"
 	"github.com/roffe/gocan/pkg/srec"
 )
@@ -114,7 +115,7 @@ func (t *Client) UploadBootLoader(ctx context.Context, callback model.ProgressCa
 			r := bytes.NewReader(rec.Data)
 			framecount := int(1 + (rec.Length-3)/7)
 			seq := byte(0x00)
-			for frame := 0; frame < framecount; frame++ {
+			for frameNo := 0; frameNo < framecount; frameNo++ {
 				payload := []byte{seq, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
 				for i := 1; i < 8; i++ {
 					b, err := r.ReadByte()
@@ -130,7 +131,7 @@ func (t *Client) UploadBootLoader(ctx context.Context, callback model.ProgressCa
 
 				resp, err := t.c.SendAndPoll(
 					ctx,
-					model.NewFrame(0x5, payload, model.ResponseRequired),
+					frame.New(0x5, payload, frame.ResponseRequired),
 					150*time.Millisecond,
 					0xC,
 				)
@@ -142,12 +143,11 @@ func (t *Client) UploadBootLoader(ctx context.Context, callback model.ProgressCa
 					if callback != nil {
 						callback("Bootloader already running")
 					}
-					fmt.Println("bootloader already running")
 					t.bootloaded = true
 					return nil
 				}
 
-				if resp.Len() != 8 || data[0] != byte(frame*7) || data[1] != 0x00 {
+				if resp.Len() != 8 || data[0] != byte(frameNo*7) || data[1] != 0x00 {
 					return fmt.Errorf("failed to upload bootloader: %X", data)
 				}
 				if callback != nil {
@@ -158,7 +158,7 @@ func (t *Client) UploadBootLoader(ctx context.Context, callback model.ProgressCa
 
 		case "S9":
 			if err := t.sendBootVectorAddressSRAM(rec.Address); err != nil {
-				return fmt.Errorf("failed to SBVAC")
+				return fmt.Errorf("failed to sendBootVectorAddressSRAM")
 			}
 		}
 	}
@@ -174,27 +174,27 @@ func (t *Client) sendBootloaderAddressCommand(ctx context.Context, address uint3
 	payload := []byte{0xA5, byte(address >> 24), byte(address >> 16), byte(address >> 8), byte(address), len, 0x00, 0x00}
 	f, err := t.c.SendAndPoll(
 		ctx,
-		model.NewFrame(0x5, payload, model.ResponseRequired),
-		150*time.Millisecond,
+		frame.New(0x5, payload, frame.ResponseRequired),
+		250*time.Millisecond,
 		0xC,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to SBLAC: %v", err)
+		return fmt.Errorf("failed to sendBootloaderAddressCommand: %v", err)
 	}
 	data := f.Data()
 	if f.Len() != 8 || data[0] != 0xA5 || data[1] != 0x00 {
-		return fmt.Errorf("invalid response to SBLAC")
+		return fmt.Errorf("invalid response to sendBootloaderAddressCommand")
 	}
 	return nil
 }
 
 func (t *Client) sendBootVectorAddressSRAM(address uint32) error {
 	data := []byte{0xC1, byte(address >> 24), byte(address >> 16), byte(address >> 8), byte(address), 0x00, 0x00, 0x00}
-	return t.c.SendFrame(0x5, data, model.OptFrameType(model.Outgoing))
+	return t.c.SendFrame(0x5, data, frame.Outgoing)
 }
 
 func (t *Client) sendBootloaderDataCommand(ctx context.Context, data []byte, length byte) error {
-	frame := model.NewFrame(0x5, data, model.ResponseRequired)
+	frame := frame.New(0x5, data, frame.ResponseRequired)
 	resp, err := t.c.SendAndPoll(ctx, frame, 150*time.Millisecond, 0xC)
 	if err != nil {
 		return fmt.Errorf("failed SBLDC: %v", err)

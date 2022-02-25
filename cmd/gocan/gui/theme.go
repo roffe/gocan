@@ -77,7 +77,7 @@ func (gocanTheme) Size(s fyne.ThemeSizeName) float32 {
 	case theme.SizeNameScrollBar:
 		return 16
 	case theme.SizeNameScrollBarSmall:
-		return 3
+		return 6
 	case theme.SizeNameSeparatorThickness:
 		return 0
 	case theme.SizeNameText:

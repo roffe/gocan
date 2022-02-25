@@ -1,4 +1,4 @@
-package model
+package frame
 
 import (
 	"fmt"
@@ -11,18 +11,17 @@ import (
 
 type Frame struct {
 	identifier uint32
-	len        int
 	data       []byte
 	frameType  CANFrameType
 	timeout    time.Duration
 }
 
-func NewFrame(identifier uint32, data []byte, frameType CANFrameType) *Frame {
+func New(identifier uint32, data []byte, frameType CANFrameType) *Frame {
 	return &Frame{
 		identifier: identifier,
-		len:        len(data),
-		data:       data,
-		frameType:  frameType,
+		//len:        len(data),
+		data:      data,
+		frameType: frameType,
 	}
 }
 
@@ -84,8 +83,27 @@ func (f *Frame) String() string {
 	out.WriteString(red(fmt.Sprintf("%-72s", binView.String())))
 
 	out.WriteString(" || ")
-	out.WriteString(yellow("%8s", kex.ReplaceAllString(string(f.data), ".")))
+	out.WriteString(yellow("%8s", printable.ReplaceAllString(string(f.data), ".")))
 	return out.String()
 }
 
-var kex = regexp.MustCompile("[^A-Za-z0-9.,!?]+")
+var printable = regexp.MustCompile("[^A-Za-z0-9.,!?]+")
+
+type FrameOpt func(f CANFrame)
+
+// expect Response
+func OptFrameType(frameType CANFrameType) FrameOpt {
+	return func(f CANFrame) {
+		switch t := f.(type) {
+		case *Frame:
+			t.frameType = frameType
+		}
+	}
+}
+
+func OptResponseRequired(f CANFrame) {
+	switch t := f.(type) {
+	case *Frame:
+		t.frameType = ResponseRequired
+	}
+}

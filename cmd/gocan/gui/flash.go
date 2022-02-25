@@ -18,7 +18,7 @@ func ecuFlash() {
 	}
 
 	disableButtons()
-	ctx, cancel := context.WithTimeout(context.Background(), 900*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 1800*time.Second)
 
 	filename, err := sdialog.File().Filter("Select Bin", "bin").Load()
 	if err != nil {
@@ -41,6 +41,7 @@ func ecuFlash() {
 		enableButtons()
 		cancel()
 		output("Flash aborted by user")
+		enableButtons()
 		return
 	}
 

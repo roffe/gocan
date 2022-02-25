@@ -3,12 +3,23 @@ package gocan
 import (
 	"context"
 
-	"github.com/roffe/gocan/pkg/model"
+	"github.com/roffe/gocan/pkg/frame"
 )
 
 const (
 	CR = 0x0D
 )
+
+type Adapter interface {
+	Init(context.Context) error
+	SetPort(string) error
+	SetPortRate(int) error
+	SetCANrate(float64) error
+	SetCANfilter(...uint32)
+	Chan() <-chan frame.CANFrame
+	Send(frame.CANFrame) error
+	Close() error
+}
 
 type Client struct {
 	hub    *Hub
@@ -29,25 +40,20 @@ func (c *Client) Close() error {
 }
 
 // Send a CAN Frame
-func (c *Client) Send(msg model.CANFrame) error {
+func (c *Client) Send(msg frame.CANFrame) error {
 	return c.device.Send(msg)
 }
 
 // Shortcommand to send a standard 11bit frame
-func (c *Client) SendFrame(identifier uint32, data []byte, opts ...model.FrameOpt) error {
-	var b = make([]byte, 8)
+func (c *Client) SendFrame(identifier uint32, data []byte, t frame.CANFrameType) error {
+	var b = make([]byte, len(data))
 	copy(b, data)
-
-	frame := model.NewFrame(identifier, b, model.ResponseRequired)
-
-	for _, o := range opts {
-		o(frame)
-	}
+	frame := frame.New(identifier, b, t)
 
 	return c.Send(frame)
 }
 
 // SendString is used to bypass the frame parser and send raw commands to the CANUSB adapter
 func (c *Client) SendString(str string) error {
-	return c.Send(model.NewRawCommand(str))
+	return c.Send(frame.NewRawCommand(str))
 }

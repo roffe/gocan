@@ -23,6 +23,7 @@ func ecuDump() {
 	if err != nil {
 		output(err.Error())
 		cancel()
+		enableButtons()
 		return
 	}
 
@@ -47,8 +48,10 @@ func ecuDump() {
 
 		bin, err := tr.DumpECU(ctx, callback)
 		if err == nil {
-
-			if err := os.WriteFile(filename, bin, 0644); err != nil {
+			mw.app.SendNotification(fyne.NewNotification("", "Dump done"))
+			if err := os.WriteFile(filename, bin, 0644); err == nil {
+				output("Saved as " + filename)
+			} else {
 				output(err.Error())
 			}
 		} else {
@@ -58,7 +61,6 @@ func ecuDump() {
 		if err := tr.ResetECU(ctx, callback); err != nil {
 			output(err.Error())
 		}
-		mw.app.SendNotification(fyne.NewNotification("", "Dump done"))
 	}()
 }
 

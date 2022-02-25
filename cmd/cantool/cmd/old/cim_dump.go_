@@ -11,7 +11,7 @@ import (
 
 	"github.com/avast/retry-go"
 	"github.com/roffe/gocan"
-	"github.com/roffe/gocan/pkg/model"
+	"github.com/roffe/gocan/pkg/frame"
 	"github.com/spf13/cobra"
 )
 
@@ -34,20 +34,20 @@ var cimDump = &cobra.Command{
 
 		go func() {
 			for {
-				c.SendFrame(0x101, []byte{0x01, 0x3e})
+				c.SendFrame(0x101, []byte{0x01, 0x3e}, frame.Outgoing)
 				time.Sleep(500 * time.Millisecond)
 			}
 		}()
 
 		log.Println("Physically Requested TesterPresent (response required)")
-		c.SendFrame(0x245, []byte{0x01, 0x3e}) // Physically Requested TesterPresent (response required)
+		c.SendFrame(0x245, []byte{0x01, 0x3e}, frame.Outgoing) // Physically Requested TesterPresent (response required)
 		_, err = c.Poll(ctx, 150*time.Millisecond, 0x645)
 		if err != nil {
 			return err
 		}
 
 		log.Println("DisableNormalCommunication Request Message")
-		c.SendFrame(0x101, []byte{0xFE, 0x01, 0x28}) // DisableNormalCommunication Request Message
+		c.SendFrame(0x101, []byte{0xFE, 0x01, 0x28}, frame.ResponseRequired) // DisableNormalCommunication Request Message
 		_, err = c.Poll(ctx, 150*time.Millisecond, 0x645)
 		if err != nil {
 			return err
@@ -55,7 +55,7 @@ var cimDump = &cobra.Command{
 
 		var secLvl byte = 0x0b
 		log.Println("SecurityAccess(requestSeed)")
-		c.SendFrame(0x245, []byte{0x02, 0x27, secLvl})
+		c.SendFrame(0x245, []byte{0x02, 0x27, secLvl}, frame.ResponseRequired)
 		f, err := c.Poll(ctx, 100*time.Millisecond, 0x645)
 		if err != nil {
 			log.Println(err)
@@ -66,7 +66,7 @@ var cimDump = &cobra.Command{
 		resp := convertSeedCIM(int(d[3])<<8 | int(d[4]))
 
 		log.Println("SecurityAccess (sendKey)")
-		c.SendFrame(0x245, []byte{0x04, 0x27, secLvl + 1, byte(int(resp) >> 8 & int(0xFF)), byte(resp) & 0xFF})
+		c.SendFrame(0x245, []byte{0x04, 0x27, secLvl + 1, byte(int(resp) >> 8 & int(0xFF)), byte(resp) & 0xFF}, frame.ResponseRequired)
 		f2, err := c.Poll(ctx, 100*time.Millisecond, 0x645)
 		if err != nil {
 			log.Println(err)
@@ -116,7 +116,7 @@ var cimDump = &cobra.Command{
 
 		time.Sleep(300 * time.Millisecond)
 		log.Println("ReturnToNormalMode Message Flow")
-		c.SendFrame(0x245, []byte{0x01, 0x20}) //  ReturnToNormalMode Message Flow
+		c.SendFrame(0x245, []byte{0x01, 0x20}, frame.Outgoing) //  ReturnToNormalMode Message Flow
 		return nil
 	},
 }
@@ -139,7 +139,7 @@ func readRange(ctx context.Context, c *gocan.Client, start, length, maxlen uint3
 		leftThisRound := int(readBytes)
 		if time.Since(lastKeepAlive) >= 2*time.Second {
 			//			log.Printf("ReadMemoryByAddress: 0x%02X len: %d\n", curOffset, readBytes)
-			c.SendFrame(0x245, []byte{0x01, 0x3e}) // Physically Requested TesterPresent (response required)
+			c.SendFrame(0x245, []byte{0x01, 0x3e}, frame.ResponseRequired) // Physically Requested TesterPresent (response required)
 			_, err := c.Poll(ctx, 150*time.Millisecond, 0x645)
 			if err != nil {
 				return nil, err
@@ -152,11 +152,11 @@ func readRange(ctx context.Context, c *gocan.Client, start, length, maxlen uint3
 		payload := []byte{0x06, 0x23, bs[1], bs[2], bs[3], 0x00, readBytes}
 		log.Printf("%X %X\n", curOffset, bs)
 		log.Printf("payload>>%X\n", payload)
-		var fs model.CANFrame
+		var fs frame.CANFrame
 		err := retry.Do(
 			func() error {
 				var err error
-				c.SendFrame(0x245, payload) //ReadMemoryByAddress
+				c.SendFrame(0x245, payload, frame.ResponseRequired) //ReadMemoryByAddress
 				ff, err := c.Poll(ctx, 150*time.Millisecond, 0x645)
 				if err != nil {
 					return err
@@ -204,7 +204,7 @@ func readRange(ctx context.Context, c *gocan.Client, start, length, maxlen uint3
 			curOffset++
 			leftThisRound--
 
-			c.SendFrame(0x245, []byte{0x30, 0x00, 0x00}) // Send me moar!
+			c.SendFrame(0x245, []byte{0x30, 0x00, 0x00}, frame.ResponseRequired) // Send me moar!
 
 		inner:
 			for {

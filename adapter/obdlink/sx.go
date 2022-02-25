@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/roffe/gocan/pkg/model"
+	"github.com/roffe/gocan/pkg/frame"
 	"go.bug.st/serial"
 )
 
@@ -38,15 +38,15 @@ type SX struct {
 	portRate     int
 	canrate      string
 	protocol     string
-	send, recv   chan model.CANFrame
+	send, recv   chan frame.CANFrame
 	close        chan struct{}
 	filter, mask string
 }
 
 func NewSX() *SX {
 	return &SX{
-		send:  make(chan model.CANFrame, 100),
-		recv:  make(chan model.CANFrame, 100),
+		send:  make(chan frame.CANFrame, 100),
+		recv:  make(chan frame.CANFrame, 100),
 		close: make(chan struct{}, 10),
 	}
 }
@@ -63,11 +63,7 @@ func (cu *SX) Init(ctx context.Context) error {
 		return fmt.Errorf("failed to open com port %q : %v", cu.portName, err)
 	}
 	cu.port = p
-
-	p.Write([]byte("ATZ\r"))
-	time.Sleep(1100 * time.Millisecond)
-	p.ResetInputBuffer()
-	var cmds = []string{
+	var initCmds = []string{
 		"ATE0",      // turn off echo
 		"ATS0",      // turn of spaces
 		cu.protocol, // Set canbus protocol
@@ -77,13 +73,29 @@ func (cu *SX) Init(ctx context.Context) error {
 		cu.canrate,  // Set CANrate
 		"ATAL",      // Allow long messages
 		"ATCFC0",    //Turn automatic CAN flow control off
-		"ATAR",      // Automatically set the receive address.
-		"ATCSM0",    //Turn CAN silent monitoring on
-		cu.filter,   // code
-		cu.mask,     // mask
+		//"ATAR",      // Automatically set the receive address.
+		//"ATCSM0",    //Turn CAN silent monitoring off
+		cu.filter, // code
+		cu.mask,   // mask
 	}
+	p.Write([]byte("ATI\r"))
+	p.ResetInputBuffer()
+	p.Write([]byte("ATZ\r"))
+	readbuff := make([]byte, 1)
+	for read := 0; read < 8; {
+		n, err := p.Read(readbuff)
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			continue
+		}
+		read++
+
+	}
+
 	p.SetReadTimeout(5 * time.Millisecond)
-	for _, c := range cmds {
+	for _, c := range initCmds {
 		if c == "" {
 			continue
 		}
@@ -122,7 +134,7 @@ func (cu *SX) SetCANrate(rate float64) error {
 		cu.protocol = "STP33"
 	case 615.384:
 		cu.protocol = "STP33"
-		cu.canrate = "STCTR 8101FC"
+		cu.canrate = "STCTR8101FC"
 	default:
 		return fmt.Errorf("unhandled canbus rate: %f", rate)
 	}
@@ -141,11 +153,11 @@ func (cu *SX) SetCANfilter(ids ...uint32) {
 	cu.mask = fmt.Sprintf("ATCM%03X", mask)
 }
 
-func (cu *SX) Chan() <-chan model.CANFrame {
+func (cu *SX) Chan() <-chan frame.CANFrame {
 	return cu.recv
 }
 
-func (cu *SX) Send(frame model.CANFrame) error {
+func (cu *SX) Send(frame frame.CANFrame) error {
 	select {
 	case cu.send <- frame:
 		return nil
@@ -170,10 +182,10 @@ func (cu *SX) sendManager(ctx context.Context) {
 			sendMutex <- token{}
 			var out string
 			switch v.(type) {
-			case *model.RawCommand:
+			case *frame.RawCommand:
 				out = fmt.Sprintf("%s\r", v.String())
 			default:
-				if v.Type() == model.Outgoing {
+				if v.Type() == frame.Outgoing {
 					out = fmt.Sprintf("STPX h:%03X,d:%X,r:0\r", v.Identifier(), v.Data())
 					break
 				}
@@ -188,6 +200,7 @@ func (cu *SX) sendManager(ctx context.Context) {
 			if err != nil {
 				log.Printf("failed to write to com port: %q, %v\n", out, err)
 			}
+			// log.Println(">>", v.String()) // debug
 		case <-ctx.Done():
 			return
 		case <-cu.close:
@@ -272,7 +285,7 @@ func (cu *SX) recvManager(ctx context.Context) {
 	}
 }
 
-func (*SX) decodeFrame(buff []byte) (model.CANFrame, error) {
+func (*SX) decodeFrame(buff []byte) (frame.CANFrame, error) {
 	//received := time.Now()
 	idBytes, err := hex.DecodeString(fmt.Sprintf("%08s", buff[0:3]))
 	if err != nil {
@@ -285,13 +298,13 @@ func (*SX) decodeFrame(buff []byte) (model.CANFrame, error) {
 
 	//length := uint8(len(data))
 
-	return model.NewFrame(
+	return frame.New(
 		binary.BigEndian.Uint32(idBytes),
 		data,
-		model.Incoming,
+		frame.Incoming,
 	), nil
 
-	//return &model.Frame{
+	//return &frame.Frame{
 	//	Time:       received,
 	//	Identifier: binary.BigEndian.Uint32(idBytes),
 	//	Len:        length,

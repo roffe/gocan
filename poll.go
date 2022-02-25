@@ -4,21 +4,41 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"time"
 
-	"github.com/roffe/gocan/pkg/model"
+	"github.com/roffe/gocan/pkg/frame"
 )
 
-func newPoller(variant PollType, size int, identifiers ...uint32) *Poll {
+type PollType int
+
+const (
+	OneOff PollType = iota
+	Subscription
+)
+
+type Poll struct {
+	errcount    uint16
+	identifiers []uint32
+	callback    chan frame.CANFrame
+	//variant     PollType
+}
+
+type Hub struct {
+	pollers    map[*Poll]bool
+	register   chan *Poll
+	unregister chan *Poll
+	incoming   <-chan frame.CANFrame
+}
+
+func newPoller(size int, identifiers ...uint32) *Poll {
 	return &Poll{
 		identifiers: identifiers,
-		callback:    make(chan model.CANFrame, size),
-		variant:     variant,
+		callback:    make(chan frame.CANFrame, size),
+		//variant:     variant,
 	}
 }
 
-func waitForFrame(ctx context.Context, timeout time.Duration, p *Poll, identifiers ...uint32) (model.CANFrame, error) {
+func waitForFrame(ctx context.Context, timeout time.Duration, p *Poll, identifiers ...uint32) (frame.CANFrame, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -33,9 +53,10 @@ func waitForFrame(ctx context.Context, timeout time.Duration, p *Poll, identifie
 	}
 }
 
-func (c *Client) SendAndPoll(ctx context.Context, frame *model.Frame, timeout time.Duration, identifiers ...uint32) (model.CANFrame, error) {
+func (c *Client) SendAndPoll(ctx context.Context, frame *frame.Frame, timeout time.Duration, identifiers ...uint32) (frame.CANFrame, error) {
 	frame.SetTimeout(timeout)
-	p := newPoller(OneOff, 1, identifiers...)
+	p := newPoller(1, identifiers...)
+
 	c.hub.register <- p
 	defer func() {
 		c.hub.unregister <- p
@@ -47,14 +68,14 @@ func (c *Client) SendAndPoll(ctx context.Context, frame *model.Frame, timeout ti
 	return waitForFrame(ctx, timeout, p, identifiers...)
 }
 
-func (c *Client) Subscribe(ctx context.Context, identifiers ...uint32) chan model.CANFrame {
-	p := newPoller(Subscription, 100, identifiers...)
+func (c *Client) Subscribe(ctx context.Context, identifiers ...uint32) chan frame.CANFrame {
+	p := newPoller(100, identifiers...)
 	c.hub.register <- p
 	return p.callback
 }
 
-func (c *Client) Poll(ctx context.Context, timeout time.Duration, identifiers ...uint32) (model.CANFrame, error) {
-	p := newPoller(OneOff, 1, identifiers...)
+func (c *Client) Poll(ctx context.Context, timeout time.Duration, identifiers ...uint32) (frame.CANFrame, error) {
+	p := newPoller(1, identifiers...)
 	c.hub.register <- p
 	defer func() {
 		c.hub.unregister <- p
@@ -62,28 +83,7 @@ func (c *Client) Poll(ctx context.Context, timeout time.Duration, identifiers ..
 	return waitForFrame(ctx, timeout, p, identifiers...)
 }
 
-type PollType int
-
-const (
-	OneOff PollType = iota
-	Subscription
-)
-
-type Poll struct {
-	errcount    uint16
-	identifiers []uint32
-	callback    chan model.CANFrame
-	variant     PollType
-}
-
-type Hub struct {
-	pollers    map[*Poll]bool
-	register   chan *Poll
-	unregister chan *Poll
-	incoming   <-chan model.CANFrame
-}
-
-func newHub(incoming <-chan model.CANFrame) *Hub {
+func newHub(incoming <-chan frame.CANFrame) *Hub {
 	return &Hub{
 		pollers:    make(map[*Poll]bool),
 		register:   make(chan *Poll, 10),
@@ -122,18 +122,13 @@ func (h *Hub) run(ctx context.Context) {
 						continue poll
 					}
 				}
+
 			}
 		}
 	}
 }
 
-func (h *Hub) deliver(poll *Poll, frame model.CANFrame) {
-	defer func() {
-		if err := recover(); err != nil {
-			log.Println("panic occurred:", err)
-			delete(h.pollers, poll)
-		}
-	}()
+func (h *Hub) deliver(poll *Poll, frame frame.CANFrame) {
 	select {
 	case poll.callback <- frame:
 	default:
