@@ -12,50 +12,50 @@ import (
 	sdialog "github.com/sqweek/dialog"
 )
 
-func ecuFlash() {
-	if !checkSelections() {
+func (m *mainWindow) ecuFlash() {
+	if !m.checkSelections() {
 		return
 	}
 
-	disableButtons()
+	m.disableButtons()
 	ctx, cancel := context.WithTimeout(context.Background(), 1800*time.Second)
 
 	filename, err := sdialog.File().Filter("Select Bin", "bin").Load()
 	if err != nil {
-		output(err.Error())
+		m.output(err.Error())
 		cancel()
-		enableButtons()
+		m.enableButtons()
 		return
 	}
 
 	bin, err := os.ReadFile(filename)
 	if err != nil {
-		output(err.Error())
+		m.output(err.Error())
 		cancel()
-		enableButtons()
+		m.enableButtons()
 		return
 	}
 
 	ok := sdialog.Message("%s", "Do you want to continue?").Title("Are you sure?").YesNo()
 	if !ok {
-		enableButtons()
+		m.enableButtons()
 		cancel()
-		output("Flash aborted by user")
-		enableButtons()
+		m.output("Flash aborted by user")
+		m.enableButtons()
 		return
 	}
 
-	output("Flashing " + strconv.Itoa(len(bin)) + " bytes")
+	m.output("Flashing " + strconv.Itoa(len(bin)) + " bytes")
 
-	mw.progressBar.SetValue(0)
-	mw.progressBar.Max = float64(len(bin))
-	mw.progressBar.Refresh()
+	m.progressBar.SetValue(0)
+	m.progressBar.Max = float64(len(bin))
+	m.progressBar.Refresh()
 
 	go func() {
-		defer enableButtons()
+		defer m.enableButtons()
 		defer cancel()
 
-		c, err := initCAN(ctx)
+		c, err := m.initCAN(ctx)
 		if err != nil {
 			log.Println(err)
 			return
@@ -64,20 +64,20 @@ func ecuFlash() {
 
 		tr, err := ecu.New(c, state.ecuType)
 		if err != nil {
-			output(err.Error())
+			m.output(err.Error())
 			return
 		}
 
-		if err := tr.FlashECU(ctx, bin, callback); err != nil {
-			output(err.Error())
+		if err := tr.FlashECU(ctx, bin, m.callback); err != nil {
+			m.output(err.Error())
 			return
 		}
 
-		if err := tr.ResetECU(ctx, callback); err != nil {
-			output(err.Error())
+		if err := tr.ResetECU(ctx, m.callback); err != nil {
+			m.output(err.Error())
 			return
 		}
 
-		mw.app.SendNotification(fyne.NewNotification("", "Flash done"))
+		m.app.SendNotification(fyne.NewNotification("", "Flash done"))
 	}()
 }

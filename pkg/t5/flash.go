@@ -64,7 +64,6 @@ func (t *Client) FlashECU(ctx context.Context, bin []byte, callback model.Progre
 				}
 				// put bytes them in the dataframe!
 				data[(i%7)+1] = buff[i]
-
 				// send a bootloader frame whenever 7 bytes or a block of 0x80 bytes have been read from the BIN file
 				if i%7 == 6 || i == 0x80-1 {
 					if err := t.sendBootloaderDataCommand(ctx, data, 8); err != nil {
@@ -84,6 +83,5 @@ func (t *Client) FlashECU(ctx context.Context, bin []byte, callback model.Progre
 	if callback != nil {
 		callback(fmt.Sprintf("Done, took: %s\n", time.Since(startTime).Round(time.Millisecond).String()))
 	}
-
 	return nil
 }

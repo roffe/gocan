@@ -11,70 +11,70 @@ import (
 	sdialog "github.com/sqweek/dialog"
 )
 
-func ecuDump() {
-	if !checkSelections() {
+func (m *mainWindow) ecuDump() {
+	if !m.checkSelections() {
 		return
 	}
 
-	disableButtons()
+	m.disableButtons()
 	ctx, cancel := context.WithTimeout(context.Background(), 900*time.Second)
 
 	filename, err := sdialog.File().Filter("bin").Title("Save binary").Save()
 	if err != nil {
-		output(err.Error())
+		m.output(err.Error())
 		cancel()
-		enableButtons()
+		m.enableButtons()
 		return
 	}
 
-	mw.progressBar.SetValue(0)
+	m.progressBar.SetValue(0)
 
 	go func() {
-		defer enableButtons()
+		defer m.enableButtons()
 		defer cancel()
 
-		c, err := initCAN(ctx)
+		c, err := m.initCAN(ctx)
 		if err != nil {
-			output(err.Error())
+			m.output(err.Error())
 			return
 		}
 		defer c.Close()
 
 		tr, err := ecu.New(c, state.ecuType)
 		if err != nil {
-			output(err.Error())
+			m.output(err.Error())
 			return
 		}
 
-		bin, err := tr.DumpECU(ctx, callback)
+		bin, err := tr.DumpECU(ctx, m.callback)
 		if err == nil {
-			mw.app.SendNotification(fyne.NewNotification("", "Dump done"))
+			m.app.SendNotification(fyne.NewNotification("", "Dump done"))
 			if err := os.WriteFile(filename, bin, 0644); err == nil {
-				output("Saved as " + filename)
+				m.output("Saved as " + filename)
 			} else {
-				output(err.Error())
+				m.output(err.Error())
 			}
 		} else {
-			output(err.Error())
+			m.output(err.Error())
 		}
 
-		if err := tr.ResetECU(ctx, callback); err != nil {
-			output(err.Error())
+		if err := tr.ResetECU(ctx, m.callback); err != nil {
+			m.output(err.Error())
 		}
 	}()
 }
 
-func callback(v interface{}) {
+func (m *mainWindow) callback(v interface{}) {
 	switch t := v.(type) {
 	case string:
-		output(t)
+		m.output(t)
 	case float64:
 		if t < 0 {
-			mw.progressBar.Max = math.Abs(t)
-			mw.progressBar.SetValue(0)
+			m.progressBar.Max = math.Abs(t)
+			m.progressBar.SetValue(0)
 			return
 		}
-		mw.progressBar.SetValue(t)
+		m.progressBar.SetValue(t)
 	default:
 		panic("invalid callback type")
 	}

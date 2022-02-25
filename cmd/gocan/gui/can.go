@@ -12,9 +12,9 @@ import (
 	"github.com/roffe/gocan/pkg/ecu"
 )
 
-func initCAN(ctx context.Context, filters ...uint32) (*gocan.Client, error) {
+func (m *mainWindow) initCAN(ctx context.Context, filters ...uint32) (*gocan.Client, error) {
 	startTime := time.Now()
-	output("Init adapter")
+	m.output("Init adapter")
 
 	var dev gocan.Adapter
 	switch strings.ToLower(state.adapter) {
@@ -51,7 +51,7 @@ func initCAN(ctx context.Context, filters ...uint32) (*gocan.Client, error) {
 		return nil, err
 	}
 
-	output(fmt.Sprintf("Done, took: %s\n", time.Since(startTime).Round(time.Millisecond).String()))
+	m.output(fmt.Sprintf("Done, took: %s\n", time.Since(startTime).Round(time.Millisecond).String()))
 
 	return gocan.New(ctx, dev, filters)
 }
