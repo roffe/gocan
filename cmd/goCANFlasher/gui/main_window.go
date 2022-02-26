@@ -133,7 +133,7 @@ func (m *mainWindow) createSelects() {
 		if err != nil {
 			m.output("failed to set port speed: " + err.Error())
 		}
-		state.portSpeed = speed
+		state.portBaudrate = speed
 		m.app.Preferences().SetString("portSpeed", s)
 	})
 

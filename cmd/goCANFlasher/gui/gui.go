@@ -15,12 +15,12 @@ import (
 )
 
 type appState struct {
-	ecuType   ecu.Type
-	canRate   float64
-	adapter   string
-	port      string
-	portSpeed int
-	portList  []string
+	ecuType      ecu.Type
+	canRate      float64
+	adapter      string
+	port         string
+	portBaudrate int
+	portList     []string
 }
 
 var (
