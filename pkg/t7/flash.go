@@ -2,7 +2,6 @@ package t7
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"log"
@@ -117,33 +116,7 @@ func (t *Client) FlashECU(ctx context.Context, bin []byte, callback model.Progre
 		if err != nil {
 			return err
 		}
-		//--
 
-		/*
-			if err := t.writeJump(ctx, o.offset, o.end-binPos); err != nil {
-				return err
-			}
-			for binPos < o.end {
-				left := o.end - binPos
-				var writeBytes int
-				if left >= 0xF0 {
-					writeBytes = 0xF0
-				} else {
-					writeBytes = left
-				}
-				if err := t.writeRange(ctx, binPos, binPos+writeBytes, bin); err != nil {
-					return err
-				}
-				binPos += writeBytes
-				left -= writeBytes
-				if callback != nil {
-					callback(float64(binPos))
-				}
-			}
-			if callback != nil {
-				callback(float64(binPos))
-			}
-		*/
 	}
 	end, err := t.c.SendAndPoll(ctx, frame.New(0x240, []byte{0x40, 0xA1, 0x01, 0x37, 0x00, 0x00, 0x00, 0x00}, frame.ResponseRequired), t.defaultTimeout, 0x258)
 	if err != nil {
@@ -165,14 +138,8 @@ func (t *Client) FlashECU(ctx context.Context, bin []byte, callback model.Progre
 
 // send request "Download - tool to module" to Trionic"
 func (t *Client) writeJump(ctx context.Context, offset, length int) error {
-	ob := make([]byte, 4)
-	binary.BigEndian.PutUint32(ob, uint32(offset))
-
-	lb := make([]byte, 4)
-	binary.BigEndian.PutUint32(lb, uint32(length))
-
-	jumpMsg := []byte{0x41, 0xA1, 0x08, 0x34, ob[1], ob[2], ob[3], ob[4]}
-	jumpMsg2 := []byte{0x00, 0xA1, lb[1], lb[2], lb[3], lb[4], 0x00, 0x00}
+	jumpMsg := []byte{0x41, 0xA1, 0x08, 0x34, byte(offset >> 16), byte(offset >> 8), byte(offset), 0x00}
+	jumpMsg2 := []byte{0x00, 0xA1, byte(length >> 16), byte(length >> 8), byte(length), 0x00, 0x00, 0x00}
 
 	t.c.SendFrame(0x240, jumpMsg, frame.Outgoing)
 
