@@ -4,6 +4,7 @@ import (
 	"context"
 	"math"
 	"os"
+	"strings"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -11,25 +12,36 @@ import (
 	sdialog "github.com/sqweek/dialog"
 )
 
+func addSuffix(s, suffix string) string {
+	if !strings.HasSuffix(s, suffix) {
+		return s + suffix
+	}
+	return s
+}
+
 func (m *mainWindow) ecuDump() {
 	if !m.checkSelections() {
 		return
 	}
 
-	m.disableButtons()
 	ctx, cancel := context.WithTimeout(context.Background(), 900*time.Second)
 
-	filename, err := sdialog.File().Filter("bin").Title("Save binary").Save()
+	filename, err := sdialog.File().Filter("Bin file", "bin").Title("Save bin file").Save()
 	if err != nil {
 		m.output(err.Error())
 		cancel()
-		m.enableButtons()
 		return
 	}
-
+	filename = addSuffix(filename, ".bin")
 	m.progressBar.SetValue(0)
 
 	go func() {
+		state.inprogress = true
+		defer func() {
+			state.inprogress = false
+		}()
+
+		m.disableButtons()
 		defer m.enableButtons()
 		defer cancel()
 

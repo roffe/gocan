@@ -13,6 +13,8 @@ import (
 //go:embed trionicCanFlasher.png
 var trionicCanFlasherIcon []byte
 
+var appIcon = fyne.NewStaticResource("trionicCanFlasherIcon.ico", trionicCanFlasherIcon)
+
 func init() {
 	log.SetFlags(log.Lshortfile | log.LstdFlags)
 }
@@ -20,9 +22,6 @@ func init() {
 func main() {
 	a := app.NewWithID("GoCANFlasher")
 	a.Settings().SetTheme(&gocanTheme{})
-
-	icon := fyne.NewStaticResource("trionicCanFlasherIcon.ico", trionicCanFlasherIcon)
-	a.SetIcon(icon)
-
+	a.SetIcon(appIcon)
 	gui.Run(context.TODO(), a)
 }

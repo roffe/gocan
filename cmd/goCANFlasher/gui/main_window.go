@@ -30,6 +30,7 @@ type mainWindow struct {
 	refreshBTN *widget.Button
 	infoBTN    *widget.Button
 	dumpBTN    *widget.Button
+	sramBTN    *widget.Button
 	flashBTN   *widget.Button
 
 	progressBar *widget.ProgressBar
@@ -37,9 +38,8 @@ type mainWindow struct {
 
 func newMainWindow(a fyne.App, w fyne.Window) *mainWindow {
 	m := &mainWindow{
-		app:    a,
-		window: w,
-
+		app:         a,
+		window:      w,
 		log:         createLogList(),
 		progressBar: widget.NewProgressBar(),
 	}
@@ -68,8 +68,8 @@ func createLogList() *widget.List {
 }
 
 func (m *mainWindow) layout() *container.Split {
-	left := container.New(layout.NewMaxLayout(), m.log)
 
+	left := container.New(layout.NewMaxLayout(), m.log)
 	right := container.NewVBox(
 		widget.NewLabel(""),
 		m.ecuList,
@@ -79,6 +79,7 @@ func (m *mainWindow) layout() *container.Split {
 		layout.NewSpacer(),
 		m.infoBTN,
 		m.dumpBTN,
+		m.sramBTN,
 		m.flashBTN,
 		m.refreshBTN,
 	)
@@ -92,6 +93,7 @@ func (m *mainWindow) layout() *container.Split {
 }
 
 func (m *mainWindow) createButtons() {
+	m.sramBTN = widget.NewButton("Dump SRAM", m.dumpSRAM)
 	m.refreshBTN = widget.NewButton("Refresh Ports", m.refreshPorts)
 	m.infoBTN = widget.NewButton("Info", m.ecuInfo)
 	m.dumpBTN = widget.NewButton("Dump", m.ecuDump)
@@ -126,7 +128,13 @@ func (m *mainWindow) createSelects() {
 	m.portList.OnChanged = func(s string) {
 		state.port = s
 		m.app.Preferences().SetString("port", s)
+
 	}
+
+	//m.speedList = widget.NewSelect(m.ports(), func(s string) {
+	//	state.port = s
+	//	m.app.Preferences().SetString("port", s)
+	//})
 
 	m.speedList = widget.NewSelect(speeds(), func(s string) {
 		speed, err := strconv.Atoi(s)
@@ -172,13 +180,25 @@ func (m *mainWindow) checkSelections() bool {
 }
 
 func (m *mainWindow) disableButtons() {
+	m.ecuList.Disable()
+	m.adapterList.Disable()
+	m.portList.Disable()
+	m.speedList.Disable()
+
 	m.infoBTN.Disable()
 	m.dumpBTN.Disable()
+	m.sramBTN.Disable()
 	m.flashBTN.Disable()
 }
 
 func (m *mainWindow) enableButtons() {
+	m.ecuList.Enable()
+	m.adapterList.Enable()
+	m.portList.Enable()
+	m.speedList.Enable()
+
 	m.infoBTN.Enable()
 	m.dumpBTN.Enable()
+	m.sramBTN.Enable()
 	m.flashBTN.Enable()
 }

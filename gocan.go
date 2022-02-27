@@ -15,36 +15,49 @@ const (
 
 type Adapter interface {
 	Init(context.Context) error
-	SetPort(string) error
-	SetPortRate(int) error
-	SetCANrate(float64) error
-	SetCANfilter(...uint32)
-	Chan() <-chan frame.CANFrame
-	Send(frame.CANFrame) error
+	Recv() <-chan frame.CANFrame
+	Send() chan<- frame.CANFrame
 	Close() error
 }
 
-type Client struct {
-	hub    *Hub
-	device Adapter
+type AdapterConfig struct {
+	Port         string
+	PortBaudrate int
+	CANRate      float64
+	CANFilter    []uint32
 }
 
-func New(ctx context.Context, device Adapter, filters []uint32) (*Client, error) {
+type Client struct {
+	hub     *Hub
+	adapter Adapter
+	send    chan<- frame.CANFrame
+}
+
+func New(ctx context.Context, adapter Adapter) (*Client, error) {
+	if err := adapter.Init(ctx); err != nil {
+		return nil, err
+	}
 	c := &Client{
-		hub:    newHub(device.Chan()),
-		device: device,
+		hub:     newHub(adapter.Recv()),
+		adapter: adapter,
+		send:    adapter.Send(),
 	}
 	go c.hub.run(ctx)
 	return c, nil
 }
 
 func (c *Client) Close() error {
-	return c.device.Close()
+	return c.adapter.Close()
 }
 
 // Send a CAN Frame
 func (c *Client) Send(msg frame.CANFrame) error {
-	return c.device.Send(msg)
+	select {
+	case c.send <- msg:
+		return nil
+	case <-time.After(3 * time.Second):
+		return errors.New("failed to send frame")
+	}
 }
 
 // Shortcommand to send a standard 11bit frame
@@ -52,7 +65,6 @@ func (c *Client) SendFrame(identifier uint32, data []byte, t frame.CANFrameType)
 	var b = make([]byte, len(data))
 	copy(b, data)
 	frame := frame.New(identifier, b, t)
-
 	return c.Send(frame)
 }
 
@@ -71,9 +83,10 @@ func (c *Client) SendAndPoll(ctx context.Context, frame *frame.Frame, timeout ti
 		c.hub.unregister <- p
 	}()
 
-	if err := c.device.Send(frame); err != nil {
+	if err := c.Send(frame); err != nil {
 		return nil, err
 	}
+
 	return waitForFrame(ctx, timeout, p, identifiers...)
 }
 

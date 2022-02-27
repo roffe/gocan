@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/albenik/bcd"
+	"github.com/roffe/gocan"
 	"github.com/roffe/gocan/pkg/frame"
 	"go.bug.st/serial"
 )
@@ -19,7 +20,7 @@ import (
 type Canusb struct {
 	port             serial.Port
 	portName         string
-	portRate         int
+	portBaudrate     int
 	canRate          string
 	canCode, canMask string
 	send, recv       chan frame.CANFrame
@@ -27,17 +28,24 @@ type Canusb struct {
 	closed           bool
 }
 
-func NewCanusb() *Canusb {
-	return &Canusb{
-		send:  make(chan frame.CANFrame, 100),
-		recv:  make(chan frame.CANFrame, 100),
-		close: make(chan struct{}, 1),
+func NewCanusb(cfg *gocan.AdapterConfig) (*Canusb, error) {
+	cu := &Canusb{
+		portName:     cfg.Port,
+		portBaudrate: cfg.PortBaudrate,
+		send:         make(chan frame.CANFrame, 100),
+		recv:         make(chan frame.CANFrame, 100),
+		close:        make(chan struct{}, 1),
 	}
+	if err := cu.setCANrate(cfg.CANRate); err != nil {
+		return nil, err
+	}
+	cu.canCode, cu.canMask = calcAcceptanceFilters(cfg.CANFilter)
+	return cu, nil
 }
 
 func (cu *Canusb) Init(ctx context.Context) error {
 	mode := &serial.Mode{
-		BaudRate: cu.portRate,
+		BaudRate: cu.portBaudrate,
 		Parity:   serial.NoParity,
 		DataBits: 8,
 		StopBits: serial.OneStopBit,
@@ -58,20 +66,20 @@ func (cu *Canusb) Init(ctx context.Context) error {
 		cu.canMask,
 		"O", // Open the CAN channel
 	}
-	p.SetReadTimeout(3 * time.Millisecond)
+	p.SetReadTimeout(2 * time.Millisecond)
 	for _, c := range cmds {
 		_, err := p.Write([]byte(c + "\r"))
 		if err != nil {
 			p.Close()
 			return err
 		}
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(5 * time.Millisecond)
 	}
 
 	go func() {
 		for ctx.Err() == nil {
 			<-time.After(500 * time.Millisecond)
-			cu.Send(frame.NewRawCommand("F"))
+			cu.send <- frame.NewRawCommand("F")
 		}
 	}()
 
@@ -81,17 +89,7 @@ func (cu *Canusb) Init(ctx context.Context) error {
 	return nil
 }
 
-func (cu *Canusb) SetPort(port string) error {
-	cu.portName = port
-	return nil
-}
-
-func (cu *Canusb) SetPortRate(rate int) error {
-	cu.portRate = rate
-	return nil
-}
-
-func (cu *Canusb) SetCANrate(rate float64) error {
+func (cu *Canusb) setCANrate(rate float64) error {
 	switch rate {
 	case 10:
 		cu.canRate = "S0"
@@ -124,25 +122,12 @@ func (cu *Canusb) SetCANrate(rate float64) error {
 	return nil
 }
 
-func (cu *Canusb) SetCANfilter(ids ...uint32) {
-	cu.canCode, cu.canMask = calcAcceptanceFilters(ids...)
-}
-
-func (cu *Canusb) Read(data []byte) (int, error) {
-	return cu.port.Read(data)
-}
-
-func (cu *Canusb) Chan() <-chan frame.CANFrame {
+func (cu *Canusb) Recv() <-chan frame.CANFrame {
 	return cu.recv
 }
 
-func (cu *Canusb) Send(frame frame.CANFrame) error {
-	select {
-	case cu.send <- frame:
-		return nil
-	case <-time.After(3 * time.Second):
-		return errors.New("failed to send frame")
-	}
+func (cu *Canusb) Send() chan<- frame.CANFrame {
+	return cu.send
 }
 
 func (cu *Canusb) Close() error {
@@ -157,7 +142,7 @@ func (cu *Canusb) Close() error {
 	return cu.port.Close()
 }
 
-func calcAcceptanceFilters(idList ...uint32) (string, string) {
+func calcAcceptanceFilters(idList []uint32) (string, string) {
 	var code uint32 = ^uint32(0)
 	var mask uint32 = 0
 	if len(idList) == 0 {

@@ -8,8 +8,7 @@ import (
 	"strings"
 
 	"github.com/roffe/gocan"
-	"github.com/roffe/gocan/adapter/lawicel"
-	"github.com/roffe/gocan/adapter/obdlink"
+	"github.com/roffe/gocan/adapter"
 	"github.com/roffe/gocan/pkg/ecu"
 	"github.com/spf13/cobra"
 )
@@ -24,47 +23,34 @@ func init() {
 	rootCmd.AddCommand(canCMD)
 }
 func initCAN(ctx context.Context) (*gocan.Client, error) {
-	adapter, port, baudrate, canrate, err := getAdapterOpts()
+	adapterName, port, baudrate, canrate, err := getAdapterOpts()
 	if err != nil {
 		return nil, err
 	}
 
-	var dev gocan.Adapter
-	switch strings.ToLower(adapter) {
-	case "canusb":
-		dev = lawicel.NewCanusb()
-	case "sx", "obdlinksx":
-		dev = obdlink.NewSX()
-	default:
-		return nil, fmt.Errorf("unknown adapter %q", adapter)
-	}
-
-	if err := dev.SetPort(port); err != nil {
-		return nil, err
-	}
-
-	if err := dev.SetPortRate(baudrate); err != nil {
-		return nil, err
-	}
-
-	if err := dev.SetCANrate(canrate); err != nil {
-		return nil, err
-	}
-
+	var filters []uint32
 	switch getECUType() {
 	case ecu.Trionic5:
-		dev.SetCANfilter(0x000, 0x005, 0x006, 0x00C)
+		filters = []uint32{0x000, 0x005, 0x006, 0x00C}
 	case ecu.Trionic7:
-		dev.SetCANfilter(0x220, 0x238, 0x240, 0x258, 0x266)
+		filters = []uint32{0x220, 0x238, 0x240, 0x258, 0x266}
 	case ecu.Trionic8:
-		dev.SetCANfilter(0x011, 0x311, 0x7E0, 0x7E8, 0x5E8)
+		filters = []uint32{0x011, 0x311, 0x7E0, 0x7E8, 0x5E8}
 	}
 
-	if err := dev.Init(ctx); err != nil {
+	dev, err := adapter.New(
+		adapterName,
+		&gocan.AdapterConfig{
+			Port:         port,
+			PortBaudrate: baudrate,
+			CANRate:      canrate,
+			CANFilter:    filters,
+		},
+	)
+	if err != nil {
 		return nil, err
 	}
-
-	return gocan.New(ctx, dev, filters)
+	return gocan.New(ctx, dev)
 }
 
 func getECUType() ecu.Type {

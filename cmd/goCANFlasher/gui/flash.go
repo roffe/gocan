@@ -20,7 +20,7 @@ func (m *mainWindow) ecuFlash() {
 	m.disableButtons()
 	ctx, cancel := context.WithTimeout(context.Background(), 1800*time.Second)
 
-	filename, err := sdialog.File().Filter("Select Bin", "bin").Load()
+	filename, err := sdialog.File().Filter("Bin file", "bin").Title("Load bin file").Load()
 	if err != nil {
 		m.output(err.Error())
 		cancel()
@@ -45,8 +45,12 @@ func (m *mainWindow) ecuFlash() {
 		return
 	}
 
-	m.output("Flashing " + strconv.Itoa(len(bin)) + " bytes")
+	state.inprogress = true
+	defer func() {
+		state.inprogress = false
+	}()
 
+	m.output("Flashing " + strconv.Itoa(len(bin)) + " bytes")
 	m.progressBar.SetValue(0)
 	m.progressBar.Max = float64(len(bin))
 	m.progressBar.Refresh()

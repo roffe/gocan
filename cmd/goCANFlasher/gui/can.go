@@ -3,55 +3,45 @@ package gui
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/roffe/gocan"
-	"github.com/roffe/gocan/adapter/lawicel"
-	"github.com/roffe/gocan/adapter/obdlink"
+	"github.com/roffe/gocan/adapter"
 	"github.com/roffe/gocan/pkg/ecu"
 )
 
-func (m *mainWindow) initCAN(ctx context.Context, filters ...uint32) (*gocan.Client, error) {
+func (m *mainWindow) initCAN(ctx context.Context) (*gocan.Client, error) {
 	startTime := time.Now()
 	m.output("Init adapter")
 
-	var dev gocan.Adapter
-	switch strings.ToLower(state.adapter) {
-	case "canusb":
-		dev = lawicel.NewCanusb()
-	case "sx", "obdlinksx":
-		dev = obdlink.NewSX()
-	default:
-		return nil, fmt.Errorf("unknown adapter %q", state.adapter)
-	}
-
-	if err := dev.SetPort(state.port); err != nil {
-		return nil, err
-	}
-
-	if err := dev.SetPortRate(state.portSpeed); err != nil {
-		return nil, err
-	}
-
-	if err := dev.SetCANrate(state.canRate); err != nil {
-		return nil, err
-	}
-
+	var filters []uint32
 	switch state.ecuType {
 	case ecu.Trionic5:
-		dev.SetCANfilter(0x000, 0x005, 0x006, 0x00C)
+		filters = []uint32{0x000, 0x005, 0x006, 0x00C}
 	case ecu.Trionic7:
-		dev.SetCANfilter(0x220, 0x238, 0x240, 0x258, 0x266)
+		filters = []uint32{0x220, 0x238, 0x240, 0x258, 0x266}
 	case ecu.Trionic8:
-		dev.SetCANfilter(0x011, 0x311, 0x7E0, 0x7E8, 0x5E8)
+		filters = []uint32{0x011, 0x311, 0x7E0, 0x7E8, 0x5E8}
 	}
 
-	if err := dev.Init(ctx); err != nil {
+	dev, err := adapter.New(
+		state.adapter,
+		&gocan.AdapterConfig{
+			Port:         state.port,
+			PortBaudrate: state.portBaudrate,
+			CANRate:      state.canRate,
+			CANFilter:    filters,
+		})
+	if err != nil {
+		return nil, err
+	}
+
+	client, err := gocan.New(ctx, dev)
+	if err != nil {
 		return nil, err
 	}
 
 	m.output(fmt.Sprintf("Done, took: %s\n", time.Since(startTime).Round(time.Millisecond).String()))
 
-	return gocan.New(ctx, dev, filters)
+	return client, nil
 }

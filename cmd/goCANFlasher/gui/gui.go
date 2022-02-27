@@ -11,6 +11,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/data/binding"
 	"github.com/roffe/gocan/pkg/ecu"
+	sdialog "github.com/sqweek/dialog"
 	"go.bug.st/serial/enumerator"
 )
 
@@ -21,6 +22,7 @@ type appState struct {
 	port         string
 	portBaudrate int
 	portList     []string
+	inprogress   bool
 }
 
 var (
@@ -40,8 +42,19 @@ func Run(ctx context.Context, a fyne.App) {
 
 	w.SetContent(mw.layout())
 
+	w.SetCloseIntercept(func() {
+		if state.inprogress {
+			if sdialog.Message("Are you sure, operation still in progress").Title("In progress").YesNo() {
+				w.Close()
+			}
+			return
+		}
+		w.Close()
+	})
+
 	go func() {
 		<-ctx.Done()
+		time.Sleep(500 * time.Millisecond)
 		w.Close()
 	}()
 

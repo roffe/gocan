@@ -12,12 +12,18 @@ func (m *mainWindow) ecuInfo() {
 	if !m.checkSelections() {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	m.disableButtons()
 
 	go func() {
-		defer m.enableButtons()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
+
+		state.inprogress = true
+		defer func() {
+			state.inprogress = false
+		}()
+
+		m.disableButtons()
+		defer m.enableButtons()
 
 		c, err := m.initCAN(ctx)
 		if err != nil {

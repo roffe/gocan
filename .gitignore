@@ -4,6 +4,7 @@
 *.RAM
 *.exe
 *.zip
+*.rar
 tmp
 tmp/*
 dump
