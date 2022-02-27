@@ -177,10 +177,7 @@ func (cu *Canusb) sendManager(ctx context.Context) {
 				f.WriteString(v.String() + "\r")
 
 			default:
-				//idb := make([]byte, 4)
-				//binary.BigEndian.PutUint32(idb, v.Identifier())
 				a := v.Identifier()
-				// convert uint32 can id to string
 				f.Write([]byte{'t', byte(a>>8) + 0x30, (byte(a) >> 4) + 0x30, ((byte(a) << 4) >> 4) + 0x30})
 				f.WriteString(strconv.Itoa(v.Length()) + hex.EncodeToString(v.Data()) + "\r")
 			}

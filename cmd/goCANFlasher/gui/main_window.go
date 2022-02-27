@@ -20,10 +20,13 @@ import (
 const eas = "KW"
 
 type mainWindow struct {
-	app    fyne.App
-	window fyne.Window
+	app           fyne.App
+	window        fyne.Window
+	wizzardWindow *wizzard
 
 	log *widget.List
+
+	wizzardBTN *widget.Button
 
 	ecuList     *widget.Select
 	adapterList *widget.Select
@@ -43,10 +46,11 @@ var keyhandler = bytes.NewBuffer(nil)
 
 func newMainWindow(a fyne.App, w fyne.Window) *mainWindow {
 	m := &mainWindow{
-		app:         a,
-		window:      w,
-		log:         createLogList(),
-		progressBar: widget.NewProgressBar(),
+		app:           a,
+		window:        w,
+		wizzardWindow: newWizzard(a, w),
+		log:           createLogList(),
+		progressBar:   widget.NewProgressBar(),
 	}
 
 	w.Canvas().SetOnTypedKey(m.onTypedKey)
@@ -93,6 +97,8 @@ func (m *mainWindow) layout() *container.Split {
 	left := container.New(layout.NewMaxLayout(), m.log)
 	right := container.NewVBox(
 		widget.NewLabel(""),
+		m.wizzardBTN,
+		widget.NewLabel(""),
 		m.ecuList,
 		m.adapterList,
 		m.portList,
@@ -114,11 +120,16 @@ func (m *mainWindow) layout() *container.Split {
 }
 
 func (m *mainWindow) createButtons() {
+	m.wizzardBTN = widget.NewButton("Wizzard", m.wizzard)
 	m.sramBTN = widget.NewButton("Dump SRAM", m.dumpSRAM)
 	m.refreshBTN = widget.NewButton("Refresh Ports", m.refreshPorts)
 	m.infoBTN = widget.NewButton("Info", m.ecuInfo)
 	m.dumpBTN = widget.NewButton("Dump", m.ecuDump)
 	m.flashBTN = widget.NewButton("Flash", m.ecuFlash)
+}
+
+func (m *mainWindow) wizzard() {
+	m.wizzardWindow.window.Show()
 }
 
 func (m *mainWindow) createSelects() {

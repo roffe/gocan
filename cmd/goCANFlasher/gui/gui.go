@@ -63,6 +63,7 @@ func (m *mainWindow) closeHandler() {
 		}
 		return
 	}
+	m.wizzardWindow.window.Close()
 	m.window.Close()
 }
 
