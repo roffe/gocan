@@ -66,19 +66,24 @@ func (cu *Canusb) Init(ctx context.Context) error {
 		cu.canMask,
 		"O", // Open the CAN channel
 	}
-	p.SetReadTimeout(2 * time.Millisecond)
+	p.SetReadTimeout(1 * time.Millisecond)
+
+	delay := time.Duration(5000000000000 / mode.BaudRate)
+	if delay > (100 * time.Millisecond) {
+		delay = 100 * time.Millisecond
+	}
+
 	for _, c := range cmds {
 		_, err := p.Write([]byte(c + "\r"))
 		if err != nil {
 			p.Close()
 			return err
 		}
-		time.Sleep(5 * time.Millisecond)
 	}
 
 	go func() {
 		for ctx.Err() == nil {
-			<-time.After(500 * time.Millisecond)
+			<-time.After(700 * time.Millisecond)
 			cu.send <- frame.NewRawCommand("F")
 		}
 	}()
@@ -165,21 +170,28 @@ type token struct{}
 var sendMutex = make(chan token, 1)
 
 func (cu *Canusb) sendManager(ctx context.Context) {
+	f := bytes.NewBuffer(nil)
 	for {
 		select {
 		case v := <-cu.send:
-			var b []byte
 			switch v.(type) {
 			case *frame.RawCommand:
-				b = []byte(append(v.Data(), '\r'))
+				f.WriteString(v.String() + "\r")
+
 			default:
-				b = []byte(fmt.Sprintf("t%03X%d%X\r", v.Identifier(), v.Len(), v.Data()))
+				idb := make([]byte, 4)
+				binary.BigEndian.PutUint32(idb, v.Identifier())
+				f.WriteString("t" + hex.EncodeToString(idb)[5:] +
+					strconv.Itoa(v.Len()) +
+					hex.EncodeToString(v.Data()) + "\r")
 			}
+
 			sendMutex <- token{}
-			_, err := cu.port.Write(b)
+			_, err := cu.port.Write(f.Bytes())
 			if err != nil {
-				log.Printf("failed to write to com port: %q, %v\n", string(b), err)
+				log.Printf("failed to write to com port: %q, %v", f.String(), err)
 			}
+			f.Reset()
 		case <-ctx.Done():
 			return
 		case <-cu.close:
@@ -190,8 +202,8 @@ func (cu *Canusb) sendManager(ctx context.Context) {
 
 func (cu *Canusb) recvManager(ctx context.Context) {
 	buff := bytes.NewBuffer(nil)
-	readBuffer := make([]byte, 10)
-	for ctx.Err() == nil {
+	readBuffer := make([]byte, 8)
+	for {
 		select {
 		case <-ctx.Done():
 			return
@@ -207,13 +219,12 @@ func (cu *Canusb) recvManager(ctx context.Context) {
 		if n == 0 {
 			continue
 		}
-		cu.parse(ctx, n, readBuffer, buff)
-
+		cu.parse(ctx, readBuffer[:n], buff)
 	}
 }
 
-func (cu *Canusb) parse(ctx context.Context, n int, readBuffer []byte, buff *bytes.Buffer) {
-	for _, b := range readBuffer[:n] {
+func (cu *Canusb) parse(ctx context.Context, readBuffer []byte, buff *bytes.Buffer) {
+	for _, b := range readBuffer {
 		select {
 		case <-ctx.Done():
 			return
@@ -253,7 +264,10 @@ func (cu *Canusb) parse(ctx context.Context, n int, readBuffer []byte, buff *byt
 				}
 				//fmt.Println("ok")
 			case 0x07:
-				//log.Println("received error response")
+				select {
+				case <-sendMutex:
+				default:
+				}
 			case 'V':
 				select {
 				case <-sendMutex:
@@ -267,6 +281,10 @@ func (cu *Canusb) parse(ctx context.Context, n int, readBuffer []byte, buff *byt
 				}
 				//log.Println("H/W serial ", buff.String())
 			default:
+				select {
+				case <-sendMutex:
+				default:
+				}
 				log.Printf("COM>> %q\n", buff.String())
 			}
 			buff.Reset()
@@ -320,28 +338,19 @@ func checkBitSet(n, k int) bool {
 }
 
 func (*Canusb) decodeFrame(buff []byte) (*frame.Frame, error) {
-	idBytes, err := hex.DecodeString(fmt.Sprintf("%08s", buff[1:4]))
+	data, err := hex.DecodeString(string(buff[5:]))
 	if err != nil {
-		return nil, fmt.Errorf("filed to decode identifier: %v", err)
-	}
-	recvBytes := len(buff[5:])
-
-	leng, err := strconv.ParseUint(string(buff[4:5]), 0, 8)
-	if err != nil {
-		return nil, err
-	}
-
-	if uint64(recvBytes/2) != leng {
-		return nil, errors.New("frame received bytes does not match header")
-	}
-
-	var data = make([]byte, hex.DecodedLen(recvBytes))
-	if _, err := hex.Decode(data, buff[5:]); err != nil {
 		return nil, fmt.Errorf("failed to decode frame body: %v", err)
 	}
 
+	if int(buff[4]-0x30) != len(buff[5:])/2 {
+		return nil, errors.New("frame received bytes does not match header")
+	}
+
+	id := uint32(buff[1]-0x30)<<8 | uint32(buff[2]-0x30)<<4 | uint32(buff[3]-0x30)
+
 	return frame.New(
-		binary.BigEndian.Uint32(idBytes),
+		id,
 		data,
 		frame.Incoming,
 	), nil

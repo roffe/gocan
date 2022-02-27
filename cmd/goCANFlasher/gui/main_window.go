@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"bytes"
 	"strconv"
 	"strings"
 
@@ -15,6 +16,8 @@ import (
 	"github.com/roffe/gocan/pkg/t8"
 	sdialog "github.com/sqweek/dialog"
 )
+
+const eas = "KW"
 
 type mainWindow struct {
 	app    fyne.App
@@ -36,6 +39,8 @@ type mainWindow struct {
 	progressBar *widget.ProgressBar
 }
 
+var keyhandler = bytes.NewBuffer(nil)
+
 func newMainWindow(a fyne.App, w fyne.Window) *mainWindow {
 	m := &mainWindow{
 		app:         a,
@@ -43,9 +48,23 @@ func newMainWindow(a fyne.App, w fyne.Window) *mainWindow {
 		log:         createLogList(),
 		progressBar: widget.NewProgressBar(),
 	}
+
+	w.Canvas().SetOnTypedKey(m.onTypedKey)
+
 	m.createSelects()
 	m.createButtons()
 	return m
+}
+
+func (m *mainWindow) onTypedKey(ke *fyne.KeyEvent) {
+	keyhandler.WriteString(string(ke.Name))
+	if keyhandler.String() == ter+eas {
+		m.output(string(cmd1))
+		keyhandler.Reset()
+	}
+	if keyhandler.Len() > 4 {
+		keyhandler.Reset()
+	}
 }
 
 func createLogList() *widget.List {

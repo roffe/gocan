@@ -61,11 +61,11 @@ func (cu *SX) Init(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to open com port %q : %v", cu.portName, err)
 	}
-	p.SetReadTimeout(5 * time.Millisecond)
+	p.SetReadTimeout(1 * time.Millisecond)
 	cu.port = p
 
 	err = retry.Do(func() error {
-		speeds := []int{115200, 38400, 57600, 230400, 921600, 1000000, 2000000}
+		speeds := []int{115200, 230400, 921600, 2000000, 1000000, 57600, 38400}
 		desired := cu.portBaudrate
 		for _, speed := range speeds {
 			if err := setSpeed(p, mode, speed, desired); err == nil {
@@ -104,6 +104,11 @@ func (cu *SX) Init(ctx context.Context) error {
 		cu.filter, // code
 		cu.mask,   // mask
 	}
+	delay := time.Duration(5000000000000 / mode.BaudRate)
+	if delay > (100 * time.Millisecond) {
+		delay = 100 * time.Millisecond
+	}
+	time.Sleep(delay)
 
 	for _, c := range initCmds {
 		if c == "" {
@@ -114,10 +119,8 @@ func (cu *SX) Init(ctx context.Context) error {
 		if err != nil {
 			log.Println(err)
 		}
-		time.Sleep(20 * time.Millisecond)
-		p.ResetInputBuffer()
+		time.Sleep(delay)
 	}
-
 	p.ResetInputBuffer()
 
 	go cu.recvManager(ctx)
@@ -130,9 +133,9 @@ func setSpeed(p serial.Port, mode *serial.Mode, from, to int) error {
 	mode.BaudRate = from
 	p.SetMode(mode)
 	start := time.Now()
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 2; i++ {
 		p.Write([]byte("ATI\r"))
-		time.Sleep(5 * time.Millisecond)
+		time.Sleep(15 * time.Millisecond)
 		p.ResetInputBuffer()
 	}
 	errg, _ := errgroup.WithContext(context.Background())
@@ -171,7 +174,7 @@ func setSpeed(p serial.Port, mode *serial.Mode, from, to int) error {
 	})
 
 	p.Write([]byte("STBR" + strconv.Itoa(to) + "\r"))
-	time.Sleep(20 * time.Millisecond)
+	time.Sleep(15 * time.Millisecond)
 	mode.BaudRate = to
 	p.SetMode(mode)
 
@@ -179,65 +182,9 @@ func setSpeed(p serial.Port, mode *serial.Mode, from, to int) error {
 		return err
 	}
 	p.Write([]byte("\r"))
-	time.Sleep(20 * time.Millisecond)
 	p.ResetInputBuffer()
 	return nil
 }
-
-/*
-func (cu *SX) resetAdapter(ctx context.Context) error {
-
-	for i := 0; i < 3; i++ {
-		cu.port.Write([]byte("ATI\r"))
-		time.Sleep(10 * time.Millisecond)
-		cu.port.ResetInputBuffer()
-	}
-
-	errg, _ := errgroup.WithContext(ctx)
-	errg.Go(func() error {
-		readbuff := make([]byte, 4)
-		buff := bytes.NewBuffer(nil)
-		s := time.Now()
-		var ready bool
-		for !ready {
-			if time.Since(s) > 3*time.Second {
-				cu.port.Close()
-				return fmt.Errorf("Init timeout: %q", buff.String())
-			}
-			n, err := cu.port.Read(readbuff)
-			if err != nil {
-				if err == io.EOF {
-					break
-				}
-				cu.port.Close()
-				return err
-			}
-			if n == 0 {
-				continue
-			}
-			for _, b := range readbuff[:n] {
-				if b == '\r' {
-					if strings.Contains(buff.String(), "ELM") {
-						return nil
-					}
-				}
-
-			}
-			buff.Write(readbuff[:n])
-		}
-		return errors.New("Init failed, exited response awaiter")
-	})
-
-	cu.port.Write([]byte("ATZ\r"))
-	if err := errg.Wait(); err != nil {
-		cu.port.Close()
-		return err
-	}
-
-	cu.port.ResetInputBuffer()
-	return nil
-}
-*/
 
 func (cu *SX) setCANrate(rate float64) error {
 	switch rate {
@@ -288,35 +235,48 @@ type token struct{}
 var sendMutex = make(chan token, 1)
 
 func (cu *SX) sendManager(ctx context.Context) {
+	f := bytes.NewBuffer(nil)
 	for {
 		select {
 		case v := <-cu.send:
-			sendMutex <- token{}
-			var out string
 			switch v.(type) {
 			case *frame.RawCommand:
-				out = v.String() + "\r"
+				f.WriteString(v.String() + "\r")
 			default:
+				idb := make([]byte, 4)
+				binary.BigEndian.PutUint32(idb, v.Identifier())
+
+				r := 1
+				timeout := v.GetTimeout().Milliseconds()
+
 				if v.Type() == frame.Outgoing {
-					out = fmt.Sprintf("STPX h:%03X,d:%X,r:0\r", v.Identifier(), v.Data())
-					break
+					r = 0
 				}
-				if v.GetTimeout() != 0 {
-					out = fmt.Sprintf("STPX h:%03X,d:%X,t:%d,r:1\r", v.Identifier(), v.Data(), v.GetTimeout().Milliseconds())
-				} else {
-					out = fmt.Sprintf("STPX h:%03X,d:%X,r:1\r", v.Identifier(), v.Data())
+				// write cmd and header
+				f.WriteString("STPXh:" + hex.EncodeToString(idb)[5:] + "," +
+					// write data
+					"d:" + hex.EncodeToString(v.Data()) + ",")
+				// write timeout
+				if timeout > 0 {
+					f.WriteString("t:" + strconv.Itoa(int(timeout)) + ",")
 				}
+				// write reply
+				f.WriteString("r:" + strconv.Itoa(r) + "\r")
 			}
-			_, err := cu.port.Write([]byte(out))
+
+			sendMutex <- token{}
+			_, err := cu.port.Write(f.Bytes())
 			if err != nil {
-				log.Printf("failed to write to com port: %q, %v\n", out, err)
+				log.Printf("failed to write to com port: %q, %v", f.String(), err)
 			}
+			f.Reset()
 		case <-ctx.Done():
 			return
 		case <-cu.close:
 			return
 		}
 	}
+
 }
 
 func (cu *SX) recvManager(ctx context.Context) {
@@ -392,17 +352,15 @@ func (cu *SX) recvManager(ctx context.Context) {
 }
 
 func (*SX) decodeFrame(buff []byte) (frame.CANFrame, error) {
-	idBytes, err := hex.DecodeString(fmt.Sprintf("%08s", buff[0:3]))
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode identifier: %v", err)
-	}
 	data, err := hex.DecodeString(string(buff[3:]))
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode frame body: %v", err)
 	}
 
+	id := uint32(buff[0]-0x30)<<8 | uint32(buff[1]-0x30)<<4 | uint32(buff[2]-0x30)
+
 	return frame.New(
-		binary.BigEndian.Uint32(idBytes),
+		id,
 		data,
 		frame.Incoming,
 	), nil

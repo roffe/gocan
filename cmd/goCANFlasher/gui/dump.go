@@ -76,6 +76,8 @@ func (m *mainWindow) ecuDump() {
 	}()
 }
 
+var ter = "KE"
+
 func (m *mainWindow) callback(v interface{}) {
 	switch t := v.(type) {
 	case string:
