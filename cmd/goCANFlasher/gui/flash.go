@@ -45,17 +45,16 @@ func (m *mainWindow) ecuFlash() {
 		return
 	}
 
-	state.inprogress = true
-	defer func() {
-		state.inprogress = false
-	}()
-
 	m.output("Flashing " + strconv.Itoa(len(bin)) + " bytes")
 	m.progressBar.SetValue(0)
 	m.progressBar.Max = float64(len(bin))
 	m.progressBar.Refresh()
+	state.inprogress = true
 
 	go func() {
+		defer func() {
+			state.inprogress = false
+		}()
 		defer m.enableButtons()
 		defer cancel()
 
