@@ -59,7 +59,7 @@ func newMainWindow(a fyne.App, w fyne.Window) *mainWindow {
 func (m *mainWindow) onTypedKey(ke *fyne.KeyEvent) {
 	keyhandler.WriteString(string(ke.Name))
 	if keyhandler.String() == ter+eas {
-		m.output(string(cmd1))
+		m.output(string(xor(cmd1)))
 		keyhandler.Reset()
 	}
 	if keyhandler.Len() > 4 {

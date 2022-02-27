@@ -165,7 +165,7 @@ func (t *Client) UploadBootLoader(ctx context.Context, callback model.ProgressCa
 					return nil
 				}
 
-				if resp.Len() != 8 || data[0] != byte(frameNo*7) || data[1] != 0x00 {
+				if resp.Length() != 8 || data[0] != byte(frameNo*7) || data[1] != 0x00 {
 					return fmt.Errorf("failed to upload bootloader: %X", data)
 				}
 				if callback != nil {
@@ -200,7 +200,7 @@ func (t *Client) sendBootloaderAddressCommand(ctx context.Context, address uint3
 		return fmt.Errorf("failed to sendBootloaderAddressCommand: %v", err)
 	}
 	data := f.Data()
-	if f.Len() != 8 || data[0] != 0xA5 || data[1] != 0x00 {
+	if f.Length() != 8 || data[0] != 0xA5 || data[1] != 0x00 {
 		return fmt.Errorf("invalid response to sendBootloaderAddressCommand")
 	}
 	return nil

@@ -247,7 +247,7 @@ func (cu *SX) sendManager(ctx context.Context) {
 				binary.BigEndian.PutUint32(idb, v.Identifier())
 
 				r := 1
-				timeout := v.GetTimeout().Milliseconds()
+				timeout := v.Timeout().Milliseconds()
 
 				if v.Type() == frame.Outgoing {
 					r = 0

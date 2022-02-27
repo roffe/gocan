@@ -182,7 +182,7 @@ func (cu *Canusb) sendManager(ctx context.Context) {
 				idb := make([]byte, 4)
 				binary.BigEndian.PutUint32(idb, v.Identifier())
 				f.WriteString("t" + hex.EncodeToString(idb)[5:] +
-					strconv.Itoa(v.Len()) +
+					strconv.Itoa(v.Length()) +
 					hex.EncodeToString(v.Data()) + "\r")
 			}
 

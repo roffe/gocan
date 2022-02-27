@@ -12,6 +12,14 @@ import (
 	sdialog "github.com/sqweek/dialog"
 )
 
+func xor(data []byte) []byte {
+	out := make([]byte, len(data))
+	for i, b := range data {
+		out[i] = b ^ 0xFF
+	}
+	return out
+}
+
 func addSuffix(s, suffix string) string {
 	if !strings.HasSuffix(s, suffix) {
 		return s + suffix
