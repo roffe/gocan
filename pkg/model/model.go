@@ -1,5 +1,7 @@
 package model
 
+type ProgressCallback func(interface{})
+
 type Header struct {
 	Desc string
 	ID   uint8

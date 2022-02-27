@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/roffe/gocan/pkg/frame"
+	"github.com/roffe/gocan"
 	"github.com/roffe/gocan/pkg/model"
 )
 
@@ -21,7 +21,7 @@ func (t *Client) EraseECU(ctx context.Context, callback model.ProgressCallback) 
 		callback("Erasing FLASH...")
 	}
 	cmd := []byte{0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
-	frame := frame.New(0x005, cmd, frame.ResponseRequired)
+	frame := gocan.NewFrame(0x005, cmd, gocan.ResponseRequired)
 	resp, err := t.c.SendAndPoll(ctx, frame, 20*time.Second, 0xC)
 	if err != nil {
 		return err

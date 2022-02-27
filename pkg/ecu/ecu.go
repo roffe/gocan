@@ -6,10 +6,10 @@ import (
 	"strings"
 
 	"github.com/roffe/gocan"
+	"github.com/roffe/gocan/pkg/ecu/t5"
+	"github.com/roffe/gocan/pkg/ecu/t7"
+	"github.com/roffe/gocan/pkg/ecu/t8"
 	"github.com/roffe/gocan/pkg/model"
-	"github.com/roffe/gocan/pkg/t5"
-	"github.com/roffe/gocan/pkg/t7"
-	"github.com/roffe/gocan/pkg/t8"
 )
 
 const (

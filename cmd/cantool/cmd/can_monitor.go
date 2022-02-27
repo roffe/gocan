@@ -15,7 +15,7 @@ import (
 	"github.com/jroimartin/gocui"
 	"github.com/roffe/gocan"
 	"github.com/roffe/gocan/cmd/cantool/pkg/ui"
-	"github.com/roffe/gocan/pkg/t7"
+	"github.com/roffe/gocan/pkg/ecu/t7"
 	"github.com/spf13/cobra"
 )
 

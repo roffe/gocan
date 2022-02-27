@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/roffe/gocan/pkg/frame"
+	"github.com/roffe/gocan"
 	"github.com/roffe/gocan/pkg/model"
 )
 
@@ -17,7 +17,7 @@ func (t *Client) ResetECU(ctx context.Context, callback model.ProgressCallback) 
 	//	}
 	//}
 	//log.Println("Resetting ECU")
-	frame := frame.New(0x5, []byte{0xC2, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, frame.ResponseRequired)
+	frame := gocan.NewFrame(0x5, []byte{0xC2, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, gocan.ResponseRequired)
 	resp, err := t.c.SendAndPoll(ctx, frame, 150*time.Millisecond, 0xC)
 	if err != nil {
 		return fmt.Errorf("failed to reset ECU: %v", err)

@@ -9,8 +9,7 @@ import (
 	"time"
 
 	"github.com/avast/retry-go"
-	gocan "github.com/roffe/gocan"
-	"github.com/roffe/gocan/pkg/frame"
+	"github.com/roffe/gocan"
 	"github.com/roffe/gocan/pkg/model"
 )
 
@@ -33,7 +32,7 @@ func New(c *gocan.Client) *Client {
 }
 
 // 266h Send acknowledgement, has 0x3F on 3rd!
-func (t *Client) Ack(val byte, typ frame.CANFrameType) {
+func (t *Client) Ack(val byte, typ gocan.CANFrameType) {
 	ack := []byte{0x40, 0xA1, 0x3F, val & 0xBF, 0x00, 0x00, 0x00, 0x00}
 	t.c.SendFrame(0x266, ack, typ)
 }
@@ -50,7 +49,7 @@ func (t *Client) DataInitialization(ctx context.Context, callback model.Progress
 
 	err := retry.Do(
 		func() error {
-			resp, err := t.c.SendAndPoll(ctx, frame.New(0x220, []byte{0x3F, 0x81, 0x00, 0x11, 0x02, 0x40, 0x00, 0x00}, frame.ResponseRequired), t.defaultTimeout, 0x238)
+			resp, err := t.c.SendAndPoll(ctx, gocan.NewFrame(0x220, []byte{0x3F, 0x81, 0x00, 0x11, 0x02, 0x40, 0x00, 0x00}, gocan.ResponseRequired), t.defaultTimeout, 0x238)
 			if err != nil {
 				return fmt.Errorf("%v", err)
 			}
@@ -84,7 +83,7 @@ func (t *Client) DataInitialization(ctx context.Context, callback model.Progress
 func (t *Client) GetHeader(ctx context.Context, id byte) (string, error) {
 	err := retry.Do(
 		func() error {
-			return t.c.SendFrame(0x240, []byte{0x40, 0xA1, 0x02, 0x1A, id, 0x00, 0x00, 0x00}, frame.ResponseRequired)
+			return t.c.SendFrame(0x240, []byte{0x40, 0xA1, 0x02, 0x1A, id, 0x00, 0x00, 0x00}, gocan.ResponseRequired)
 		},
 		retry.Context(ctx),
 		retry.Attempts(3),
@@ -128,10 +127,10 @@ func (t *Client) GetHeader(ctx context.Context, id byte) (string, error) {
 		}
 
 		if d[0] == 0x80 || d[0] == 0xC0 {
-			t.Ack(d[0], frame.Outgoing)
+			t.Ack(d[0], gocan.Outgoing)
 			break
 		} else {
-			t.Ack(d[0], frame.ResponseRequired)
+			t.Ack(d[0], gocan.ResponseRequired)
 		}
 	}
 
@@ -161,13 +160,13 @@ func (t *Client) letMeIn(ctx context.Context, method int) (bool, error) {
 	msg := []byte{0x40, 0xA1, 0x02, 0x27, 0x05, 0x00, 0x00, 0x00}
 	msgReply := []byte{0x40, 0xA1, 0x04, 0x27, 0x06, 0x00, 0x00, 0x00}
 
-	f, err := t.c.SendAndPoll(ctx, frame.New(0x240, msg, frame.ResponseRequired), t.defaultTimeout, 0x258)
+	f, err := t.c.SendAndPoll(ctx, gocan.NewFrame(0x240, msg, gocan.ResponseRequired), t.defaultTimeout, 0x258)
 	if err != nil {
 		return false, err
 
 	}
 	d := f.Data()
-	t.Ack(d[0], frame.ResponseRequired)
+	t.Ack(d[0], gocan.ResponseRequired)
 
 	s := int(d[5])<<8 | int(d[6])
 	k := calcen(s, method)
@@ -175,13 +174,13 @@ func (t *Client) letMeIn(ctx context.Context, method int) (bool, error) {
 	msgReply[5] = byte(int(k) >> 8 & int(0xFF))
 	msgReply[6] = byte(k) & 0xFF
 
-	f2, err := t.c.SendAndPoll(ctx, frame.New(0x240, msgReply, frame.ResponseRequired), t.defaultTimeout, 0x258)
+	f2, err := t.c.SendAndPoll(ctx, gocan.NewFrame(0x240, msgReply, gocan.ResponseRequired), t.defaultTimeout, 0x258)
 	if err != nil {
 		return false, err
 
 	}
 	d2 := f2.Data()
-	t.Ack(d2[0], frame.ResponseRequired)
+	t.Ack(d2[0], gocan.ResponseRequired)
 	if d2[3] == 0x67 && d2[5] == 0x34 {
 		return true, nil
 	} else {
@@ -211,14 +210,14 @@ func (t *Client) LetMeTry(ctx context.Context, key1, key2 int) bool {
 	msg := []byte{0x40, 0xA1, 0x02, 0x27, 0x05, 0x00, 0x00, 0x00}
 	msgReply := []byte{0x40, 0xA1, 0x04, 0x27, 0x06, 0x00, 0x00, 0x00}
 
-	f, err := t.c.SendAndPoll(ctx, frame.New(0x240, msg, frame.ResponseRequired), t.defaultTimeout, 0x258)
+	f, err := t.c.SendAndPoll(ctx, gocan.NewFrame(0x240, msg, gocan.ResponseRequired), t.defaultTimeout, 0x258)
 	if err != nil {
 		log.Println(err)
 		return false
 
 	}
 	d := f.Data()
-	t.Ack(d[0], frame.ResponseRequired)
+	t.Ack(d[0], gocan.ResponseRequired)
 
 	s := int(d[5])<<8 | int(d[6])
 	k := calcenCustom(s, key1, key2)
@@ -226,14 +225,14 @@ func (t *Client) LetMeTry(ctx context.Context, key1, key2 int) bool {
 	msgReply[5] = byte(int(k) >> 8 & int(0xFF))
 	msgReply[6] = byte(k) & 0xFF
 
-	f2, err := t.c.SendAndPoll(ctx, frame.New(0x240, msgReply, frame.ResponseRequired), t.defaultTimeout, 0x258)
+	f2, err := t.c.SendAndPoll(ctx, gocan.NewFrame(0x240, msgReply, gocan.ResponseRequired), t.defaultTimeout, 0x258)
 	if err != nil {
 		log.Println(err)
 		return false
 
 	}
 	d2 := f2.Data()
-	t.Ack(d2[0], frame.ResponseRequired)
+	t.Ack(d2[0], gocan.ResponseRequired)
 	if d2[3] == 0x67 && d2[5] == 0x34 {
 		return true
 	} else {

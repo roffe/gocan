@@ -15,7 +15,6 @@ import (
 
 	"github.com/avast/retry-go"
 	"github.com/roffe/gocan"
-	"github.com/roffe/gocan/pkg/frame"
 	"go.bug.st/serial"
 	"golang.org/x/sync/errgroup"
 )
@@ -28,7 +27,7 @@ type SX struct {
 	portBaudrate int
 	canrate      string
 	protocol     string
-	send, recv   chan frame.CANFrame
+	send, recv   chan gocan.CANFrame
 	close        chan struct{}
 	closed       bool
 	filter, mask string
@@ -38,8 +37,8 @@ func NewSX(cfg *gocan.AdapterConfig) (*SX, error) {
 	sx := &SX{
 		portName:     cfg.Port,
 		portBaudrate: cfg.PortBaudrate,
-		send:         make(chan frame.CANFrame, 100),
-		recv:         make(chan frame.CANFrame, 100),
+		send:         make(chan gocan.CANFrame, 100),
+		recv:         make(chan gocan.CANFrame, 100),
 		close:        make(chan struct{}, 10),
 	}
 	if err := sx.setCANrate(cfg.CANRate); err != nil {
@@ -69,16 +68,16 @@ func (cu *SX) Init(ctx context.Context) error {
 		desired := cu.portBaudrate
 		for _, speed := range speeds {
 			if err := setSpeed(p, mode, speed, desired); err == nil {
-				log.Printf("Switched speed from %d to %d bps", speed, desired)
+				log.Printf("Switched adapter baudrate from %d to %d bps", speed, desired)
 				return nil
 			} else {
 				log.Println(err)
 			}
 		}
-		return errors.New("could not init adapter")
+		return errors.New("/!\\ Could not init adapter")
 	},
 		retry.Context(ctx),
-		retry.Attempts(3),
+		retry.Attempts(2),
 		retry.OnRetry(func(n uint, err error) {
 			log.Printf("Retry #%d: %v", n, err)
 		}),
@@ -170,7 +169,7 @@ func setSpeed(p serial.Port, mode *serial.Mode, from, to int) error {
 				buff.WriteByte(b)
 			}
 		}
-		return fmt.Errorf("init timeout: %q", buff.String())
+		return fmt.Errorf("/!\\ Init timeout: %q", buff.String())
 	})
 
 	p.Write([]byte("STBR" + strconv.Itoa(to) + "\r"))
@@ -194,7 +193,7 @@ func (cu *SX) setCANrate(rate float64) error {
 		cu.protocol = "STP33"
 		cu.canrate = "STCTR8101FC"
 	default:
-		return fmt.Errorf("unhandled canbus rate: %f", rate)
+		return fmt.Errorf("/!\\ Unhandled CANBus rate: %f", rate)
 	}
 	return nil
 }
@@ -211,11 +210,11 @@ func (cu *SX) setCANfilter(ids []uint32) {
 	cu.mask = fmt.Sprintf("ATCM%03X", mask)
 }
 
-func (cu *SX) Recv() <-chan frame.CANFrame {
+func (cu *SX) Recv() <-chan gocan.CANFrame {
 	return cu.recv
 }
 
-func (cu *SX) Send() chan<- frame.CANFrame {
+func (cu *SX) Send() chan<- gocan.CANFrame {
 	return cu.send
 }
 
@@ -240,7 +239,7 @@ func (cu *SX) sendManager(ctx context.Context) {
 		select {
 		case v := <-cu.send:
 			switch v.(type) {
-			case *frame.RawCommand:
+			case *gocan.RawCommand:
 				f.WriteString(v.String() + "\r")
 			default:
 				idb := make([]byte, 4)
@@ -249,7 +248,7 @@ func (cu *SX) sendManager(ctx context.Context) {
 				r := 1
 				timeout := v.Timeout().Milliseconds()
 
-				if v.Type() == frame.Outgoing {
+				if v.Type() == gocan.Outgoing {
 					r = 0
 				}
 				// write cmd and header
@@ -351,7 +350,7 @@ func (cu *SX) recvManager(ctx context.Context) {
 	}
 }
 
-func (*SX) decodeFrame(buff []byte) (frame.CANFrame, error) {
+func (*SX) decodeFrame(buff []byte) (gocan.CANFrame, error) {
 	data, err := hex.DecodeString(string(buff[3:]))
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode frame body: %v", err)
@@ -359,9 +358,9 @@ func (*SX) decodeFrame(buff []byte) (frame.CANFrame, error) {
 
 	id := uint32(buff[0]-0x30)<<8 | uint32(buff[1]-0x30)<<4 | uint32(buff[2]-0x30)
 
-	return frame.New(
+	return gocan.NewFrame(
 		id,
 		data,
-		frame.Incoming,
+		gocan.Incoming,
 	), nil
 }

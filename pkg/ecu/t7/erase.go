@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/roffe/gocan/pkg/frame"
+	"github.com/roffe/gocan"
 	"github.com/roffe/gocan/pkg/model"
 )
 
@@ -26,12 +26,12 @@ func (t *Client) EraseECU(ctx context.Context, callback model.ProgressCallback) 
 	data[3] = 0
 	i := 0
 	for data[3] != 0x71 && i < 30 {
-		f, err := t.c.SendAndPoll(ctx, frame.New(0x240, eraseMsg, frame.ResponseRequired), t.defaultTimeout, 0x258)
+		f, err := t.c.SendAndPoll(ctx, gocan.NewFrame(0x240, eraseMsg, gocan.ResponseRequired), t.defaultTimeout, 0x258)
 		if err != nil {
 			return err
 		}
 		data = f.Data()
-		t.Ack(data[0], frame.Outgoing)
+		t.Ack(data[0], gocan.Outgoing)
 		i++
 		progress++
 		if callback != nil {
@@ -48,12 +48,12 @@ func (t *Client) EraseECU(ctx context.Context, callback model.ProgressCallback) 
 	i = 0
 	eraseMsg[4] = 0x53
 	for data[3] != 0x71 && i < 200 {
-		f, err := t.c.SendAndPoll(ctx, frame.New(0x240, eraseMsg, frame.ResponseRequired), t.defaultTimeout, 0x258)
+		f, err := t.c.SendAndPoll(ctx, gocan.NewFrame(0x240, eraseMsg, gocan.ResponseRequired), t.defaultTimeout, 0x258)
 		if err != nil {
 			return err
 		}
 		data = f.Data()
-		t.Ack(data[0], frame.Outgoing)
+		t.Ack(data[0], gocan.Outgoing)
 		i++
 		progress++
 		if callback != nil {
@@ -70,7 +70,7 @@ func (t *Client) EraseECU(ctx context.Context, callback model.ProgressCallback) 
 	i = 0
 	for data[3] != 0x7E && i < 10 {
 		time.Sleep(250 * time.Millisecond)
-		f, err := t.c.SendAndPoll(ctx, frame.New(0x240, confirmMsg, frame.ResponseRequired), t.defaultTimeout, 0x258)
+		f, err := t.c.SendAndPoll(ctx, gocan.NewFrame(0x240, confirmMsg, gocan.ResponseRequired), t.defaultTimeout, 0x258)
 		if err != nil {
 			return err
 		}

@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/roffe/gocan"
-	"github.com/roffe/gocan/pkg/frame"
 )
 
 type Client struct {
@@ -23,7 +22,7 @@ func New(c *gocan.Client) *Client {
 }
 
 func (cl *Client) DisableNormalCommunication(ctx context.Context) error {
-	if err := cl.c.SendFrame(0x101, []byte{0xFE, 0x01, 0x28}, frame.Outgoing); err != nil { // DisableNormalCommunication Request Message
+	if err := cl.c.SendFrame(0x101, []byte{0xFE, 0x01, 0x28}, gocan.Outgoing); err != nil { // DisableNormalCommunication Request Message
 		return err
 	}
 	return nil
@@ -46,7 +45,7 @@ func (cl *Client) WriteDataByIdentifier(ctx context.Context, canID uint32, ident
 	//cl.c.SendFrame(canID, payload)
 	//log.Printf("%X\n", payload)
 	//resp, err := cl.c.Poll(ctx, 100*time.Millisecond, canID+0x400)
-	fr := frame.New(canID, payload, frame.ResponseRequired)
+	fr := gocan.NewFrame(canID, payload, gocan.ResponseRequired)
 	resp, err := cl.c.SendAndPoll(ctx, fr, 150*time.Millisecond, canID+0x400)
 	if err != nil {
 		return err
@@ -75,7 +74,7 @@ func (cl *Client) WriteDataByIdentifier(ctx context.Context, canID uint32, ident
 			}
 			pkg = append(pkg, b)
 		}
-		cl.c.SendFrame(canID, pkg, frame.Outgoing)
+		cl.c.SendFrame(canID, pkg, gocan.Outgoing)
 		log.Printf("%X\n", pkg)
 		time.Sleep(time.Duration(delay) * time.Millisecond)
 		seq++
@@ -89,7 +88,7 @@ func (cl *Client) WriteDataByIdentifier(ctx context.Context, canID uint32, ident
 
 func (cl *Client) ReadDataByIdentifier(ctx context.Context, canID uint32, identifier byte) ([]byte, error) {
 	out := bytes.NewBuffer([]byte{})
-	cl.c.SendFrame(canID, []byte{0x02, 0x1A, identifier}, frame.ResponseRequired)
+	cl.c.SendFrame(canID, []byte{0x02, 0x1A, identifier}, gocan.ResponseRequired)
 	resp, err := cl.c.Poll(ctx, 100*time.Millisecond, canID+0x400)
 	if err != nil {
 		return nil, err
@@ -108,7 +107,7 @@ func (cl *Client) ReadDataByIdentifier(ctx context.Context, canID uint32, identi
 
 	left := int(d[1])
 	left -= 6
-	cl.c.SendFrame(canID, []byte{0x30, 0x00, 0x00}, frame.ResponseRequired)
+	cl.c.SendFrame(canID, []byte{0x30, 0x00, 0x00}, gocan.ResponseRequired)
 
 outer:
 	for left > 0 {

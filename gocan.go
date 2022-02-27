@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"time"
-
-	"github.com/roffe/gocan/pkg/frame"
 )
 
 const (
@@ -15,8 +13,8 @@ const (
 
 type Adapter interface {
 	Init(context.Context) error
-	Recv() <-chan frame.CANFrame
-	Send() chan<- frame.CANFrame
+	Recv() <-chan CANFrame
+	Send() chan<- CANFrame
 	Close() error
 }
 
@@ -30,7 +28,7 @@ type AdapterConfig struct {
 type Client struct {
 	hub     *Hub
 	adapter Adapter
-	send    chan<- frame.CANFrame
+	send    chan<- CANFrame
 }
 
 func New(ctx context.Context, adapter Adapter) (*Client, error) {
@@ -51,7 +49,7 @@ func (c *Client) Close() error {
 }
 
 // Send a CAN Frame
-func (c *Client) Send(msg frame.CANFrame) error {
+func (c *Client) Send(msg CANFrame) error {
 	select {
 	case c.send <- msg:
 		return nil
@@ -61,20 +59,20 @@ func (c *Client) Send(msg frame.CANFrame) error {
 }
 
 // Shortcommand to send a standard 11bit frame
-func (c *Client) SendFrame(identifier uint32, data []byte, t frame.CANFrameType) error {
+func (c *Client) SendFrame(identifier uint32, data []byte, t CANFrameType) error {
 	var b = make([]byte, len(data))
 	copy(b, data)
-	frame := frame.New(identifier, b, t)
+	frame := NewFrame(identifier, b, t)
 	return c.Send(frame)
 }
 
 // SendString is used to bypass the frame parser and send raw commands to the CANUSB adapter
 func (c *Client) SendString(str string) error {
-	return c.Send(frame.NewRawCommand(str))
+	return c.Send(NewRawCommand(str))
 }
 
 // Send and wait up to <timeout> for a answer on given identifiers
-func (c *Client) SendAndPoll(ctx context.Context, frame *frame.Frame, timeout time.Duration, identifiers ...uint32) (frame.CANFrame, error) {
+func (c *Client) SendAndPoll(ctx context.Context, frame *Frame, timeout time.Duration, identifiers ...uint32) (CANFrame, error) {
 	frame.SetTimeout(timeout)
 	p := newPoller(1, identifiers...)
 
@@ -91,14 +89,14 @@ func (c *Client) SendAndPoll(ctx context.Context, frame *frame.Frame, timeout ti
 }
 
 // Subscribe to CAN identifiers and return a message channel
-func (c *Client) Subscribe(ctx context.Context, identifiers ...uint32) chan frame.CANFrame {
+func (c *Client) Subscribe(ctx context.Context, identifiers ...uint32) chan CANFrame {
 	p := newPoller(100, identifiers...)
 	c.hub.register <- p
 	return p.callback
 }
 
 // Poll for a certain CAN identifier for up to <timeout>
-func (c *Client) Poll(ctx context.Context, timeout time.Duration, identifiers ...uint32) (frame.CANFrame, error) {
+func (c *Client) Poll(ctx context.Context, timeout time.Duration, identifiers ...uint32) (CANFrame, error) {
 	p := newPoller(1, identifiers...)
 	c.hub.register <- p
 	defer func() {
@@ -107,7 +105,7 @@ func (c *Client) Poll(ctx context.Context, timeout time.Duration, identifiers ..
 	return waitForFrame(ctx, timeout, p, identifiers...)
 }
 
-func waitForFrame(ctx context.Context, timeout time.Duration, p *Poll, identifiers ...uint32) (frame.CANFrame, error) {
+func waitForFrame(ctx context.Context, timeout time.Duration, p *Poll, identifiers ...uint32) (CANFrame, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()

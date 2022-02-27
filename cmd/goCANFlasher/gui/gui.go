@@ -34,23 +34,11 @@ func init() {
 	state = &appState{}
 }
 
-func Run(ctx context.Context, a fyne.App) {
+func ShowAndRun(ctx context.Context, a fyne.App) {
 	w := a.NewWindow("GoCANFlasher")
 	w.Resize(fyne.NewSize(900, 500))
 
 	mw := newMainWindow(a, w)
-
-	w.SetContent(mw.layout())
-
-	w.SetCloseIntercept(func() {
-		if state.inprogress {
-			if sdialog.Message("Are you sure, operation still in progress").Title("In progress").YesNo() {
-				w.Close()
-			}
-			return
-		}
-		w.Close()
-	})
 
 	go func() {
 		<-ctx.Done()
@@ -66,6 +54,16 @@ func Run(ctx context.Context, a fyne.App) {
 	}()
 
 	w.ShowAndRun()
+}
+
+func (m *mainWindow) closeHandler() {
+	if state.inprogress {
+		if sdialog.Message("Are you sure, operation still in progress").Title("In progress").YesNo() {
+			m.window.Close()
+		}
+		return
+	}
+	m.window.Close()
 }
 
 func (m *mainWindow) loadPreferences() {

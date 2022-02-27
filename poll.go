@@ -2,18 +2,16 @@ package gocan
 
 import (
 	"context"
-
-	"github.com/roffe/gocan/pkg/frame"
 )
 
 type Hub struct {
 	pollers    map[*Poll]bool
 	register   chan *Poll
 	unregister chan *Poll
-	incoming   <-chan frame.CANFrame
+	incoming   <-chan CANFrame
 }
 
-func newHub(incoming <-chan frame.CANFrame) *Hub {
+func newHub(incoming <-chan CANFrame) *Hub {
 	return &Hub{
 		pollers:    make(map[*Poll]bool),
 		register:   make(chan *Poll, 10),
@@ -25,13 +23,13 @@ func newHub(incoming <-chan frame.CANFrame) *Hub {
 type Poll struct {
 	errcount    uint16
 	identifiers []uint32
-	callback    chan frame.CANFrame
+	callback    chan CANFrame
 }
 
 func newPoller(bufferSize int, identifiers ...uint32) *Poll {
 	return &Poll{
 		identifiers: identifiers,
-		callback:    make(chan frame.CANFrame, bufferSize),
+		callback:    make(chan CANFrame, bufferSize),
 	}
 }
 
@@ -71,7 +69,7 @@ func (h *Hub) run(ctx context.Context) {
 	}
 }
 
-func (h *Hub) deliver(poll *Poll, frame frame.CANFrame) {
+func (h *Hub) deliver(poll *Poll, frame CANFrame) {
 	select {
 	case poll.callback <- frame:
 	default:

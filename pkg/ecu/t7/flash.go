@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/avast/retry-go"
-	"github.com/roffe/gocan/pkg/frame"
+	"github.com/roffe/gocan"
 	"github.com/roffe/gocan/pkg/model"
 )
 
@@ -118,13 +118,13 @@ func (t *Client) FlashECU(ctx context.Context, bin []byte, callback model.Progre
 		}
 
 	}
-	end, err := t.c.SendAndPoll(ctx, frame.New(0x240, []byte{0x40, 0xA1, 0x01, 0x37, 0x00, 0x00, 0x00, 0x00}, frame.ResponseRequired), t.defaultTimeout, 0x258)
+	end, err := t.c.SendAndPoll(ctx, gocan.NewFrame(0x240, []byte{0x40, 0xA1, 0x01, 0x37, 0x00, 0x00, 0x00, 0x00}, gocan.ResponseRequired), t.defaultTimeout, 0x258)
 	if err != nil {
 		return fmt.Errorf("error waiting for data transfer exit reply: %v", err)
 	}
 	// Send acknowledgement
 	d := end.Data()
-	t.Ack(d[0], frame.Outgoing)
+	t.Ack(d[0], gocan.Outgoing)
 
 	if d[3] != 0x77 {
 		return errors.New("exit download mode failed")
@@ -141,15 +141,15 @@ func (t *Client) writeJump(ctx context.Context, offset, length int) error {
 	jumpMsg := []byte{0x41, 0xA1, 0x08, 0x34, byte(offset >> 16), byte(offset >> 8), byte(offset), 0x00}
 	jumpMsg2 := []byte{0x00, 0xA1, byte(length >> 16), byte(length >> 8), byte(length), 0x00, 0x00, 0x00}
 
-	t.c.SendFrame(0x240, jumpMsg, frame.Outgoing)
+	t.c.SendFrame(0x240, jumpMsg, gocan.Outgoing)
 
-	f, err := t.c.SendAndPoll(ctx, frame.New(0x240, jumpMsg2, frame.ResponseRequired), t.defaultTimeout, 0x258)
+	f, err := t.c.SendAndPoll(ctx, gocan.NewFrame(0x240, jumpMsg2, gocan.ResponseRequired), t.defaultTimeout, 0x258)
 	if err != nil {
 		return fmt.Errorf("failed to enable request download")
 	}
 
 	d := f.Data()
-	t.Ack(d[0], frame.Outgoing)
+	t.Ack(d[0], gocan.Outgoing)
 
 	if d[3] != 0x74 {
 		return fmt.Errorf("invalid response enabling download mode")
@@ -202,10 +202,10 @@ func (t *Client) writeRange(ctx context.Context, start, end int, bin []byte) err
 			}
 		}
 		if i > 0 {
-			t.c.SendFrame(0x240, data, frame.Outgoing)
+			t.c.SendFrame(0x240, data, gocan.Outgoing)
 			continue
 		}
-		t.c.SendFrame(0x240, data, frame.ResponseRequired)
+		t.c.SendFrame(0x240, data, gocan.ResponseRequired)
 	}
 
 	resp, err := t.c.Poll(ctx, t.defaultTimeout, 0x258)
@@ -215,7 +215,7 @@ func (t *Client) writeRange(ctx context.Context, start, end int, bin []byte) err
 
 	// Send acknowledgement
 	d := resp.Data()
-	t.Ack(d[0], frame.Outgoing)
+	t.Ack(d[0], gocan.Outgoing)
 
 	if d[3] != 0x76 {
 		return fmt.Errorf("ECU did not confirm write")

@@ -152,7 +152,7 @@ func readRange(ctx context.Context, c *gocan.Client, start, length, maxlen uint3
 		payload := []byte{0x06, 0x23, bs[1], bs[2], bs[3], 0x00, readBytes}
 		log.Printf("%X %X\n", curOffset, bs)
 		log.Printf("payload>>%X\n", payload)
-		var fs frame.CANFrame
+		var fs gocan.CANFrame
 		err := retry.Do(
 			func() error {
 				var err error

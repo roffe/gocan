@@ -11,9 +11,9 @@ import (
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 	"github.com/roffe/gocan/pkg/ecu"
-	"github.com/roffe/gocan/pkg/t5"
-	"github.com/roffe/gocan/pkg/t7"
-	"github.com/roffe/gocan/pkg/t8"
+	"github.com/roffe/gocan/pkg/ecu/t5"
+	"github.com/roffe/gocan/pkg/ecu/t7"
+	"github.com/roffe/gocan/pkg/ecu/t8"
 	sdialog "github.com/sqweek/dialog"
 )
 
@@ -27,7 +27,7 @@ type mainWindow struct {
 
 	ecuList     *widget.Select
 	adapterList *widget.Select
-	portList    *widget.SelectEntry
+	portList    *widget.Select
 	speedList   *widget.Select
 
 	refreshBTN *widget.Button
@@ -50,9 +50,11 @@ func newMainWindow(a fyne.App, w fyne.Window) *mainWindow {
 	}
 
 	w.Canvas().SetOnTypedKey(m.onTypedKey)
-
+	w.SetCloseIntercept(m.closeHandler)
 	m.createSelects()
 	m.createButtons()
+	w.SetContent(m.layout())
+
 	return m
 }
 
@@ -143,17 +145,17 @@ func (m *mainWindow) createSelects() {
 
 	state.portList = m.ports()
 
-	m.portList = widget.NewSelectEntry(state.portList)
-	m.portList.OnChanged = func(s string) {
-		state.port = s
-		m.app.Preferences().SetString("port", s)
-
-	}
-
-	//m.speedList = widget.NewSelect(m.ports(), func(s string) {
+	//m.portList = widget.NewSelectEntry(state.portList)
+	//m.portList.OnChanged = func(s string) {
 	//	state.port = s
 	//	m.app.Preferences().SetString("port", s)
-	//})
+	//
+	//}
+
+	m.portList = widget.NewSelect(state.portList, func(s string) {
+		state.port = s
+		m.app.Preferences().SetString("port", s)
+	})
 
 	m.speedList = widget.NewSelect(speeds(), func(s string) {
 		speed, err := strconv.Atoi(s)
@@ -171,7 +173,7 @@ func (m *mainWindow) createSelects() {
 }
 
 func (m *mainWindow) refreshPorts() {
-	m.portList.SetOptions(m.ports())
+	m.portList.Options = m.ports()
 	m.portList.Refresh()
 }
 

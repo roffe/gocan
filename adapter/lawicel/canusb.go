@@ -3,7 +3,6 @@ package lawicel
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -13,7 +12,6 @@ import (
 
 	"github.com/albenik/bcd"
 	"github.com/roffe/gocan"
-	"github.com/roffe/gocan/pkg/frame"
 	"go.bug.st/serial"
 )
 
@@ -23,7 +21,7 @@ type Canusb struct {
 	portBaudrate     int
 	canRate          string
 	canCode, canMask string
-	send, recv       chan frame.CANFrame
+	send, recv       chan gocan.CANFrame
 	close            chan struct{}
 	closed           bool
 }
@@ -32,8 +30,8 @@ func NewCanusb(cfg *gocan.AdapterConfig) (*Canusb, error) {
 	cu := &Canusb{
 		portName:     cfg.Port,
 		portBaudrate: cfg.PortBaudrate,
-		send:         make(chan frame.CANFrame, 100),
-		recv:         make(chan frame.CANFrame, 100),
+		send:         make(chan gocan.CANFrame, 100),
+		recv:         make(chan gocan.CANFrame, 100),
 		close:        make(chan struct{}, 1),
 	}
 	if err := cu.setCANrate(cfg.CANRate); err != nil {
@@ -84,7 +82,7 @@ func (cu *Canusb) Init(ctx context.Context) error {
 	go func() {
 		for ctx.Err() == nil {
 			<-time.After(700 * time.Millisecond)
-			cu.send <- frame.NewRawCommand("F")
+			cu.send <- gocan.NewRawCommand("F")
 		}
 	}()
 
@@ -127,11 +125,11 @@ func (cu *Canusb) setCANrate(rate float64) error {
 	return nil
 }
 
-func (cu *Canusb) Recv() <-chan frame.CANFrame {
+func (cu *Canusb) Recv() <-chan gocan.CANFrame {
 	return cu.recv
 }
 
-func (cu *Canusb) Send() chan<- frame.CANFrame {
+func (cu *Canusb) Send() chan<- gocan.CANFrame {
 	return cu.send
 }
 
@@ -175,15 +173,16 @@ func (cu *Canusb) sendManager(ctx context.Context) {
 		select {
 		case v := <-cu.send:
 			switch v.(type) {
-			case *frame.RawCommand:
+			case *gocan.RawCommand:
 				f.WriteString(v.String() + "\r")
 
 			default:
-				idb := make([]byte, 4)
-				binary.BigEndian.PutUint32(idb, v.Identifier())
-				f.WriteString("t" + hex.EncodeToString(idb)[5:] +
-					strconv.Itoa(v.Length()) +
-					hex.EncodeToString(v.Data()) + "\r")
+				//idb := make([]byte, 4)
+				//binary.BigEndian.PutUint32(idb, v.Identifier())
+				a := v.Identifier()
+				// convert uint32 can id to string
+				f.Write([]byte{'t', byte(a>>8) + 0x30, (byte(a) >> 4) + 0x30, ((byte(a) << 4) >> 4) + 0x30})
+				f.WriteString(strconv.Itoa(v.Length()) + hex.EncodeToString(v.Data()) + "\r")
 			}
 
 			sendMutex <- token{}
@@ -337,7 +336,7 @@ func checkBitSet(n, k int) bool {
 	return v == 1
 }
 
-func (*Canusb) decodeFrame(buff []byte) (*frame.Frame, error) {
+func (*Canusb) decodeFrame(buff []byte) (*gocan.Frame, error) {
 	data, err := hex.DecodeString(string(buff[5:]))
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode frame body: %v", err)
@@ -349,9 +348,9 @@ func (*Canusb) decodeFrame(buff []byte) (*frame.Frame, error) {
 
 	id := uint32(buff[1]-0x30)<<8 | uint32(buff[2]-0x30)<<4 | uint32(buff[3]-0x30)
 
-	return frame.New(
+	return gocan.NewFrame(
 		id,
 		data,
-		frame.Incoming,
+		gocan.Incoming,
 	), nil
 }
