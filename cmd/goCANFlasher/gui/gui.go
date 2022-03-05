@@ -28,6 +28,7 @@ type appState struct {
 var (
 	listData = binding.NewStringList()
 	state    *appState
+	//mw       *mainWindow
 )
 
 func init() {
@@ -36,7 +37,6 @@ func init() {
 
 func ShowAndRun(ctx context.Context, a fyne.App) {
 	w := a.NewWindow("GoCANFlasher")
-	w.Resize(fyne.NewSize(900, 500))
 
 	mw := newMainWindow(a, w)
 
@@ -77,10 +77,6 @@ func (m *mainWindow) loadPreferences() {
 	m.speedList.SetSelected(m.app.Preferences().StringWithFallback("portSpeed", "115200"))
 }
 
-func adapters() []string {
-	return []string{"Canusb", "OBDLinkSX"}
-}
-
 func speeds() []string {
 	var out []string
 	l := []int{9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600, 1000000, 2000000}
@@ -90,7 +86,7 @@ func speeds() []string {
 	return out
 }
 
-func (m *mainWindow) ports() []string {
+func (m *mainWindow) listPorts() []string {
 	var portsList []string
 	ports, err := enumerator.GetDetailedPortsList()
 	if err != nil {
@@ -109,5 +105,6 @@ func (m *mainWindow) ports() []string {
 			portsList = append(portsList, port.Name)
 		}
 	}
+	state.portList = portsList
 	return portsList
 }

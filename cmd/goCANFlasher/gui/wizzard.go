@@ -2,13 +2,13 @@ package gui
 
 import (
 	_ "embed"
-	"fmt"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
+	"github.com/roffe/gocan/pkg/ecu"
 )
 
 //go:embed ng900.png
@@ -20,25 +20,27 @@ var og95 []byte
 //go:embed ng93.png
 var ng93 []byte
 
+//go:embed clone.png
+var clone []byte
+
 type wizzard struct {
-	app     fyne.App
-	parrent fyne.Window
-	window  fyne.Window
+	app    fyne.App
+	mw     *mainWindow
+	window fyne.Window
 }
 
-func newWizzard(a fyne.App, pw fyne.Window) *wizzard {
+func newWizzard(a fyne.App, mw *mainWindow) *wizzard {
 	w := a.NewWindow("Wizzard")
 	wm := &wizzard{
-		app:     a,
-		parrent: pw,
-		window:  w,
+		app:    a,
+		mw:     mw,
+		window: w,
 	}
 	w.SetCloseIntercept(func() {
 		w.Hide()
 	})
 	w.SetContent(wm.selectCar())
-	w.Resize(fyne.NewSize(1050, 300))
-	w.Canvas().Refresh(wm.selectCar())
+	w.Resize(fyne.NewSize(1050, 150))
 	return wm
 }
 
@@ -60,35 +62,63 @@ var (
 			StaticName:    "ng93.png",
 			StaticContent: ng93},
 	}
+
+	xclone = &canvas.Image{
+		Resource: &fyne.StaticResource{
+			StaticName:    "clone.png",
+			StaticContent: clone},
+	}
 )
 
-func (w *wizzard) newTappableImage(img *canvas.Image) fyne.CanvasObject {
+func (w *wizzard) newTappableImage(img *canvas.Image, btnFunc func()) fyne.CanvasObject {
 	img.ScaleMode = canvas.ImageScaleFastest
 	img.FillMode = canvas.ImageFillContain
-
-	img.SetMinSize(fyne.NewSize(300, 200))
-
-	openButton := widget.NewButton("", func() {
-		fmt.Println("Image clicked...")
-		w.window.SetContent(w.selectOperation())
-	})
+	img.SetMinSize(fyne.NewSize(300, 150))
+	openButton := widget.NewButton("", btnFunc)
 	box := container.NewPadded(img, openButton)
 	return box
 }
 
 func (w *wizzard) selectOperation() fyne.CanvasObject {
+	cl := w.newTappableImage(xclone, func() {
+		w.window.Hide()
+		w.mw.ecuClone()
+	})
+	cloneText := widget.NewLabel("Clone ECU")
+	cloneText.Alignment = fyne.TextAlignCenter
 	return container.New(
-		layout.NewMaxLayout(),
-		container.NewCenter(
-			widget.NewLabel("Kiss"),
+		layout.NewVBoxLayout(),
+		container.NewVBox(
+			cl,
+			cloneText,
+			layout.NewSpacer(),
+			widget.NewButton("Back", func() {
+				w.window.SetContent(w.selectCar())
+			}),
 		),
 	)
 }
 
 func (w *wizzard) selectCar() fyne.CanvasObject {
-	n900 := w.newTappableImage(x900)
-	n95 := w.newTappableImage(x95)
-	n93 := w.newTappableImage(x93)
+
+	sel900 := func() {
+		w.mw.setECU(ecu.Trionic5)
+		w.window.SetContent(w.selectOperation())
+	}
+
+	sel95 := func() {
+		w.mw.setECU(ecu.Trionic7)
+		w.window.SetContent(w.selectOperation())
+	}
+
+	sel93 := func() {
+		w.mw.setECU(ecu.Trionic8)
+		w.window.SetContent(w.selectOperation())
+	}
+
+	n900 := w.newTappableImage(x900, sel900)
+	n95 := w.newTappableImage(x95, sel95)
+	n93 := w.newTappableImage(x93, sel93)
 
 	ng900text := widget.NewLabel("Saab 900II\nSaab 9000\nSaab 9-3I (T5)")
 	ng900text.Alignment = fyne.TextAlignCenter
@@ -100,31 +130,29 @@ func (w *wizzard) selectCar() fyne.CanvasObject {
 	n93text.Alignment = fyne.TextAlignCenter
 
 	return container.New(
-		layout.NewMaxLayout(),
-		container.NewHBox(
+		layout.NewVBoxLayout(),
+		container.New(
+			layout.NewHBoxLayout(),
+			layout.NewSpacer(),
+			widget.NewLabel("~~ Select Car ~~"),
+			layout.NewSpacer(),
+		),
+		container.New(
+			layout.NewHBoxLayout(),
 			layout.NewSpacer(),
 			container.NewVBox(
-				layout.NewSpacer(),
 				n900,
-				layout.NewSpacer(),
 				ng900text,
-				layout.NewSpacer(),
 			),
 			layout.NewSpacer(),
 			container.NewVBox(
-				layout.NewSpacer(),
 				n95,
-				layout.NewSpacer(),
 				o95text,
-				layout.NewSpacer(),
 			),
 			layout.NewSpacer(),
 			container.NewVBox(
-				layout.NewSpacer(),
 				n93,
-				layout.NewSpacer(),
 				n93text,
-				layout.NewSpacer(),
 			),
 			layout.NewSpacer(),
 		),

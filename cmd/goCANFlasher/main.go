@@ -10,10 +10,10 @@ import (
 	"github.com/roffe/gocan/cmd/goCANFlasher/gui"
 )
 
-//go:embed trionicCanFlasher.png
-var trionicCanFlasherIcon []byte
+//go:embed ECU.png
+var appIconBytes []byte
 
-var appIcon = fyne.NewStaticResource("trionicCanFlasherIcon.ico", trionicCanFlasherIcon)
+var appIcon = fyne.NewStaticResource("ecu.png", appIconBytes)
 
 func init() {
 	log.SetFlags(log.Lshortfile | log.LstdFlags)

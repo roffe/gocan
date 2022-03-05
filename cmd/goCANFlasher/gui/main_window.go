@@ -10,6 +10,7 @@ import (
 	"fyne.io/fyne/v2/data/binding"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
+	"github.com/roffe/gocan/adapter"
 	"github.com/roffe/gocan/pkg/ecu"
 	"github.com/roffe/gocan/pkg/ecu/t5"
 	"github.com/roffe/gocan/pkg/ecu/t7"
@@ -46,19 +47,20 @@ var keyhandler = bytes.NewBuffer(nil)
 
 func newMainWindow(a fyne.App, w fyne.Window) *mainWindow {
 	m := &mainWindow{
-		app:           a,
-		window:        w,
-		wizzardWindow: newWizzard(a, w),
-		log:           createLogList(),
-		progressBar:   widget.NewProgressBar(),
+		app:         a,
+		window:      w,
+		log:         createLogList(),
+		progressBar: widget.NewProgressBar(),
 	}
+
+	m.wizzardWindow = newWizzard(a, m)
 
 	w.Canvas().SetOnTypedKey(m.onTypedKey)
 	w.SetCloseIntercept(m.closeHandler)
 	m.createSelects()
 	m.createButtons()
 	w.SetContent(m.layout())
-
+	w.Resize(fyne.NewSize(900, 350))
 	return m
 }
 
@@ -149,21 +151,12 @@ func (m *mainWindow) createSelects() {
 
 	})
 
-	m.adapterList = widget.NewSelect(adapters(), func(s string) {
+	m.adapterList = widget.NewSelect(adapter.ListAdapterStrings(), func(s string) {
 		state.adapter = s
 		m.app.Preferences().SetString("adapter", s)
 	})
 
-	state.portList = m.ports()
-
-	//m.portList = widget.NewSelectEntry(state.portList)
-	//m.portList.OnChanged = func(s string) {
-	//	state.port = s
-	//	m.app.Preferences().SetString("port", s)
-	//
-	//}
-
-	m.portList = widget.NewSelect(state.portList, func(s string) {
+	m.portList = widget.NewSelect(m.listPorts(), func(s string) {
 		state.port = s
 		m.app.Preferences().SetString("port", s)
 	})
@@ -184,7 +177,7 @@ func (m *mainWindow) createSelects() {
 }
 
 func (m *mainWindow) refreshPorts() {
-	m.portList.Options = m.ports()
+	m.portList.Options = m.listPorts()
 	m.portList.Refresh()
 }
 
@@ -196,10 +189,6 @@ func (m *mainWindow) checkSelections() bool {
 	if m.adapterList.SelectedIndex() < 0 {
 		out.WriteString("Adapter\n")
 	}
-
-	//if mw.portList.SelectedIndex() < 0 {
-	//	out.WriteString("Port\n")
-	//}
 
 	if m.speedList.SelectedIndex() < 0 {
 		out.WriteString("Speed\n")
