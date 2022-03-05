@@ -17,13 +17,13 @@ import (
 )
 
 type Canusb struct {
-	cfg              *gocan.AdapterConfig
-	port             serial.Port
-	canRate          string
-	canCode, canMask string
-	send, recv       chan gocan.CANFrame
-	close            chan struct{}
-	closed           bool
+	cfg          *gocan.AdapterConfig
+	port         serial.Port
+	canRate      string
+	filter, mask string
+	send, recv   chan gocan.CANFrame
+	close        chan struct{}
+	closed       bool
 }
 
 func NewCanusb(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
@@ -36,7 +36,7 @@ func NewCanusb(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	if err := cu.setCANrate(cfg.CANRate); err != nil {
 		return nil, err
 	}
-	cu.canCode, cu.canMask = calcAcceptanceFilters(cfg.CANFilter)
+	cu.filter, cu.mask = calcAcceptanceFilters(cfg.CANFilter)
 	return cu, nil
 }
 
@@ -63,8 +63,8 @@ func (cu *Canusb) Init(ctx context.Context) error {
 		"N",        // Get Serial number of the CANUSB
 		"Z0",       // Sets Time Stamp OFF for received frames
 		cu.canRate, // Setup CAN bit-rates
-		cu.canCode,
-		cu.canMask,
+		cu.filter,
+		cu.mask,
 		"O", // Open the CAN channel
 	}
 
