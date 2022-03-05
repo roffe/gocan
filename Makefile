@@ -7,5 +7,5 @@ clean:
 windows: goCANFlasher-win64.exe
 
 goCANFlasher-win64.exe:
-	cd .\cmd\goCANFlasher && fyne package -os windows -icon trionicCanFlasher.png 
+	cd .\cmd\goCANFlasher && fyne package -os windows -icon ECU.png 
 	move .\cmd\goCANFlasher\goCANFlasher.exe .\goCANFlasher-win64.exe

@@ -10,9 +10,9 @@ import (
 
 var T7Headers = []model.Header{
 	{Desc: "VIN", ID: 0x90},
-	{Desc: "Box HW part number", ID: 0x91},
+	{Desc: "Box Hardware P/N", ID: 0x91},
 	{Desc: "Immo Code", ID: 0x92},
-	{Desc: "Software Saab part number", ID: 0x94},
+	{Desc: "Software P/N", ID: 0x94},
 	{Desc: "ECU Software version:", ID: 0x95},
 	{Desc: "Engine type", ID: 0x97},
 	{Desc: "Tester info", ID: 0x98},

@@ -12,6 +12,8 @@ import (
 	"github.com/roffe/gocan/pkg/model"
 )
 
+type Type int
+
 const (
 	UnknownECU Type = -1
 	Trionic5   Type = iota
@@ -29,7 +31,7 @@ type Client interface {
 	EraseECU(context.Context, model.ProgressCallback) error
 }
 
-func TypeFromString(s string) Type {
+func FromString(s string) Type {
 	switch strings.ToLower(s) {
 	case "5", "t5", "trionic5", "trionic 5":
 		return Trionic5
@@ -43,8 +45,6 @@ func TypeFromString(s string) Type {
 		return UnknownECU
 	}
 }
-
-type Type int
 
 func (e Type) String() string {
 	switch e {
@@ -71,5 +71,18 @@ func New(c *gocan.Client, t Type) (Client, error) {
 		return t8.New(c), nil
 	default:
 		return nil, errors.New("unknown ECU")
+	}
+}
+
+func CANFilters(t Type) []uint32 {
+	switch t {
+	case Trionic5:
+		return []uint32{0x000, 0x005, 0x006, 0x00C}
+	case Trionic7:
+		return []uint32{0x220, 0x238, 0x240, 0x258, 0x266}
+	case Trionic8:
+		return []uint32{0x011, 0x311, 0x7E0, 0x7E8, 0x5E8}
+	default:
+		return []uint32{}
 	}
 }

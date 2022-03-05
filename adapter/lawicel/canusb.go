@@ -3,6 +3,7 @@ package lawicel
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -16,9 +17,8 @@ import (
 )
 
 type Canusb struct {
+	cfg              *gocan.AdapterConfig
 	port             serial.Port
-	portName         string
-	portBaudrate     int
 	canRate          string
 	canCode, canMask string
 	send, recv       chan gocan.CANFrame
@@ -26,13 +26,12 @@ type Canusb struct {
 	closed           bool
 }
 
-func NewCanusb(cfg *gocan.AdapterConfig) (*Canusb, error) {
+func NewCanusb(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	cu := &Canusb{
-		portName:     cfg.Port,
-		portBaudrate: cfg.PortBaudrate,
-		send:         make(chan gocan.CANFrame, 100),
-		recv:         make(chan gocan.CANFrame, 100),
-		close:        make(chan struct{}, 1),
+		cfg:   cfg,
+		send:  make(chan gocan.CANFrame, 100),
+		recv:  make(chan gocan.CANFrame, 100),
+		close: make(chan struct{}, 1),
 	}
 	if err := cu.setCANrate(cfg.CANRate); err != nil {
 		return nil, err
@@ -43,16 +42,20 @@ func NewCanusb(cfg *gocan.AdapterConfig) (*Canusb, error) {
 
 func (cu *Canusb) Init(ctx context.Context) error {
 	mode := &serial.Mode{
-		BaudRate: cu.portBaudrate,
+		BaudRate: cu.cfg.PortBaudrate,
 		Parity:   serial.NoParity,
 		DataBits: 8,
 		StopBits: serial.OneStopBit,
 	}
-	p, err := serial.Open(cu.portName, mode)
+	p, err := serial.Open(cu.cfg.Port, mode)
 	if err != nil {
-		return fmt.Errorf("failed to open com port %q : %v", cu.portName, err)
+		return fmt.Errorf("failed to open com port %q : %v", cu.cfg.Port, err)
 	}
+	p.SetReadTimeout(1 * time.Millisecond)
 	cu.port = p
+
+	p.ResetOutputBuffer()
+	p.ResetInputBuffer()
 
 	var cmds = []string{
 		"\r", "\r", "\r", "\r", // Empty buffer
@@ -64,7 +67,6 @@ func (cu *Canusb) Init(ctx context.Context) error {
 		cu.canMask,
 		"O", // Open the CAN channel
 	}
-	p.SetReadTimeout(1 * time.Millisecond)
 
 	delay := time.Duration(5000000000000 / mode.BaudRate)
 	if delay > (100 * time.Millisecond) {
@@ -80,7 +82,7 @@ func (cu *Canusb) Init(ctx context.Context) error {
 	}
 
 	go func() {
-		for ctx.Err() == nil {
+		for !cu.closed {
 			<-time.After(700 * time.Millisecond)
 			cu.send <- gocan.NewRawCommand("F")
 		}
@@ -136,12 +138,10 @@ func (cu *Canusb) Send() chan<- gocan.CANFrame {
 func (cu *Canusb) Close() error {
 	cu.closed = true
 	cu.close <- struct{}{}
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 	cu.port.Write([]byte("C\r"))
 	cu.port.Write([]byte("\r\r\r"))
 	time.Sleep(10 * time.Millisecond)
-	cu.port.ResetInputBuffer()
-	cu.port.ResetOutputBuffer()
 	return cu.port.Close()
 }
 
@@ -253,13 +253,12 @@ func (cu *Canusb) parse(ctx context.Context, readBuffer []byte, buff *bytes.Buff
 				}
 				buff.Reset()
 
-			case 'z':
+			case 'z': // last command ok
 				select {
 				case <-sendMutex:
 				default:
 				}
-				//fmt.Println("ok")
-			case 0x07:
+			case 0x07: // bell, last command was error
 				select {
 				case <-sendMutex:
 				default:
@@ -269,13 +268,13 @@ func (cu *Canusb) parse(ctx context.Context, readBuffer []byte, buff *bytes.Buff
 				case <-sendMutex:
 				default:
 				}
-				//log.Println("H/W version", buff.String())
+				log.Println("H/W version", buff.String())
 			case 'N':
 				select {
 				case <-sendMutex:
 				default:
 				}
-				//log.Println("H/W serial ", buff.String())
+				log.Println("H/W serial ", buff.String())
 			default:
 				select {
 				case <-sendMutex:
@@ -333,6 +332,35 @@ func checkBitSet(n, k int) bool {
 	return v == 1
 }
 
+func (*Canusb) decodeFrame(buff []byte) (gocan.CANFrame, error) {
+	idBytes, err := hex.DecodeString(fmt.Sprintf("%08s", buff[1:4]))
+	if err != nil {
+		return nil, fmt.Errorf("filed to decode identifier: %v", err)
+	}
+	recvBytes := len(buff[5:])
+
+	leng, err := strconv.ParseUint(string(buff[4:5]), 0, 8)
+	if err != nil {
+		return nil, err
+	}
+
+	if uint64(recvBytes/2) != leng {
+		return nil, errors.New("frame received bytes does not match header")
+	}
+
+	var data = make([]byte, hex.DecodedLen(recvBytes))
+	if _, err := hex.Decode(data, buff[5:]); err != nil {
+		return nil, fmt.Errorf("failed to decode frame body: %v", err)
+	}
+
+	return gocan.NewFrame(
+		binary.BigEndian.Uint32(idBytes),
+		data,
+		gocan.Incoming,
+	), nil
+}
+
+/*
 func (*Canusb) decodeFrame(buff []byte) (*gocan.Frame, error) {
 	data, err := hex.DecodeString(string(buff[5:]))
 	if err != nil {
@@ -351,3 +379,4 @@ func (*Canusb) decodeFrame(buff []byte) (*gocan.Frame, error) {
 		gocan.Incoming,
 	), nil
 }
+*/

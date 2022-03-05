@@ -22,9 +22,8 @@ import (
 var Debug bool
 
 type SX struct {
+	cfg          *gocan.AdapterConfig
 	port         serial.Port
-	portName     string
-	portBaudrate int
 	canrate      string
 	protocol     string
 	send, recv   chan gocan.CANFrame
@@ -33,42 +32,50 @@ type SX struct {
 	filter, mask string
 }
 
-func NewSX(cfg *gocan.AdapterConfig) (*SX, error) {
+func NewSX(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	sx := &SX{
-		portName:     cfg.Port,
-		portBaudrate: cfg.PortBaudrate,
-		send:         make(chan gocan.CANFrame, 100),
-		recv:         make(chan gocan.CANFrame, 100),
-		close:        make(chan struct{}, 10),
+		cfg:   cfg,
+		send:  make(chan gocan.CANFrame, 100),
+		recv:  make(chan gocan.CANFrame, 100),
+		close: make(chan struct{}, 10),
 	}
+
 	if err := sx.setCANrate(cfg.CANRate); err != nil {
 		return nil, err
 	}
+
 	sx.setCANfilter(cfg.CANFilter)
 
 	return sx, nil
 }
 
+var adapterSpeeds = []int{115200, 230400, 921600, 2000000, 1000000, 57600, 38400}
+
 func (cu *SX) Init(ctx context.Context) error {
 	mode := &serial.Mode{
-		BaudRate: cu.portBaudrate,
+		BaudRate: cu.cfg.PortBaudrate,
 		Parity:   serial.NoParity,
 		DataBits: 8,
 		StopBits: serial.OneStopBit,
 	}
-	p, err := serial.Open(cu.portName, mode)
+
+	p, err := serial.Open(cu.cfg.Port, mode)
 	if err != nil {
-		return fmt.Errorf("failed to open com port %q : %v", cu.portName, err)
+		return fmt.Errorf("failed to open com port %q : %v", cu.cfg.Port, err)
 	}
+
 	p.SetReadTimeout(1 * time.Millisecond)
+
 	cu.port = p
 
+	p.ResetOutputBuffer()
+	p.ResetInputBuffer()
+
 	err = retry.Do(func() error {
-		speeds := []int{115200, 230400, 921600, 2000000, 1000000, 57600, 38400}
-		desired := cu.portBaudrate
-		for _, speed := range speeds {
-			if err := setSpeed(p, mode, speed, desired); err == nil {
-				log.Printf("Switched adapter baudrate from %d to %d bps", speed, desired)
+		to := cu.cfg.PortBaudrate
+		for _, from := range adapterSpeeds {
+			if err := setSpeed(p, mode, from, to); err == nil {
+				log.Printf("Switched adapter baudrate from %d to %d bps", from, to)
 				return nil
 			} else {
 				log.Println(err)
@@ -103,10 +110,12 @@ func (cu *SX) Init(ctx context.Context) error {
 		cu.filter, // code
 		cu.mask,   // mask
 	}
+
 	delay := time.Duration(5000000000000 / mode.BaudRate)
 	if delay > (100 * time.Millisecond) {
 		delay = 100 * time.Millisecond
 	}
+
 	time.Sleep(delay)
 
 	for _, c := range initCmds {
@@ -251,7 +260,10 @@ func (cu *SX) sendManager(ctx context.Context) {
 				if v.Type() == gocan.Outgoing {
 					r = 0
 				}
+
+				//a := v.Identifier()
 				// write cmd and header
+				//f.Write([]byte{'S','T','P','X','h', ':',byte(a>>8) + 0x30, (byte(a) >> 4) + 0x30, ((byte(a) << 4) >> 4) + 0x30, ','})
 				f.WriteString("STPXh:" + hex.EncodeToString(idb)[5:] + "," +
 					// write data
 					"d:" + hex.EncodeToString(v.Data()) + ",")
@@ -351,6 +363,24 @@ func (cu *SX) recvManager(ctx context.Context) {
 }
 
 func (*SX) decodeFrame(buff []byte) (gocan.CANFrame, error) {
+	idBytes, err := hex.DecodeString(fmt.Sprintf("%08s", buff[0:3]))
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode identifier: %v", err)
+	}
+
+	data, err := hex.DecodeString(string(buff[3:]))
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode frame body: %v", err)
+	}
+
+	return gocan.NewFrame(
+		binary.BigEndian.Uint32(idBytes),
+		data,
+		gocan.Incoming,
+	), nil
+}
+
+/*func (*SX) decodeFrame(buff []byte) (gocan.CANFrame, error) {
 	data, err := hex.DecodeString(string(buff[3:]))
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode frame body: %v", err)
@@ -364,3 +394,4 @@ func (*SX) decodeFrame(buff []byte) (gocan.CANFrame, error) {
 		gocan.Incoming,
 	), nil
 }
+*/

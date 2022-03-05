@@ -3,7 +3,6 @@ package gocan
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 )
 
@@ -26,9 +25,8 @@ type AdapterConfig struct {
 }
 
 type Client struct {
-	hub     *Hub
+	fh      *FrameHandler
 	adapter Adapter
-	send    chan<- CANFrame
 }
 
 func New(ctx context.Context, adapter Adapter) (*Client, error) {
@@ -36,22 +34,22 @@ func New(ctx context.Context, adapter Adapter) (*Client, error) {
 		return nil, err
 	}
 	c := &Client{
-		hub:     newHub(adapter.Recv()),
+		fh:      newFrameHandler(adapter.Recv()),
 		adapter: adapter,
-		send:    adapter.Send(),
 	}
-	go c.hub.run(ctx)
+	go c.fh.run(ctx)
 	return c, nil
 }
 
 func (c *Client) Close() error {
+	c.fh.Close()
 	return c.adapter.Close()
 }
 
 // Send a CAN Frame
 func (c *Client) Send(msg CANFrame) error {
 	select {
-	case c.send <- msg:
+	case c.adapter.Send() <- msg:
 		return nil
 	case <-time.After(3 * time.Second):
 		return errors.New("failed to send frame")
@@ -59,10 +57,10 @@ func (c *Client) Send(msg CANFrame) error {
 }
 
 // Shortcommand to send a standard 11bit frame
-func (c *Client) SendFrame(identifier uint32, data []byte, t CANFrameType) error {
+func (c *Client) SendFrame(identifier uint32, data []byte, f CANFrameType) error {
 	var b = make([]byte, len(data))
 	copy(b, data)
-	frame := NewFrame(identifier, b, t)
+	frame := NewFrame(identifier, b, f)
 	return c.Send(frame)
 }
 
@@ -72,50 +70,35 @@ func (c *Client) SendString(str string) error {
 }
 
 // Send and wait up to <timeout> for a answer on given identifiers
-func (c *Client) SendAndPoll(ctx context.Context, frame *Frame, timeout time.Duration, identifiers ...uint32) (CANFrame, error) {
+func (c *Client) SendAndPoll(ctx context.Context, frame CANFrame, timeout time.Duration, identifiers ...uint32) (CANFrame, error) {
 	frame.SetTimeout(timeout)
-	p := newPoller(1, identifiers...)
+	p := newSub(1, identifiers...)
 
-	c.hub.register <- p
+	c.fh.register <- p
 	defer func() {
-		c.hub.unregister <- p
+		c.fh.unregister <- p
 	}()
 
 	if err := c.Send(frame); err != nil {
 		return nil, err
 	}
 
-	return waitForFrame(ctx, timeout, p, identifiers...)
-}
-
-// Subscribe to CAN identifiers and return a message channel
-func (c *Client) Subscribe(ctx context.Context, identifiers ...uint32) chan CANFrame {
-	p := newPoller(100, identifiers...)
-	c.hub.register <- p
-	return p.callback
+	return p.Wait(ctx, timeout)
 }
 
 // Poll for a certain CAN identifier for up to <timeout>
 func (c *Client) Poll(ctx context.Context, timeout time.Duration, identifiers ...uint32) (CANFrame, error) {
-	p := newPoller(1, identifiers...)
-	c.hub.register <- p
+	p := newSub(1, identifiers...)
+	c.fh.register <- p
 	defer func() {
-		c.hub.unregister <- p
+		c.fh.unregister <- p
 	}()
-	return waitForFrame(ctx, timeout, p, identifiers...)
+	return p.Wait(ctx, timeout)
 }
 
-func waitForFrame(ctx context.Context, timeout time.Duration, p *Poll, identifiers ...uint32) (CANFrame, error) {
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case f := <-p.callback:
-		if f == nil {
-			return nil, errors.New("got nil frame from poller")
-		}
-		return f, nil
-	case <-time.After(timeout):
-		return nil, fmt.Errorf("timeout waiting for frame 0x%03X", identifiers)
-
-	}
+// Subscribe to CAN identifiers and return a message channel
+func (c *Client) Subscribe(ctx context.Context, identifiers ...uint32) chan CANFrame {
+	p := newSub(100, identifiers...)
+	c.fh.register <- p
+	return p.callback
 }

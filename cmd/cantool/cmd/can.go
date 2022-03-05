@@ -28,23 +28,13 @@ func initCAN(ctx context.Context) (*gocan.Client, error) {
 		return nil, err
 	}
 
-	var filters []uint32
-	switch getECUType() {
-	case ecu.Trionic5:
-		filters = []uint32{0x000, 0x005, 0x006, 0x00C}
-	case ecu.Trionic7:
-		filters = []uint32{0x220, 0x238, 0x240, 0x258, 0x266}
-	case ecu.Trionic8:
-		filters = []uint32{0x011, 0x311, 0x7E0, 0x7E8, 0x5E8}
-	}
-
 	dev, err := adapter.New(
 		adapterName,
 		&gocan.AdapterConfig{
 			Port:         port,
 			PortBaudrate: baudrate,
 			CANRate:      canrate,
-			CANFilter:    filters,
+			CANFilter:    ecu.CANFilters(getECUType()),
 		},
 	)
 	if err != nil {
@@ -58,7 +48,7 @@ func getECUType() ecu.Type {
 	if err != nil {
 		log.Fatal(err)
 	}
-	return ecu.TypeFromString(ecutemp)
+	return ecu.FromString(ecutemp)
 }
 
 func getAdapterOpts() (adapter string, port string, baudrate int, canrate float64, err error) {
