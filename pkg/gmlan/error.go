@@ -22,7 +22,7 @@ func TranslateErrorCode(p byte) string {
 	case 0x11:
 		return "Service not supported"
 	case 0x12:
-		return "subFunction not supported - invalid format"
+		return "SubFunction not supported - invalid format"
 	case 0x21:
 		return "Busy, repeat request"
 	case 0x22:

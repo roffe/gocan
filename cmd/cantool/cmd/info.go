@@ -32,7 +32,7 @@ var infoCmd = &cobra.Command{
 		if _, err := tr.Info(ctx, infoCallback); err != nil {
 			return err
 		}
-		log.Println("took", time.Since(start).String())
+		log.Println("Done, took", time.Since(start).String())
 		if err := tr.ResetECU(ctx, nil); err != nil {
 			return err
 		}

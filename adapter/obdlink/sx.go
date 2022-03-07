@@ -255,8 +255,6 @@ func (cu *SX) sendManager(ctx context.Context) {
 		select {
 		case v := <-cu.send:
 			switch v.(type) {
-			case *gocan.RawCommand:
-				f.WriteString(v.String() + "\r")
 			default:
 				idb := make([]byte, 4)
 				binary.BigEndian.PutUint32(idb, v.Identifier())
@@ -270,8 +268,8 @@ func (cu *SX) sendManager(ctx context.Context) {
 				// write cmd and header
 				//f.Write([]byte{'S','T','P','X','h', ':',byte(a>>8) + 0x30, (byte(a) >> 4) + 0x30, ((byte(a) << 4) >> 4) + 0x30, ','})
 				f.WriteString("STPXh:" + hex.EncodeToString(idb)[5:] + "," +
-					// write data
-					"d:" + hex.EncodeToString(v.Data()) + ",")
+					"d:" + hex.EncodeToString(v.Data()) + ",",
+				)
 				// write timeout
 				if timeout > 0 {
 					f.WriteString("t:" + strconv.Itoa(int(timeout)) + ",")

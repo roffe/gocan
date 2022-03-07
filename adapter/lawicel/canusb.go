@@ -91,13 +91,6 @@ func (cu *Canusb) Init(ctx context.Context) error {
 		}
 	}
 
-	go func() {
-		for !cu.closed {
-			<-time.After(700 * time.Millisecond)
-			cu.send <- gocan.NewRawCommand("F")
-		}
-	}()
-
 	go cu.recvManager(ctx)
 	go cu.sendManager(ctx)
 
@@ -178,22 +171,22 @@ type token struct{}
 var sendMutex = make(chan token, 1)
 
 func (cu *Canusb) sendManager(ctx context.Context) {
+	t := time.NewTicker(600 * time.Millisecond)
 	f := bytes.NewBuffer(nil)
 	for {
 		select {
-		case v := <-cu.send:
-			switch v.(type) {
-			case *gocan.RawCommand:
-				f.WriteString(v.String() + "\r")
-
-			default:
-				idb := make([]byte, 4)
-				binary.BigEndian.PutUint32(idb, v.Identifier())
-				f.WriteString("t" + hex.EncodeToString(idb)[5:] +
-					strconv.Itoa(v.Length()) +
-					hex.EncodeToString(v.Data()) + "\r")
+		case <-t.C:
+			if !cu.closed {
+				sendMutex <- token{}
+				cu.port.Write([]byte{'F', '\r'})
 			}
 
+		case v := <-cu.send:
+			idb := make([]byte, 4)
+			binary.BigEndian.PutUint32(idb, v.Identifier())
+			f.WriteString("t" + hex.EncodeToString(idb)[5:] +
+				strconv.Itoa(v.Length()) +
+				hex.EncodeToString(v.Data()) + "\r")
 			sendMutex <- token{}
 			_, err := cu.port.Write(f.Bytes())
 			if err != nil {
@@ -261,14 +254,15 @@ func (cu *Canusb) parse(ctx context.Context, readBuffer []byte, buff *bytes.Buff
 					log.Printf("failed to decode frame: %q\n", buff.String())
 					continue
 				}
+				if debug {
+					fmt.Fprint(os.Stderr, f.String()+"\n")
+				}
 				select {
 				case cu.recv <- f:
 				default:
 					log.Println("dropped frame")
 				}
-				if debug {
-					log.Println(f.String())
-				}
+
 				buff.Reset()
 
 			case 'z': // last command ok

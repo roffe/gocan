@@ -1,7 +1,5 @@
 # goCAN
 
-[Docs](docs/cantool.md)
-
 Golang linux/windows/osx Trionic 5/7 ecu flasher
 
 Supported adapters:

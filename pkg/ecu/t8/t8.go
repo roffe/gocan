@@ -35,6 +35,19 @@ func (t *Client) ResetECU(ctx context.Context, callback model.ProgressCallback) 
 }
 
 func (t *Client) DumpECU(ctx context.Context, callback model.ProgressCallback) ([]byte, error) {
+	if err := t.Bootstrap(ctx, callback); err != nil {
+		return nil, err
+	}
+
+	time.Sleep(2 * time.Second)
+
+	if callback != nil {
+		callback("Exiting bootloader")
+	}
+	if err := t.LegionExit(ctx); err != nil {
+		return nil, err
+	}
+
 	return nil, nil
 }
 

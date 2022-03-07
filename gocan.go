@@ -64,11 +64,6 @@ func (c *Client) SendFrame(identifier uint32, data []byte, f CANFrameType) error
 	return c.Send(frame)
 }
 
-// SendString is used to bypass the frame parser and send raw commands to the CANUSB adapter
-func (c *Client) SendString(str string) error {
-	return c.Send(NewRawCommand(str))
-}
-
 // Send and wait up to <timeout> for a answer on given identifiers
 func (c *Client) SendAndPoll(ctx context.Context, frame CANFrame, timeout time.Duration, identifiers ...uint32) (CANFrame, error) {
 	frame.SetTimeout(timeout)

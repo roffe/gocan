@@ -33,7 +33,7 @@ var dumpCmd = &cobra.Command{
 			return err
 		}
 
-		bin, err := tr.DumpECU(ctx, nil)
+		bin, err := tr.DumpECU(ctx, infoCallback)
 		if err != nil {
 			return err
 		}

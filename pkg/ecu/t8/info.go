@@ -47,22 +47,26 @@ var T8Headers = []model.Header{
 }
 
 func (t *Client) Info(ctx context.Context, callback model.ProgressCallback) ([]model.HeaderResult, error) {
+	gm := gmlan.New(t.c)
 	if callback != nil {
 		callback(-float64(len(T8Headers)))
 		callback("Initialize session")
 	}
-	if err := t.InitializeSession(ctx); err != nil {
-		return nil, err
-	}
+	gm.TesterPresentNoResponseAllowed()
 
 	time.Sleep(20 * time.Millisecond)
+
+	gm.DisableNormalCommunicationAllNodes()
+	if err := gm.DisableNormalCommunication(ctx, 0x7E0, 0x7E8); err != nil {
+		return nil, err
+	}
 
 	n := 0
 	//var out []model.HeaderResult
 	for i, h := range T8Headers {
 		n++
 		if n == 5 {
-			t.SendKeepAlive(ctx)
+			gm.TesterPresentNoResponseAllowed()
 			n = 0
 		}
 		switch h.Type {
@@ -161,10 +165,6 @@ func (t *Client) Info(ctx context.Context, callback model.ProgressCallback) ([]m
 		//a.Desc = h.Desc
 		//a.ID = h.ID
 		//out = append(out, a)
-	}
-	time.Sleep(100 * time.Millisecond)
-	if err := t.UploadBootloader(ctx); err != nil {
-		return nil, err
 	}
 
 	return nil, nil
