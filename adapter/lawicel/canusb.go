@@ -8,13 +8,23 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/albenik/bcd"
 	"github.com/roffe/gocan"
 	"go.bug.st/serial"
 )
+
+var debug bool
+
+func init() {
+	if strings.ToLower(os.Getenv("DEBUG")) == "true" {
+		debug = true
+	}
+}
 
 type Canusb struct {
 	cfg          *gocan.AdapterConfig
@@ -177,15 +187,20 @@ func (cu *Canusb) sendManager(ctx context.Context) {
 				f.WriteString(v.String() + "\r")
 
 			default:
-				a := v.Identifier()
-				f.Write([]byte{'t', byte(a>>8) + 0x30, (byte(a) >> 4) + 0x30, ((byte(a) << 4) >> 4) + 0x30})
-				f.WriteString(strconv.Itoa(v.Length()) + hex.EncodeToString(v.Data()) + "\r")
+				idb := make([]byte, 4)
+				binary.BigEndian.PutUint32(idb, v.Identifier())
+				f.WriteString("t" + hex.EncodeToString(idb)[5:] +
+					strconv.Itoa(v.Length()) +
+					hex.EncodeToString(v.Data()) + "\r")
 			}
 
 			sendMutex <- token{}
 			_, err := cu.port.Write(f.Bytes())
 			if err != nil {
 				log.Printf("failed to write to com port: %q, %v", f.String(), err)
+			}
+			if debug {
+				fmt.Fprint(os.Stderr, v.String()+"\n")
 			}
 			f.Reset()
 		case <-ctx.Done():
@@ -227,6 +242,10 @@ func (cu *Canusb) parse(ctx context.Context, readBuffer []byte, buff *bytes.Buff
 		default:
 		}
 		if b == 0x0D {
+			select {
+			case <-sendMutex:
+			default:
+			}
 			if buff.Len() == 0 {
 				continue
 			}
@@ -235,10 +254,6 @@ func (cu *Canusb) parse(ctx context.Context, readBuffer []byte, buff *bytes.Buff
 			case 'F':
 				if err := decodeStatus(by); err != nil {
 					log.Println("CAN status error", err)
-				}
-				select {
-				case <-sendMutex:
-				default:
 				}
 			case 't':
 				f, err := cu.decodeFrame(by)
@@ -251,35 +266,18 @@ func (cu *Canusb) parse(ctx context.Context, readBuffer []byte, buff *bytes.Buff
 				default:
 					log.Println("dropped frame")
 				}
+				if debug {
+					log.Println(f.String())
+				}
 				buff.Reset()
 
 			case 'z': // last command ok
-				select {
-				case <-sendMutex:
-				default:
-				}
 			case 0x07: // bell, last command was error
-				select {
-				case <-sendMutex:
-				default:
-				}
 			case 'V':
-				select {
-				case <-sendMutex:
-				default:
-				}
 				log.Println("H/W version", buff.String())
 			case 'N':
-				select {
-				case <-sendMutex:
-				default:
-				}
 				log.Println("H/W serial ", buff.String())
 			default:
-				select {
-				case <-sendMutex:
-				default:
-				}
 				log.Printf("COM>> %q\n", buff.String())
 			}
 			buff.Reset()

@@ -55,7 +55,7 @@ func (t *Client) DataInitialization(ctx context.Context, callback model.Progress
 			}
 			d := resp.Data()
 			if !bytes.Equal(d, []byte{0x40, 0xBF, 0x21, 0xC1, 0x00, 0x11, 0x02, 0x58}) {
-				return fmt.Errorf("invalid DataInitialization response")
+				return fmt.Errorf("/!\\ Invalid data initialization response")
 			}
 
 			return nil
@@ -75,7 +75,7 @@ func (t *Client) DataInitialization(ctx context.Context, callback model.Progress
 		retry.Delay(250*time.Millisecond),
 	)
 	if err != nil {
-		return fmt.Errorf("/!\\Datainitialization failed: %v", err)
+		return fmt.Errorf("/!\\ Data initialization failed: %v", err)
 	}
 	return nil
 }

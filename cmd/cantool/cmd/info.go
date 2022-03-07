@@ -1,6 +1,9 @@
 package cmd
 
 import (
+	"log"
+	"time"
+
 	"github.com/roffe/gocan/pkg/ecu"
 	"github.com/spf13/cobra"
 )
@@ -25,15 +28,22 @@ var infoCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-
-		if err := tr.PrintECUInfo(ctx); err != nil {
+		start := time.Now()
+		if _, err := tr.Info(ctx, infoCallback); err != nil {
 			return err
 		}
-
+		log.Println("took", time.Since(start).String())
 		if err := tr.ResetECU(ctx, nil); err != nil {
 			return err
 		}
 
 		return nil
 	},
+}
+
+func infoCallback(v interface{}) {
+	switch t := v.(type) {
+	case string:
+		log.Println(t)
+	}
 }

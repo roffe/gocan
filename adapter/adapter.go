@@ -2,7 +2,6 @@ package adapter
 
 import (
 	"fmt"
-	"log"
 	"strings"
 
 	"github.com/roffe/gocan"
@@ -62,7 +61,6 @@ func New(adapter interface{}, cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 			}
 			for _, alias := range a.Alias {
 				if normalized == strings.ToLower(alias) {
-					log.Println(a.Alias)
 					return a.New(cfg)
 				}
 			}

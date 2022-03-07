@@ -26,10 +26,6 @@ func New(c *gocan.Client) *Client {
 	return t
 }
 
-func (t *Client) Info(ctx context.Context, callback model.ProgressCallback) ([]model.HeaderResult, error) {
-	return nil, nil
-}
-
 func (t *Client) PrintECUInfo(ctx context.Context) error {
 	return nil
 }

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -19,7 +20,13 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-var Debug bool
+var debug bool
+
+func init() {
+	if strings.ToLower(os.Getenv("DEBUG")) == "true" {
+		debug = true
+	}
+}
 
 type SX struct {
 	cfg          *gocan.AdapterConfig
@@ -254,12 +261,10 @@ func (cu *SX) sendManager(ctx context.Context) {
 				idb := make([]byte, 4)
 				binary.BigEndian.PutUint32(idb, v.Identifier())
 
-				r := 1
-				timeout := v.Timeout().Milliseconds()
+				t := v.Type()
+				r := t.GetResponseCount()
 
-				if v.Type() == gocan.Outgoing {
-					r = 0
-				}
+				timeout := v.Timeout().Milliseconds()
 
 				//a := v.Identifier()
 				// write cmd and header
@@ -279,6 +284,9 @@ func (cu *SX) sendManager(ctx context.Context) {
 			_, err := cu.port.Write(f.Bytes())
 			if err != nil {
 				log.Printf("failed to write to com port: %q, %v", f.String(), err)
+			}
+			if debug {
+				fmt.Fprint(os.Stderr, v.String()+"\n")
 			}
 			f.Reset()
 		case <-ctx.Done():
@@ -347,6 +355,9 @@ func (cu *SX) recvManager(ctx context.Context) {
 					if err != nil {
 						log.Printf("%v: %q\n", err, buff.String())
 						continue
+					}
+					if debug {
+						fmt.Fprint(os.Stderr, f.String()+"\n")
 					}
 					select {
 					case cu.recv <- f:

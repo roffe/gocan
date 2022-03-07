@@ -9,12 +9,23 @@ import (
 	"github.com/fatih/color"
 )
 
-type CANFrameType int
+type CANFrameType struct {
+	Type      int
+	Responses int
+}
 
-const (
-	Incoming CANFrameType = iota
-	Outgoing
-	ResponseRequired
+func (c *CANFrameType) SetResponseCount(no int) {
+	c.Responses = no
+}
+
+func (c *CANFrameType) GetResponseCount() int {
+	return c.Responses
+}
+
+var (
+	Incoming         = CANFrameType{Type: 0, Responses: 0}
+	Outgoing         = CANFrameType{Type: 1, Responses: 0}
+	ResponseRequired = CANFrameType{Type: 2, Responses: 1}
 )
 
 type CANFrame interface {
@@ -83,6 +94,16 @@ var (
 
 func (f *Frame) String() string {
 	var out strings.Builder
+
+	switch f.frameType.Type {
+	case 0:
+		out.WriteString("<i> || ")
+	case 1:
+		out.WriteString("<o> || ")
+	case 2:
+		out.WriteString("<r> || ")
+
+	}
 
 	out.WriteString(green("0x%03X", f.identifier) + " || ")
 

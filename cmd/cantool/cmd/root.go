@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -30,7 +31,7 @@ const (
 )
 
 func init() {
-	switch os.Getenv("DEBUG") {
+	switch strings.ToLower(os.Getenv("DEBUG")) {
 	case "true":
 		log.SetFlags(log.Lshortfile | log.LstdFlags)
 	default:

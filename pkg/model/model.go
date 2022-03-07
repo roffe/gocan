@@ -5,6 +5,7 @@ type ProgressCallback func(interface{})
 type Header struct {
 	Desc string
 	ID   uint8
+	Type string
 }
 
 type HeaderResult struct {
