@@ -14,8 +14,10 @@ const (
 )
 
 type Client struct {
-	c              *gocan.Client
-	defaultTimeout time.Duration
+	c               *gocan.Client
+	defaultTimeout  time.Duration
+	legionRunning   bool
+	interframeDelay int
 }
 
 func New(c *gocan.Client) *Client {
@@ -32,23 +34,6 @@ func (t *Client) PrintECUInfo(ctx context.Context) error {
 
 func (t *Client) ResetECU(ctx context.Context, callback model.ProgressCallback) error {
 	return nil
-}
-
-func (t *Client) DumpECU(ctx context.Context, callback model.ProgressCallback) ([]byte, error) {
-	if err := t.Bootstrap(ctx, callback); err != nil {
-		return nil, err
-	}
-
-	time.Sleep(2 * time.Second)
-
-	if callback != nil {
-		callback("Exiting bootloader")
-	}
-	if err := t.LegionExit(ctx); err != nil {
-		return nil, err
-	}
-
-	return nil, nil
 }
 
 func (t *Client) FlashECU(ctx context.Context, bin []byte, callback model.ProgressCallback) error {

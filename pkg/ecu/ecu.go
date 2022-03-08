@@ -12,8 +12,6 @@ import (
 	"github.com/roffe/gocan/pkg/model"
 )
 
-type Type int
-
 const (
 	UnknownECU Type = -1
 	Trionic5   Type = iota
@@ -46,6 +44,8 @@ func FromString(s string) Type {
 	}
 }
 
+type Type int
+
 func (e Type) String() string {
 	switch e {
 	case Trionic5:
@@ -77,7 +77,7 @@ func New(c *gocan.Client, t Type) (Client, error) {
 func CANFilters(t Type) []uint32 {
 	switch t {
 	case Trionic5:
-		return []uint32{0x000, 0x005, 0x006, 0x00C}
+		return []uint32{0x0, 0x05, 0x06, 0x0C}
 	case Trionic7:
 		return []uint32{0x220, 0x238, 0x240, 0x258, 0x266}
 	case Trionic8:

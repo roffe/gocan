@@ -93,7 +93,7 @@ func (c *Client) Poll(ctx context.Context, timeout time.Duration, identifiers ..
 
 // Subscribe to CAN identifiers and return a message channel
 func (c *Client) Subscribe(ctx context.Context, identifiers ...uint32) chan CANFrame {
-	p := newSub(100, identifiers...)
+	p := newSub(10, identifiers...)
 	c.fh.register <- p
 	return p.callback
 }

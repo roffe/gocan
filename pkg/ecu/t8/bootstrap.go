@@ -9,8 +9,9 @@ import (
 	"github.com/roffe/gocan/pkg/model"
 )
 
+// Disable normal communication, enter programming mode, and request security access
+// then upload bootloader and jump to it
 func (t *Client) Bootstrap(ctx context.Context, callback model.ProgressCallback) error {
-	var legionRunning bool
 	if callback != nil {
 		callback("Checking if Legion is running")
 	}
@@ -23,13 +24,22 @@ func (t *Client) Bootstrap(ctx context.Context, callback model.ProgressCallback)
 		if callback != nil {
 			callback("Legion running")
 		}
-		legionRunning = true
+
+		if err := t.LegionEnableHighSpeed(ctx); err != nil {
+			return err
+		}
+
+		t.legionRunning = true
 		return nil
 	},
 		retry.Attempts(4),
 		retry.Context(ctx),
 		retry.LastErrorOnly(true),
 	)
+	if t.legionRunning {
+		return nil
+	}
+
 	gm := gmlan.New(t.c)
 	gm.TesterPresentNoResponseAllowed()
 
@@ -64,7 +74,7 @@ func (t *Client) Bootstrap(ctx context.Context, callback model.ProgressCallback)
 		return err
 	}
 
-	if !legionRunning {
+	if !t.legionRunning {
 		if err := t.UploadBootloader(ctx, callback); err != nil {
 			return err
 		}
@@ -92,6 +102,19 @@ func (t *Client) Bootstrap(ctx context.Context, callback model.ProgressCallback)
 		if err != nil {
 			return err
 		}
+		t.legionRunning = true
+	}
+
+	//if t.interframeDelay != 1200 {
+	//	t.interframeDelay = 1200
+	//	if err := t.LegionIDemand(0, uint(t.interframeDelay)); err != nil {
+	//		return err
+	//	}
+	//
+	//}
+
+	if err := t.LegionEnableHighSpeed(ctx); err != nil {
+		return err
 	}
 
 	return nil

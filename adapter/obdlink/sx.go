@@ -279,12 +279,12 @@ func (cu *SX) sendManager(ctx context.Context) {
 			}
 
 			sendMutex <- token{}
+			if debug {
+				fmt.Fprint(os.Stderr, "<o> "+f.String()+"\n")
+			}
 			_, err := cu.port.Write(f.Bytes())
 			if err != nil {
 				log.Printf("failed to write to com port: %q, %v", f.String(), err)
-			}
-			if debug {
-				fmt.Fprint(os.Stderr, v.String()+"\n")
 			}
 			f.Reset()
 		case <-ctx.Done():
@@ -335,6 +335,9 @@ func (cu *SX) recvManager(ctx context.Context) {
 				if buff.Len() == 0 {
 					continue
 				}
+				if debug {
+					fmt.Fprint(os.Stderr, "<i> ", buff.String()+"\n")
+				}
 				switch buff.String() {
 				case "CAN ERROR":
 					log.Println("CAN ERROR")
@@ -345,6 +348,7 @@ func (cu *SX) recvManager(ctx context.Context) {
 					log.Println("UNKNOWN COMMAND")
 					buff.Reset()
 				case "NO DATA":
+					//log.Println("NO DATA")
 					buff.Reset()
 				case "OK":
 					buff.Reset()
@@ -353,9 +357,6 @@ func (cu *SX) recvManager(ctx context.Context) {
 					if err != nil {
 						log.Printf("%v: %q\n", err, buff.String())
 						continue
-					}
-					if debug {
-						fmt.Fprint(os.Stderr, f.String()+"\n")
 					}
 					select {
 					case cu.recv <- f:
