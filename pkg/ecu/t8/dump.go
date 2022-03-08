@@ -30,7 +30,7 @@ func (t *Client) DumpECU(ctx context.Context, callback model.ProgressCallback) (
 	}
 
 	if callback != nil {
-		callback("Verifying MD5..")
+		callback("Verifying md5..")
 	}
 
 	ecumd5bytes, err := t.LegionIDemand(ctx, 0x02, 0x00)
@@ -40,20 +40,16 @@ func (t *Client) DumpECU(ctx context.Context, callback model.ProgressCallback) (
 	calculatedMD5 := md5.Sum(bin)
 
 	if callback != nil {
-		callback(fmt.Sprintf("Legion MD5 : %X", ecumd5bytes))
-		callback(fmt.Sprintf("Local MD5  : %X", calculatedMD5))
+		callback(fmt.Sprintf("Legion md5 : %X", ecumd5bytes))
+		callback(fmt.Sprintf("Local md5  : %X", calculatedMD5))
 	}
 
 	if !bytes.Equal(ecumd5bytes, calculatedMD5[:]) {
-		return nil, errors.New("MD5 Verification failed")
+		return nil, errors.New("md5 Verification failed")
 	}
 
 	if callback != nil {
 		callback("Done, took: " + time.Since(start).String())
-		callback("Exiting bootloader")
-	}
-	if err := t.LegionExit(ctx); err != nil {
-		return nil, err
 	}
 
 	return bin, nil

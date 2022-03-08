@@ -50,17 +50,21 @@ func (t *Client) UploadBootloader(ctx context.Context, callback model.ProgressCa
 	start := time.Now()
 
 	if callback != nil {
-		callback(-float64(Len))
+		callback(-float64(9996))
 		callback(float64(0))
 		callback("Uploading bootloader")
 	}
 
 	r := bytes.NewReader(LegionBytes)
-	p := 0
+	pp := 0
+
+	progress := 0
+
 	for i := 0; i < Len; i++ {
-		if p == 15 {
+		pp++
+		if pp == 10 {
 			gm.TesterPresentNoResponseAllowed()
-			p = 0
+			pp = 0
 		}
 		if callback != nil {
 			callback(float64(i + 1))
@@ -78,6 +82,7 @@ func (t *Client) UploadBootloader(ctx context.Context, callback model.ProgressCa
 					return err
 				}
 				payload[x] = b
+				progress++
 			}
 
 			tt := gocan.Outgoing
@@ -93,6 +98,9 @@ func (t *Client) UploadBootloader(ctx context.Context, callback model.ProgressCa
 			if seq > 0x2F {
 				seq = 0x20
 			}
+			if callback != nil {
+				callback(float64(progress))
+			}
 		}
 		resp, err := t.c.Poll(ctx, t.defaultTimeout, 0x7E8)
 		if err != nil {
@@ -106,7 +114,6 @@ func (t *Client) UploadBootloader(ctx context.Context, callback model.ProgressCa
 		if d[0] != 0x01 || d[1] != 0x76 {
 			return errors.New("invalid transfer data response")
 		}
-
 		startAddress += 0xEA
 	}
 
@@ -184,7 +191,7 @@ func (t *Client) LegionExit(ctx context.Context) error {
 
 func (t *Client) LegionEnableHighSpeed(ctx context.Context) error {
 	log.Println("Enable LegionHighSpeed")
-	payload := []byte{0x02, 0xA5, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10}
+	payload := []byte{0x02, 0xA5, 0x00, 0x00, 0x00, 0x00, 0x00, 0x20}
 	frame := gocan.NewFrame(0x7E0, payload, gocan.ResponseRequired)
 	resp, err := t.c.SendAndPoll(ctx, frame, t.defaultTimeout, 0x7E8)
 	if err != nil {
@@ -236,7 +243,7 @@ func (t *Client) LegionEnableHighSpeed(ctx context.Context) error {
 //   whish:
 //   Which pin to read.
 func (t *Client) LegionIDemand(ctx context.Context, command byte, wish uint16) ([]byte, error) {
-	log.Println("Legion i demand")
+	log.Println("Legion i demand", cmdToString(command)+"!")
 	payload := []byte{0x02, 0xA5, command, 0x00, 0x00, 0x00, byte(wish >> 8), byte(wish)}
 	frame := gocan.NewFrame(0x7E0, payload, gocan.ResponseRequired)
 
@@ -250,21 +257,89 @@ func (t *Client) LegionIDemand(ctx context.Context, command byte, wish uint16) (
 		}
 		//log.Println(resp.String())
 		d := resp.Data()
-		if (command == 2 || command == 3) && d[3] != 1 {
-			return errors.New("MD5 not ready yet")
+
+		if err := demandErr(command, d); err != nil {
+			return err
 		}
 
-		if (command == 2 || command == 3) && d[3] == 1 {
+		switch command {
+		case 0:
+			// Settings correctly received.
+			log.Println("settings correctly received")
+			return nil
+		case 1:
+			// Crc-32; complete
+			log.Println("crc-32 complete")
+			out = d[4:]
+			return nil
+		case 2, 3:
+			// md5; complete
 			b, _, err := t.readDataByLocalIdentifier(ctx, nil, true, 7, 0, 16)
 			if err != nil {
 				return err
 			}
-			//log.Printf("%d>> %X || %q", n, b, b)
 			out = b
+			log.Println("md5 complete")
 			return nil
+		case 4:
+			// Secondary loader is alive!
+			log.Println("secondary loader alive")
+			return nil
+		case 5:
+			// Marriage; Complete
+			log.Println("marriage complete")
+			return nil
+		case 6:
+			// ADC-read; complete
+			out = d[4:5]
+			return nil
+		default:
+			return retry.Unrecoverable(errors.New("command unknown to the legion"))
 		}
+		/*
+			// Settings correctly received.
+			if command == 0 && d[3] == 1 {
+				log.Println("settings correctly received")
+				return nil
+			}
 
-		return nil
+			// Crc-32; complete
+			if command == 1 && d[3] == 1 {
+				log.Println("Crc-32; complete")
+				out = d[4:]
+				return nil
+			}
+
+			// md5; complete
+			if (command == 2 || command == 3) && d[3] == 1 {
+				log.Println("md5 complete")
+				b, _, err := t.readDataByLocalIdentifier(ctx, nil, true, 7, 0, 16)
+				if err != nil {
+					return err
+				}
+				out = b
+				return nil
+			}
+
+			// Secondary loader is alive!
+			if command == 4 && d[3] == 1 {
+				log.Println("secondary loader alive")
+				return nil
+			}
+
+			// MCP marriage
+			if command == 5 && d[3] == 1 {
+				// Marriage; Complete
+				log.Println("marriage complete")
+				return nil
+			}
+
+			// ADC-read; complete
+			if command == 6 && d[3] == 1 {
+				out = d[4:5]
+				return nil
+			}
+		*/
 	},
 		retry.Context(ctx),
 		retry.Attempts(10),
@@ -275,4 +350,57 @@ func (t *Client) LegionIDemand(ctx context.Context, command byte, wish uint16) (
 	}
 
 	return out, nil
+}
+
+func cmdToString(command byte) string {
+	switch command {
+	case 0x00:
+		return "configure packet delay"
+	case 0x01:
+		return "full crc-32"
+	case 0x02:
+		return "Trionic8 md5"
+	case 0x03:
+		return "Trionic8 MCP md5"
+	case 0x04:
+		return "start secondary bootloader"
+	case 0x05:
+		return "marry secondary processor"
+	case 0x06:
+		return "read ADC pin"
+	default:
+		return "I knew what i was doing"
+	}
+}
+
+func demandErr(command byte, d []byte) error {
+	if command == 1 && d[3] != 1 {
+		return errors.New("crc-32 not ready yet :(")
+	}
+	if (command == 2 || command == 3) && d[3] != 1 {
+		return errors.New("md5 not ready yet :(")
+	}
+
+	if command == 5 {
+		// Critical error; Could not start the secondary loader!
+		if d[3] == 0xFF {
+			return errors.New("failed to start the secondary loader")
+		} else if d[3] == 0xFD {
+			// Failed to write!
+			return errors.New("retrying write")
+		} else if d[3] == 0xFE {
+			// Failed to format!
+			return errors.New("retrying format")
+		} else {
+			time.Sleep(500 * time.Millisecond)
+			return fmt.Errorf("busy")
+		}
+	}
+
+	// Something is wrong or we sent the wrong command.
+	if d[3] == 0xFF {
+		return errors.New("bootloader did what it could and failed. Sorry")
+
+	}
+	return nil
 }

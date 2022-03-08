@@ -34,8 +34,18 @@ var toyCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-
 		log.Printf("%X", b)
+
+		b2, err := tr.LegionIDemand(ctx, 0x01, 0x00)
+		if err != nil {
+			return err
+		}
+
+		log.Printf("%X", b2)
+
+		if err := tr.ResetECU(ctx, nil); err != nil {
+			return err
+		}
 
 		return nil
 	},
