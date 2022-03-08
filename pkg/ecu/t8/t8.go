@@ -14,10 +14,10 @@ const (
 )
 
 type Client struct {
-	c               *gocan.Client
-	defaultTimeout  time.Duration
-	legionRunning   bool
-	interframeDelay int
+	c              *gocan.Client
+	defaultTimeout time.Duration
+	legionRunning  bool
+	//interframeDelay int
 }
 
 func New(c *gocan.Client) *Client {
@@ -33,6 +33,11 @@ func (t *Client) PrintECUInfo(ctx context.Context) error {
 }
 
 func (t *Client) ResetECU(ctx context.Context, callback model.ProgressCallback) error {
+	if t.legionRunning {
+		if err := t.LegionExit(ctx); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
