@@ -81,7 +81,7 @@ func (t *Client) FlashECU(ctx context.Context, bin []byte, callback model.Progre
 	}
 
 	if callback != nil {
-		callback(fmt.Sprintf("Done, took: %s\n", time.Since(startTime).Round(time.Millisecond).String()))
+		callback(fmt.Sprintf("Done, took: %s", time.Since(startTime).Round(time.Millisecond).String()))
 	}
 	return nil
 }

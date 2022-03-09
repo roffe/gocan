@@ -182,7 +182,7 @@ func (t *Client) UploadBootLoader(ctx context.Context, callback model.ProgressCa
 	}
 	//fmt.Printf("took: %s\n", time.Since(start).Round(time.Millisecond).String())
 	if callback != nil {
-		callback(fmt.Sprintf("Done, took: %s\n", time.Since(start).Round(time.Millisecond).String()))
+		callback(fmt.Sprintf("Done, took: %s", time.Since(start).Round(time.Millisecond).String()))
 	}
 	t.bootloaded = true
 	return nil

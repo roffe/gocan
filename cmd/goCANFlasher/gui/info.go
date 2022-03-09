@@ -41,7 +41,6 @@ func (m *mainWindow) ecuInfo() {
 		val, err := tr.Info(ctx, m.callback)
 		if err != nil {
 			m.output(err.Error())
-			return
 		}
 
 		for _, v := range val {

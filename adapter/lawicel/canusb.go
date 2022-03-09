@@ -68,9 +68,9 @@ func (cu *Canusb) Init(ctx context.Context) error {
 	p.ResetInputBuffer()
 
 	var cmds = []string{
-		"\r", "\r", "\r", "\r", // Empty buffer
-		"V",        // Get Version number of both CANUSB hardware and software
-		"N",        // Get Serial number of the CANUSB
+		"\r", "\r", // Empty buffer
+		"V", // Get Version number of both CANUSB hardware and software
+		//"N",        // Get Serial number of the CANUSB
 		"Z0",       // Sets Time Stamp OFF for received frames
 		cu.canRate, // Setup CAN bit-rates
 		cu.filter,
@@ -83,15 +83,17 @@ func (cu *Canusb) Init(ctx context.Context) error {
 		delay = 100 * time.Millisecond
 	}
 
+	go cu.recvManager(ctx)
+
 	for _, c := range cmds {
 		_, err := p.Write([]byte(c + "\r"))
 		if err != nil {
 			p.Close()
 			return err
 		}
+		time.Sleep(delay)
 	}
 
-	go cu.recvManager(ctx)
 	go cu.sendManager(ctx)
 
 	return nil

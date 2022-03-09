@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"log"
 	"strconv"
 )
 
@@ -315,9 +316,9 @@ func (r *Record) String() string {
 func printBytes(bt []byte) {
 	for i, b := range bt {
 		if i != 0 && i%16 == 0 {
-			fmt.Println()
+			log.Println()
 		}
-		fmt.Printf("%02X", b)
+		log.Printf("%02X", b)
 	}
-	fmt.Print("\n")
+	log.Print("\n")
 }

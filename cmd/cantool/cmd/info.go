@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"fmt"
 	"log"
 	"math"
 	"time"
@@ -68,7 +67,8 @@ func infoCallback(v interface{}) {
 		if t == max {
 			if ask != nil {
 				ask.Close()
-				fmt.Println("")
+				log.Println("")
+				//ask = nil
 			}
 		}
 	}

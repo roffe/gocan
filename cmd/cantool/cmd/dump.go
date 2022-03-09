@@ -42,7 +42,7 @@ var dumpCmd = &cobra.Command{
 			log.Printf("failed to write dump file: %v", err)
 		}
 
-		if err := tr.ResetECU(ctx, nil); err != nil {
+		if err := tr.ResetECU(ctx, infoCallback); err != nil {
 			return err
 		}
 

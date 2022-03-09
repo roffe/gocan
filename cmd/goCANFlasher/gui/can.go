@@ -31,7 +31,7 @@ func (m *mainWindow) initCAN(ctx context.Context) (*gocan.Client, error) {
 		return nil, err
 	}
 
-	m.output(fmt.Sprintf("Done, took: %s\n", time.Since(startTime).Round(time.Millisecond).String()))
+	m.output(fmt.Sprintf("Done, took: %s", time.Since(startTime).Round(time.Millisecond).String()))
 
 	return client, nil
 }

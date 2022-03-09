@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -61,8 +62,12 @@ func (t *Client) Info(ctx context.Context, callback model.ProgressCallback) ([]m
 		return nil, err
 	}
 
+	if callback != nil {
+		callback(-float64(len(T8Headers)))
+		callback("Fetching ECU info")
+	}
 	n := 0
-	//var out []model.HeaderResult
+	var out []model.HeaderResult
 	for i, h := range T8Headers {
 		n++
 		if n == 5 {
@@ -75,33 +80,45 @@ func (t *Client) Info(ctx context.Context, callback model.ProgressCallback) ([]m
 			if err != nil {
 				return nil, err
 			}
-			if callback != nil {
-				callback(fmt.Sprintf("%-27s: %s", h.Desc, data))
+			res := model.HeaderResult{
+				Value: data,
 			}
+			res.ID = h.ID
+			res.Desc = h.Desc
+			out = append(out, res)
 		case "int64":
 			data, err := t.RequestECUInfoAsInt64(ctx, h.ID)
 			if err != nil {
 				return nil, err
 			}
-			if callback != nil {
-				callback(fmt.Sprintf("%-27s: %d", h.Desc, data))
+			res := model.HeaderResult{
+				Value: strconv.Itoa(int(data)),
 			}
+			res.ID = h.ID
+			res.Desc = h.Desc
+			out = append(out, res)
 		case "hex":
 			data, err := t.RequestECUInfo(ctx, h.ID)
 			if err != nil {
 				return nil, err
 			}
-			if callback != nil {
-				callback(fmt.Sprintf("%-27s: %X", h.Desc, data))
+			res := model.HeaderResult{
+				Value: fmt.Sprintf("%X", data),
 			}
+			res.ID = h.ID
+			res.Desc = h.Desc
+			out = append(out, res)
 		case "uint32":
 			data, err := t.RequestECUInfoAsUint32(ctx, h.ID)
 			if err != nil {
 				return nil, err
 			}
-			if callback != nil {
-				callback(fmt.Sprintf("%-27s: %d", h.Desc, data))
+			res := model.HeaderResult{
+				Value: strconv.Itoa(int(data)),
 			}
+			res.ID = h.ID
+			res.Desc = h.Desc
+			out = append(out, res)
 		case "km/h":
 			data, err := t.RequestECUInfo(ctx, h.ID)
 			if err != nil {
@@ -113,19 +130,25 @@ func (t *Client) Info(ctx context.Context, callback model.ProgressCallback) ([]m
 				retval += uint32(data[1])
 				retval /= 10
 			}
-			if callback != nil {
-				callback(fmt.Sprintf("%-27s: %d km/h", h.Desc, retval))
+			res := model.HeaderResult{
+				Value: fmt.Sprintf("%d km/h", retval),
 			}
+			res.ID = h.ID
+			res.Desc = h.Desc
+			out = append(out, res)
 		case "oilquality":
 			data, err := t.RequestECUInfoAsUint64(ctx, h.ID)
 			if err != nil {
 				return nil, err
 			}
 			quality := float64(data) / 256
-
-			if callback != nil {
-				callback(fmt.Sprintf("%-27s: %.2f %%", h.Desc, quality))
+			res := model.HeaderResult{
+				Value: fmt.Sprintf("%.2f%%", quality),
 			}
+			res.ID = h.ID
+			res.Desc = h.Desc
+			out = append(out, res)
+
 		case "ddi":
 			data, err := t.RequestECUInfo(ctx, h.ID)
 			if err != nil {
@@ -135,9 +158,12 @@ func (t *Client) Info(ctx context.Context, callback model.ProgressCallback) ([]m
 			if len(data) == 2 {
 				retval = fmt.Sprintf("0x%02X 0x%02X", data[0], data[1])
 			}
-			if callback != nil {
-				callback(fmt.Sprintf("%-27s: %s", h.Desc, retval))
+			res := model.HeaderResult{
+				Value: retval,
 			}
+			res.ID = h.ID
+			res.Desc = h.Desc
+			out = append(out, res)
 		case "e85":
 			gm := gmlan.New(t.c)
 			data, err := gm.ReadDataByPacketIdentifier(ctx, 0x7E0, 0x7E8, 0x01, 0x7A)
@@ -146,28 +172,27 @@ func (t *Client) Info(ctx context.Context, callback model.ProgressCallback) ([]m
 			}
 			if len(data) == 2 {
 				e85 := uint32(data[2])
-				if callback != nil {
-					callback(fmt.Sprintf("%-27s: %d %%", h.Desc, e85))
+				res := model.HeaderResult{
+					Value: fmt.Sprintf("%d%%", e85),
 				}
+				res.ID = h.ID
+				res.Desc = h.Desc
+				out = append(out, res)
 			} else {
-				if callback != nil {
-					callback(fmt.Sprintf("%-27s: %d %%", "E85", 0))
+				res := model.HeaderResult{
+					Value: "Not BioPower",
 				}
+				res.ID = h.ID
+				res.Desc = h.Desc
+				out = append(out, res)
 			}
-
-		default:
-
 		}
 		if callback != nil {
 			callback(float64(i + 1))
 		}
-		//a := model.HeaderResult{Value: resp}
-		//a.Desc = h.Desc
-		//a.ID = h.ID
-		//out = append(out, a)
 	}
 
-	return nil, nil
+	return out, nil
 }
 func (t *Client) RequestECUInfoAsString(ctx context.Context, pid byte) (string, error) {
 	resp, err := t.RequestECUInfo(ctx, pid)
@@ -192,8 +217,7 @@ func (t *Client) RequestECUInfoAsInt64(ctx context.Context, pid byte) (int64, er
 	if err != nil {
 		return 0, err
 	}
-	var retval int64
-	retval += int64(resp[0]) * 256 * 256 * 256
+	retval := int64(resp[0]) * 256 * 256 * 256
 	retval += int64(resp[1]) * 256 * 256
 	retval += int64(resp[2]) * 256
 	retval += int64(resp[3])
@@ -205,8 +229,7 @@ func (t *Client) RequestECUInfoAsUint64(ctx context.Context, pid byte) (uint64, 
 	if err != nil {
 		return 0, err
 	}
-	var retval uint64
-	retval += uint64(resp[0]) * 256 * 256 * 256
+	retval := uint64(resp[0]) * 256 * 256 * 256
 	retval += uint64(resp[1]) * 256 * 256
 	retval += uint64(resp[2]) * 256
 	retval += uint64(resp[3])

@@ -67,7 +67,7 @@ func (t *Client) DumpECU(ctx context.Context, callback model.ProgressCallback) (
 
 	if callback != nil {
 		callback(float64(length))
-		callback(fmt.Sprintf("Done, took: %s\n", time.Since(startTime).Round(time.Millisecond).String()))
+		callback(fmt.Sprintf("Done, took: %s", time.Since(startTime).Round(time.Millisecond).String()))
 	}
 
 	//fmt.Printf("took: %s\n", time.Since(startTime).Round(time.Millisecond).String())

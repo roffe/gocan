@@ -150,14 +150,14 @@ func setSpeed(p serial.Port, mode *serial.Mode, from, to int) error {
 	start := time.Now()
 	for i := 0; i < 2; i++ {
 		p.Write([]byte("ATI\r"))
-		time.Sleep(15 * time.Millisecond)
+		time.Sleep(20 * time.Millisecond)
 		p.ResetInputBuffer()
 	}
 	errg, _ := errgroup.WithContext(context.Background())
 	errg.Go(func() error {
 		readbuff := make([]byte, 4)
 		buff := bytes.NewBuffer(nil)
-		for time.Since(start) < 500*time.Millisecond {
+		for time.Since(start) < 300*time.Millisecond {
 			n, err := p.Read(readbuff)
 			if err != nil {
 				if err == io.EOF {
@@ -178,7 +178,6 @@ func setSpeed(p serial.Port, mode *serial.Mode, from, to int) error {
 						log.Printf("%q, %s", buff.String(), time.Since(start).String())
 						return nil
 					}
-					log.Printf("%q", buff.String())
 					buff.Reset()
 					continue
 				}

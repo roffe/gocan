@@ -188,11 +188,7 @@ func (t *Client) readDataByLocalIdentifier(ctx context.Context, callback model.P
 				d2 := resp.Data()
 
 				if d2[0] != seq {
-					errText := fmt.Sprintf("received invalid sequenced frame 0x%02X, expected 0x%02X", d2[0], seq)
-					if callback != nil {
-						callback(errText)
-					}
-					return nil, 0, errors.New(errText)
+					return nil, 0, fmt.Errorf("received invalid sequenced frame 0x%02X, expected 0x%02X", d2[0], seq)
 				}
 				for i := 1; i < 8; i++ {
 					if rx_cnt < int(length) {
@@ -206,7 +202,7 @@ func (t *Client) readDataByLocalIdentifier(ctx context.Context, callback model.P
 					seq = 0x20
 				}
 
-			case <-time.After(1 * time.Second):
+			case <-time.After(t.defaultTimeout):
 				return nil, 0, errors.New("timeout waiting for blocks")
 			}
 		}

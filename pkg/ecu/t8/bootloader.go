@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"strconv"
 	"time"
 
 	"github.com/avast/retry-go"
@@ -52,7 +53,7 @@ func (t *Client) UploadBootloader(ctx context.Context, callback model.ProgressCa
 	if callback != nil {
 		callback(-float64(9996))
 		callback(float64(0))
-		callback("Uploading bootloader")
+		callback("Uploading bootloader " + strconv.Itoa(len(LegionBytes)) + " bytes")
 	}
 
 	r := bytes.NewReader(LegionBytes)
@@ -65,9 +66,6 @@ func (t *Client) UploadBootloader(ctx context.Context, callback model.ProgressCa
 		if pp == 10 {
 			gm.TesterPresentNoResponseAllowed()
 			pp = 0
-		}
-		if callback != nil {
-			callback(float64(i + 1))
 		}
 		if err := gm.DataTransfer(ctx, 0xF0, startAddress, 0x7E0, 0x7E8); err != nil {
 			return err
