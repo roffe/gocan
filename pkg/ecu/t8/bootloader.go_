@@ -13,11 +13,11 @@ import (
 	"github.com/avast/retry-go"
 	"github.com/roffe/gocan"
 	"github.com/roffe/gocan/pkg/gmlan"
+	"github.com/roffe/gocan/pkg/legion"
 	"github.com/roffe/gocan/pkg/model"
 )
 
 func (t *Client) StartBootloader(ctx context.Context, startAddress uint32) error {
-	// 06368000102400
 	payload := []byte{
 		0x06, 0x36, 0x80,
 		byte(startAddress >> 24),
@@ -53,10 +53,10 @@ func (t *Client) UploadBootloader(ctx context.Context, callback model.ProgressCa
 	if callback != nil {
 		callback(-float64(9996))
 		callback(float64(0))
-		callback("Uploading bootloader " + strconv.Itoa(len(LegionBytes)) + " bytes")
+		callback("Uploading bootloader " + strconv.Itoa(len(legion.BootloaderBytes)) + " bytes")
 	}
 
-	r := bytes.NewReader(LegionBytes)
+	r := bytes.NewReader(legion.BootloaderBytes)
 	pp := 0
 
 	progress := 0
@@ -127,6 +127,8 @@ func (t *Client) UploadBootloader(ctx context.Context, callback model.ProgressCa
 		b, err := r.ReadByte()
 		if err != nil && err != io.EOF {
 			return err
+		} else if err == io.EOF {
+			log.Println("EOF")
 		}
 		payload[x] = b
 	}

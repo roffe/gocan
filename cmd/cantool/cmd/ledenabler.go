@@ -32,19 +32,19 @@ var ledenablerCmd = &cobra.Command{
 
 		gm := gmlan.New(c)
 
-		f, err := gm.ReadDataByIdentifier(ctx, 0x249, 0x649, 0x45) // Read REC Bulb Outage &Substitution Lighting
+		f, err := gm.ReadDataByIdentifier(ctx, 0x45, 0x249, 0x649) // Read REC Bulb Outage &Substitution Lighting
 		if err != nil {
 			return err
 		}
 		log.Println("BO REC", string(f[:]))
 
-		f0, err := gm.ReadDataByIdentifier(ctx, 0x24F, 0x64F, 0x40) // Read PWM Settings for Bulbs
+		f0, err := gm.ReadDataByIdentifier(ctx, 0x40, 0x24F, 0x64F) // Read PWM Settings for Bulbs
 		if err != nil {
 			return err
 		}
 		log.Println("PWM UEC", string(f0[:]))
 
-		f2, err := gm.ReadDataByIdentifier(ctx, 0x24F, 0x64F, 0x4D) // Read UHEC Bulb Outage & Substitution
+		f2, err := gm.ReadDataByIdentifier(ctx, 0x4D, 0x24F, 0x64F) // Read UHEC Bulb Outage & Substitution
 		if err != nil {
 			return err
 		}
@@ -60,11 +60,11 @@ var ledenablerCmd = &cobra.Command{
 		}
 
 		if result == "Yes" {
-			err := gm.WriteDataByIdentifier(ctx, 0x249, 0x649, 0x45, []byte{0x00}) // set Bulb Outage & Substitution Lighting to 0?
+			err := gm.WriteDataByIdentifier(ctx, 0x45, []byte{0x00}, 0x249, 0x649) // set Bulb Outage & Substitution Lighting to 0?
 			if err != nil {
 				return errors.New("failed to disable bulb outage in REC ")
 			}
-			err = gm.WriteDataByIdentifier(ctx, 0x24F, 0x64F, 0x4F, []byte{0x00}) // set Bulb Outage & Substitution to 0?
+			err = gm.WriteDataByIdentifier(ctx, 0x4F, []byte{0x00}, 0x24F, 0x64F) // set Bulb Outage & Substitution to 0?
 			if err != nil {
 				return errors.New("failed to disable bulb outage in UEC ")
 			}

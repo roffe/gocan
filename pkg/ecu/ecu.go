@@ -9,6 +9,7 @@ import (
 	"github.com/roffe/gocan/pkg/ecu/t5"
 	"github.com/roffe/gocan/pkg/ecu/t7"
 	"github.com/roffe/gocan/pkg/ecu/t8"
+	"github.com/roffe/gocan/pkg/ecu/t8mcp"
 	"github.com/roffe/gocan/pkg/model"
 )
 
@@ -17,6 +18,7 @@ const (
 	Trionic5   Type = iota
 	Trionic7
 	Trionic8
+	Trionic8MCP
 	Me96
 )
 
@@ -37,6 +39,8 @@ func FromString(s string) Type {
 		return Trionic7
 	case "8", "t8", "trionic8", "trionic 8":
 		return Trionic8
+	case "mcp", "t8mcp", "trionic8mcp", "trionic 8 mcp":
+		return Trionic8MCP
 	case "96", "me9.6", "me96", "me 9.6":
 		return Me96
 	default:
@@ -54,6 +58,8 @@ func (e Type) String() string {
 		return "Trionic 7"
 	case Trionic8:
 		return "Trionic 8"
+	case Trionic8MCP:
+		return "Trionic 8 MCP"
 	case Me96:
 		return "Me 9.6"
 	default:
@@ -69,6 +75,8 @@ func New(c *gocan.Client, t Type) (Client, error) {
 		return t7.New(c), nil
 	case Trionic8:
 		return t8.New(c), nil
+	case Trionic8MCP:
+		return t8mcp.New(c), nil
 	default:
 		return nil, errors.New("unknown ECU")
 	}
@@ -82,6 +90,8 @@ func CANFilters(t Type) []uint32 {
 		return []uint32{0x220, 0x238, 0x240, 0x258, 0x266}
 	case Trionic8:
 		return []uint32{0x7E0, 0x7E8, 0x5E8}
+	case Trionic8MCP:
+		return []uint32{0x7E0, 0x7E8}
 	default:
 		return []uint32{}
 	}

@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/roffe/gocan"
-	"github.com/roffe/gocan/pkg/gmlan"
 	"github.com/roffe/gocan/pkg/model"
 )
 
@@ -48,17 +47,16 @@ var T8Headers = []model.Header{
 }
 
 func (t *Client) Info(ctx context.Context, callback model.ProgressCallback) ([]model.HeaderResult, error) {
-	gm := gmlan.New(t.c)
 	if callback != nil {
 		callback(-float64(len(T8Headers)))
 		callback("Initialize session")
 	}
-	gm.TesterPresentNoResponseAllowed()
 
 	time.Sleep(20 * time.Millisecond)
 
-	gm.DisableNormalCommunicationAllNodes()
-	if err := gm.DisableNormalCommunication(ctx, 0x7E0, 0x7E8); err != nil {
+	t.gm.DisableNormalCommunicationAllNodes()
+
+	if err := t.gm.DisableNormalCommunication(ctx, 0x7E0, 0x7E8); err != nil {
 		return nil, err
 	}
 
@@ -71,7 +69,7 @@ func (t *Client) Info(ctx context.Context, callback model.ProgressCallback) ([]m
 	for i, h := range T8Headers {
 		n++
 		if n == 5 {
-			gm.TesterPresentNoResponseAllowed()
+			t.gm.TesterPresentNoResponseAllowed()
 			n = 0
 		}
 		switch h.Type {
@@ -165,8 +163,7 @@ func (t *Client) Info(ctx context.Context, callback model.ProgressCallback) ([]m
 			res.Desc = h.Desc
 			out = append(out, res)
 		case "e85":
-			gm := gmlan.New(t.c)
-			data, err := gm.ReadDataByPacketIdentifier(ctx, 0x7E0, 0x7E8, 0x01, 0x7A)
+			data, err := t.gm.ReadDataByPacketIdentifier(ctx, 0x7E0, 0x7E8, 0x01, 0x7A)
 			if err != nil && err.Error() != "Request out of range or session dropped" {
 				return nil, err
 			}
@@ -237,8 +234,7 @@ func (t *Client) RequestECUInfoAsUint64(ctx context.Context, pid byte) (uint64, 
 }
 
 func (t *Client) RequestECUInfo(ctx context.Context, pid byte) ([]byte, error) {
-	gm := gmlan.New(t.c)
-	return gm.ReadDataByIdentifier(ctx, 0x7E0, 0x7E8, pid)
+	return t.gm.ReadDataByIdentifier(ctx, pid, 0x7E0, 0x7E8)
 }
 
 func (t *Client) SendAckMessageT8() {

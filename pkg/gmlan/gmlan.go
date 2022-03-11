@@ -29,10 +29,58 @@ func New(c *gocan.Client) *Client {
 //
 // This service is used to transfer and/or execute a block of data, usually for
 // reprogramming purposes.
-func (cl *Client) DataTransfer(ctx context.Context, length byte, startAddress int, canID, responseID uint32) error {
+
+// 80 downloadAndExecuteOrExecute
+// This sub-parameter level of operation is used to command a node to receive a block
+// transfer, download the data received to the memory address specified in the
+// startingAddress[] parameter, and execute the data (program) downloaded. This subparameter command can also be used to execute a previously downloaded program by
+// sending the request message with no data in the dataRecord[ ].
+
+func (cl *Client) Execute(ctx context.Context, startAddress uint32, canID, responseID uint32) error {
+	payload := []byte{
+		0x06, 0x36, 0x80,
+		byte(startAddress >> 24),
+		byte(startAddress >> 16),
+		byte(startAddress >> 8),
+		byte(startAddress),
+	}
+	resp, err := cl.c.SendAndPoll(ctx, gocan.NewFrame(canID, payload, gocan.ResponseRequired), cl.defaultTimeout, responseID)
+	if err != nil {
+		return err
+	}
+	if err := CheckErr(resp); err != nil {
+		return err
+	}
+	return nil
+}
+
+//8.20 DeviceControl ($AE) Service.
+//The purpose of this service is to allow a test device to override normal
+//output control functions in order to verify proper operation of a component or system, or to reset/clear variables
+//used within normal control algorithms. The tool may take control of multiple outputs simultaneously with a
+//single request message or by sending multiple device control service messages.
+
+func (cl *Client) DeviceControl(ctx context.Context, command byte, canID, recvID uint32) error {
+	payload := []byte{0x02, 0xAE, command}
+	frame := gocan.NewFrame(canID, payload, gocan.ResponseRequired)
+	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, recvID)
+	if err != nil {
+		return err
+	}
+	if err := CheckErr(resp); err != nil {
+		return err
+	}
+	return nil
+}
+
+// 00 Download
+// This sub-parameter level of operation is used to command a node to receive a block
+// transfer and (only) download the data received to the memory address specified in the
+// startingAddress[] parameter.
+func (cl *Client) TransferData(ctx context.Context, subFunc byte, length byte, startAddress int, canID, responseID uint32) error {
 	payload := []byte{
 		0x10, length, 0x36,
-		0x00,                     // Byte 3 is present when the memoryAddress parameter contains 3 or 4 bytes
+		subFunc,                  // Byte 3 is present when the memoryAddress parameter contains 3 or 4 bytes
 		byte(startAddress >> 24), // Byte 4 is present , the memoryAddress parameter contains 4 bytes.
 		byte(startAddress >> 16),
 		byte(startAddress >> 8),
@@ -173,15 +221,15 @@ subFunc
   be sent if preceded by one of the valid requestProgrammingMode messages (above).
 */
 func (cl *Client) ProgrammingModeRequest(ctx context.Context, canID, recvID uint32) error {
-	return cl.programmingMode(ctx, 0x01, 0x7E0, 0x7E8)
+	return cl.programmingMode(ctx, 0x01, canID, recvID)
 }
 
 func (cl *Client) ProgrammingModeRequestHighSpeed(ctx context.Context, canID, recvID uint32) error {
-	return cl.programmingMode(ctx, 0x02, 0x7E0, 0x7E8)
+	return cl.programmingMode(ctx, 0x02, canID, recvID)
 }
 
 func (cl *Client) ProgrammingModeEnable(ctx context.Context, canID, recvID uint32) error {
-	return cl.programmingMode(ctx, 0x03, 0x7E0, 0x7E8)
+	return cl.programmingMode(ctx, 0x03, canID, recvID)
 }
 
 func (cl *Client) programmingMode(ctx context.Context, subFunc byte, canID, recvID uint32) error {
@@ -254,7 +302,7 @@ func (cl *Client) ReportProgrammedState(ctx context.Context, canID, recvID uint3
 // content of pre-defined ECU data referenced by a dataIdentifier (DID) which contains static information such as
 // ECU identification data or other information which does not require real-time updates. (Real-time data is
 // intended to be retrieved via the ReadDataByPacketIdentifier ($AA) service.)
-func (cl *Client) ReadDataByIdentifier(ctx context.Context, canID, recvID uint32, pid byte) ([]byte, error) {
+func (cl *Client) ReadDataByIdentifier(ctx context.Context, pid byte, canID, recvID uint32) ([]byte, error) {
 	out := bytes.NewBuffer([]byte{})
 	//resp, err := cl.c.Poll(ctx, cl.defaultTimeout, recvID) // +0x400?
 	f := gocan.NewFrame(canID, []byte{0x02, 0x1A, pid}, gocan.ResponseRequired)
@@ -291,7 +339,7 @@ func (cl *Client) ReadDataByIdentifier(ctx context.Context, canID, recvID uint32
 			left--
 		}
 
-		cl.c.SendFrame(0x7E0, []byte{0x30, 0x00}, gocan.CANFrameType{Type: 2, Responses: int(framesToReceive)})
+		cl.c.SendFrame(canID, []byte{0x30, 0x00}, gocan.CANFrameType{Type: 2, Responses: int(framesToReceive)})
 
 		var seq byte = 0x21
 
@@ -377,14 +425,11 @@ func (cl *Client) ReadDataByPacketIdentifier(ctx context.Context, canID, recvID 
 // where security access may be required. Improper routines or data downloaded into a node could potentially
 // damage the electronics or other vehicle components or risk the vehicle’s compliance to emission, safety, or
 // security standards. This mode is intended
-func (cl *Client) SecurityAccessRequestSeed(ctx context.Context, canID, recvID uint32, accessLevel byte) ([]byte, error) {
+func (cl *Client) SecurityAccessRequestSeed(ctx context.Context, accessLevel byte, canID, recvID uint32) ([]byte, error) {
 	payload := []byte{0x02, 0x27, accessLevel}
 	frame := gocan.NewFrame(canID, payload, gocan.ResponseRequired)
 	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, recvID)
 	if err != nil {
-		return nil, errors.New("SecurityAccessRequestSeed: " + err.Error())
-	}
-	if err := CheckErr(resp); err != nil {
 		return nil, errors.New("SecurityAccessRequestSeed: " + err.Error())
 	}
 
@@ -392,14 +437,17 @@ func (cl *Client) SecurityAccessRequestSeed(ctx context.Context, canID, recvID u
 	if d[1] != 0x67 || d[2] != accessLevel {
 		return nil, errors.New("invalid Response to SecurityAccessRequestSeed")
 	}
+	if err := CheckErr(resp); err != nil {
+		return nil, errors.New("SecurityAccessRequestSeed: " + err.Error())
+	}
 
 	return []byte{d[3], d[4]}, nil
 }
 
-func (cl *Client) SecurityAccessSendKey(ctx context.Context, canID, recvID uint32, accessLevel, high, low byte) error {
+func (cl *Client) SecurityAccessSendKey(ctx context.Context, accessLevel, high, low byte, canID, recvID uint32) error {
 	respPayload := []byte{0x04, 0x27, accessLevel + 0x01, high, low}
-	frame := gocan.NewFrame(0x7E0, respPayload, gocan.ResponseRequired)
-	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, 0x7E8)
+	frame := gocan.NewFrame(canID, respPayload, gocan.ResponseRequired)
+	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, recvID)
 	if err != nil {
 		return errors.New("SecurityAccessSendKey: " + err.Error())
 	}
@@ -410,10 +458,38 @@ func (cl *Client) SecurityAccessSendKey(ctx context.Context, canID, recvID uint3
 
 	d := resp.Data()
 	if d[1] == 0x67 && d[2] == accessLevel+0x01 {
-		log.Println("Security access granted")
+		//log.Println("Security access granted")
 		return nil
 	}
 	return errors.New("/!\\ Failed to obtain security access")
+}
+
+func (cl *Client) RequestSecurityAccess(ctx context.Context, accesslevel byte, delay time.Duration, canID, recvID uint32, seedfunc func([]byte, byte) (byte, byte)) error {
+	time.Sleep(50 * time.Millisecond)
+	seed, err := cl.SecurityAccessRequestSeed(ctx, accesslevel, canID, recvID)
+	if err != nil {
+		return err
+	}
+
+	if seed[0] == 0x00 && seed[1] == 0x00 {
+		log.Println("Security access already granted")
+		return nil
+	}
+
+	secondsToWait := delay.Milliseconds() / 1000
+	for secondsToWait > 0 {
+		time.Sleep(1 * time.Second)
+		cl.TesterPresentNoResponseAllowed()
+		secondsToWait--
+	}
+
+	high, low := seedfunc(seed, accesslevel)
+
+	if err := cl.SecurityAccessSendKey(ctx, accesslevel, high, low, canID, recvID); err != nil {
+		return err
+	}
+	time.Sleep(50 * time.Millisecond)
+	return nil
 }
 
 // 8.12 RequestDownload ($34) Service. This service is used in order to prepare a node to be programmed
@@ -465,7 +541,7 @@ func (cl *Client) TesterPresentResponseRequired(ctx context.Context, canID, recv
 
 func (cl *Client) TesterPresentNoResponseAllowed() {
 	payload := []byte{0xFE, 0x01, 0x3E}
-	frame := gocan.NewFrame(0x101, payload, gocan.ResponseRequired)
+	frame := gocan.NewFrame(0x101, payload, gocan.Outgoing)
 	if err := cl.c.Send(frame); err != nil {
 		panic(err)
 	}
@@ -476,7 +552,31 @@ func (cl *Client) TesterPresentNoResponseAllowed() {
 // The purpose of this service is to provide the ability to change
 // write/program) the content of pre-defined ECU data referenced by a dataIdentifier (DID) which contains static
 // information like ECU identification data, or other information which does not require real-time updates.
-func (cl *Client) WriteDataByIdentifier(ctx context.Context, canID, recvID uint32, pid byte, data []byte) error {
+func (cl *Client) WriteDataByIdentifier(ctx context.Context, pid byte, data []byte, canID, recvID uint32) error {
+	if len(data) > 6 {
+		return cl.WriteDataByIdentifierMultiframe(ctx, pid, data, canID, recvID)
+	}
+
+	payload := []byte{byte(len(data) + 2), 0x3B, pid}
+	payload = append(payload, data...)
+	for i := len(payload); i < 8; i++ {
+		payload = append(payload, 0x00)
+	}
+	frame := gocan.NewFrame(canID, payload, gocan.ResponseRequired)
+	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, recvID)
+	if err != nil {
+		return err
+	}
+	if err := CheckErr(resp); err != nil {
+		log.Println(frame.String())
+		log.Println(resp.String())
+		return err
+	}
+
+	return nil
+}
+
+func (cl *Client) WriteDataByIdentifierMultiframe(ctx context.Context, pid byte, data []byte, canID, recvID uint32) error {
 	r := bytes.NewReader(data)
 	firstPart := make([]byte, 4)
 	_, err := r.Read(firstPart)
@@ -489,12 +589,17 @@ func (cl *Client) WriteDataByIdentifier(ctx context.Context, canID, recvID uint3
 	}
 	payload := []byte{0x10, byte(len(data) + 2), 0x3B, pid}
 	payload = append(payload, firstPart...)
-	fr := gocan.NewFrame(canID, payload, gocan.ResponseRequired)
-	resp, err := cl.c.SendAndPoll(ctx, fr, cl.defaultTimeout, recvID)
+	frame := gocan.NewFrame(canID, payload, gocan.ResponseRequired)
+	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, recvID)
 	if err != nil {
 		return err
 	}
 	d := resp.Data()
+
+	if err := CheckErr(resp); err != nil {
+		return err
+	}
+
 	if d[0] != 0x30 || d[1] != 0x00 {
 		log.Println(resp.String())
 		return errors.New("invalid response to initial writeDataByIdentifier")

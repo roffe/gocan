@@ -135,7 +135,7 @@ func (m *mainWindow) wizzard() {
 }
 
 func (m *mainWindow) createSelects() {
-	m.ecuList = widget.NewSelect([]string{"Trionic 5", "Trionic 7", "Trionic 8"}, func(s string) {
+	m.ecuList = widget.NewSelect([]string{"Trionic 5", "Trionic 7", "Trionic 8", "Trionic 8 MCP"}, func(s string) {
 		index := m.ecuList.SelectedIndex()
 		state.ecuType = ecu.Type(index + 1)
 		switch state.ecuType {
