@@ -24,13 +24,17 @@ type Client struct {
 	defaultTimeout time.Duration
 	legionRunning  bool
 	gm             *gmlan.Client
+	canID          uint32
+	recvID         []uint32
 }
 
-func New(c *gocan.Client) *Client {
+func New(c *gocan.Client, canID uint32, recvID ...uint32) *Client {
 	return &Client{
 		c:              c,
 		defaultTimeout: 150 * time.Millisecond,
-		gm:             gmlan.New(c, 0x7e0, 0x7e8),
+		gm:             gmlan.New(c, canID, recvID...),
+		canID:          canID,
+		recvID:         recvID,
 	}
 }
 
@@ -39,11 +43,11 @@ func (t *Client) IsRunning() bool {
 }
 
 func (t *Client) StartBootloader(ctx context.Context, startAddress uint32) error {
-	return t.gm.Execute(ctx, startAddress, 0x7E0, 0x7E8)
+	return t.gm.Execute(ctx, startAddress)
 }
 
 func (t *Client) UploadBootloader(ctx context.Context, callback model.ProgressCallback) error {
-	if err := t.gm.RequestDownload(ctx, 0x7E0, 0x7E8, false); err != nil {
+	if err := t.gm.RequestDownload(ctx, false); err != nil {
 		return err
 	}
 	startAddress := 0x102400
@@ -69,7 +73,7 @@ func (t *Client) UploadBootloader(ctx context.Context, callback model.ProgressCa
 			t.gm.TesterPresentNoResponseAllowed()
 			pp = 0
 		}
-		if err := t.gm.TransferData(ctx, 0x00, 0xF0, startAddress, 0x7E0, 0x7E8); err != nil {
+		if err := t.gm.TransferData(ctx, 0x00, 0xF0, startAddress); err != nil {
 			return err
 		}
 		seq = 0x21
@@ -89,7 +93,7 @@ func (t *Client) UploadBootloader(ctx context.Context, callback model.ProgressCa
 			if j == 0x21 {
 				tt = gocan.ResponseRequired
 			}
-			f := gocan.NewFrame(0x7E0, payload, tt)
+			f := gocan.NewFrame(t.canID, payload, tt)
 			if err := t.c.Send(f); err != nil {
 				return err
 			}
@@ -102,7 +106,7 @@ func (t *Client) UploadBootloader(ctx context.Context, callback model.ProgressCa
 				callback(float64(progress))
 			}
 		}
-		resp, err := t.c.Poll(ctx, t.defaultTimeout, 0x7E8)
+		resp, err := t.c.Poll(ctx, t.defaultTimeout, t.recvID...)
 		if err != nil {
 			return err
 		}
@@ -119,7 +123,7 @@ func (t *Client) UploadBootloader(ctx context.Context, callback model.ProgressCa
 
 	seq = 0x21
 
-	if err := t.gm.TransferData(ctx, 0x00, 0x0A, startAddress, 0x7E0, 0x7E8); err != nil {
+	if err := t.gm.TransferData(ctx, 0x00, 0x0A, startAddress); err != nil {
 		return err
 	}
 
@@ -132,8 +136,8 @@ func (t *Client) UploadBootloader(ctx context.Context, callback model.ProgressCa
 		}
 		payload[x] = b
 	}
-	f2 := gocan.NewFrame(0x7E0, payload, gocan.ResponseRequired)
-	resp, err := t.c.SendAndPoll(ctx, f2, t.defaultTimeout, 0x7E8)
+	f2 := gocan.NewFrame(t.canID, payload, gocan.ResponseRequired)
+	resp, err := t.c.SendAndPoll(ctx, f2, t.defaultTimeout, t.recvID...)
 	if err != nil {
 		return err
 	}
@@ -158,8 +162,8 @@ func (t *Client) UploadBootloader(ctx context.Context, callback model.ProgressCa
 }
 
 func (t *Client) Ping(ctx context.Context) error {
-	frame := gocan.NewFrame(0x7E0, []byte{0xEF, 0xBE, 0x00, 0x00, 0x00, 0x00, 0x33, 0x66}, gocan.ResponseRequired)
-	resp, err := t.c.SendAndPoll(ctx, frame, t.defaultTimeout, 0x7E8)
+	frame := gocan.NewFrame(t.canID, []byte{0xEF, 0xBE, 0x00, 0x00, 0x00, 0x00, 0x33, 0x66}, gocan.ResponseRequired)
+	resp, err := t.c.SendAndPoll(ctx, frame, t.defaultTimeout, t.recvID...)
 	if err != nil {
 		return errors.New("LegionPing: " + err.Error())
 	}
@@ -175,8 +179,8 @@ func (t *Client) Ping(ctx context.Context) error {
 
 func (t *Client) Exit(ctx context.Context) error {
 	payload := []byte{0x01, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
-	frame := gocan.NewFrame(0x7E0, payload, gocan.ResponseRequired)
-	resp, err := t.c.SendAndPoll(ctx, frame, t.defaultTimeout, 0x7E8)
+	frame := gocan.NewFrame(t.canID, payload, gocan.ResponseRequired)
+	resp, err := t.c.SendAndPoll(ctx, frame, t.defaultTimeout, t.recvID...)
 	if err != nil {
 		return errors.New("LegionExit: " + err.Error())
 	}
@@ -240,12 +244,12 @@ func (t *Client) EnableHighSpeed(ctx context.Context) error {
 func (t *Client) IDemand(ctx context.Context, command Command, wish uint16) ([]byte, error) {
 	//log.Println("Legion i demand", command.String()+"!")
 	payload := []byte{0x02, 0xA5, byte(command), 0x00, 0x00, 0x00, byte(wish >> 8), byte(wish)}
-	frame := gocan.NewFrame(0x7E0, payload, gocan.ResponseRequired)
+	frame := gocan.NewFrame(t.canID, payload, gocan.ResponseRequired)
 
 	var out []byte
 
 	err := retry.Do(func() error {
-		resp, err := t.c.SendAndPoll(ctx, frame, t.defaultTimeout, 0x7E8)
+		resp, err := t.c.SendAndPoll(ctx, frame, t.defaultTimeout, t.recvID...)
 		if err != nil {
 			return err
 		}
@@ -497,9 +501,9 @@ func (t *Client) ReadDataByLocalIdentifier(ctx context.Context, legionMode bool,
 		0x00,
 	}
 
-	frame := gocan.NewFrame(0x7E0, payload, gocan.ResponseRequired)
+	frame := gocan.NewFrame(t.canID, payload, gocan.ResponseRequired)
 
-	resp, err := t.c.SendAndPoll(ctx, frame, t.defaultTimeout, 0x7E8)
+	resp, err := t.c.SendAndPoll(ctx, frame, t.defaultTimeout, t.recvID...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -529,7 +533,7 @@ func (t *Client) ReadDataByLocalIdentifier(ctx context.Context, legionMode bool,
 	}
 
 	if !legionMode || d[3] == 0x00 {
-		if err := t.c.SendFrame(0x7E0, []byte{0x30}, gocan.CANFrameType{Type: 2, Responses: 18}); err != nil {
+		if err := t.c.SendFrame(t.canID, []byte{0x30}, gocan.CANFrameType{Type: 2, Responses: 18}); err != nil {
 			return nil, 0, err
 		}
 		m_nrFrameToReceive := ((length - 4) / 7)
@@ -537,7 +541,7 @@ func (t *Client) ReadDataByLocalIdentifier(ctx context.Context, legionMode bool,
 			m_nrFrameToReceive++
 		}
 
-		c := t.c.Subscribe(ctx, 0x7E8)
+		c := t.c.Subscribe(ctx, t.recvID...)
 
 		for m_nrFrameToReceive > 0 {
 			select {

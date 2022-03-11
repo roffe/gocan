@@ -33,23 +33,23 @@ var toyCmd = &cobra.Command{
 
 		//time.Sleep(50 * time.Millisecond)
 
-		if err := gm.InitiateDiagnosticOperation(ctx, 0x02, 0x7E0, 0x7E8); err != nil {
+		if err := gm.InitiateDiagnosticOperation(ctx, 0x02); err != nil {
 			return err
 		}
 
-		if err := gm.DisableNormalCommunication(ctx, 0x7E0, 0x7E8); err != nil {
+		if err := gm.DisableNormalCommunication(ctx); err != nil {
 			return err
 		}
 
-		if err := gm.ReportProgrammedState(ctx, 0x7E0, 0x7E8); err != nil {
+		if err := gm.ReportProgrammedState(ctx); err != nil {
 			return err
 		}
 
-		//if err := gm.ProgrammingModeRequest(ctx, 0x7E0, 0x7E8); err != nil {
+		//if err := gm.ProgrammingModeRequest(ctx); err != nil {
 		//	return err
 		//}
 		//
-		//if err := gm.ProgrammingModeEnable(ctx, 0x7E0, 0x7E8); err != nil {
+		//if err := gm.ProgrammingModeEnable(ctx); err != nil {
 		//	return err
 		//}
 
@@ -105,11 +105,11 @@ var toyCmd = &cobra.Command{
 			return err
 		}
 
-		if err := gm.DeviceControl(ctx, 0x16, 0x7E0, 0x7E8); err != nil {
+		if err := gm.DeviceControl(ctx, 0x16); err != nil {
 			return err
 		}
 
-		if err := gm.ReturnToNormalMode(ctx, 0x7E0, 0x7E8); err != nil {
+		if err := gm.ReturnToNormalMode(ctx); err != nil {
 			return err
 		}
 

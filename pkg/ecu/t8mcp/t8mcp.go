@@ -28,7 +28,7 @@ func New(c *gocan.Client) *Client {
 	t := &Client{
 		c:              c,
 		defaultTimeout: 150 * time.Millisecond,
-		legion:         legion.New(c),
+		legion:         legion.New(c, 0x7e0, 0x7e8),
 	}
 	return t
 }

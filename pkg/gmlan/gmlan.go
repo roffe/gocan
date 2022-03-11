@@ -42,7 +42,7 @@ func New(c *gocan.Client, canID uint32, recvID ...uint32) *Client {
 // startingAddress[] parameter, and execute the data (program) downloaded. This subparameter command can also be used to execute a previously downloaded program by
 // sending the request message with no data in the dataRecord[ ].
 
-func (cl *Client) Execute(ctx context.Context, startAddress uint32, canID, responseID uint32) error {
+func (cl *Client) Execute(ctx context.Context, startAddress uint32) error {
 	payload := []byte{
 		0x06, 0x36, 0x80,
 		byte(startAddress >> 24),
@@ -50,7 +50,7 @@ func (cl *Client) Execute(ctx context.Context, startAddress uint32, canID, respo
 		byte(startAddress >> 8),
 		byte(startAddress),
 	}
-	resp, err := cl.c.SendAndPoll(ctx, gocan.NewFrame(canID, payload, gocan.ResponseRequired), cl.defaultTimeout, responseID)
+	resp, err := cl.c.SendAndPoll(ctx, gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired), cl.defaultTimeout, cl.recvID...)
 	if err != nil {
 		return err
 	}
@@ -66,10 +66,10 @@ func (cl *Client) Execute(ctx context.Context, startAddress uint32, canID, respo
 //used within normal control algorithms. The tool may take control of multiple outputs simultaneously with a
 //single request message or by sending multiple device control service messages.
 
-func (cl *Client) DeviceControl(ctx context.Context, command byte, canID, recvID uint32) error {
+func (cl *Client) DeviceControl(ctx context.Context, command byte) error {
 	payload := []byte{0x02, 0xAE, command}
-	frame := gocan.NewFrame(canID, payload, gocan.ResponseRequired)
-	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, recvID)
+	frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
+	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
 		return err
 	}
@@ -79,11 +79,11 @@ func (cl *Client) DeviceControl(ctx context.Context, command byte, canID, recvID
 	return nil
 }
 
-func (cl *Client) DeviceControlWithCode(ctx context.Context, command byte, code []byte, canID, recvID uint32) error {
+func (cl *Client) DeviceControlWithCode(ctx context.Context, command byte, code []byte) error {
 	payload := []byte{0x07, 0xAE, command}
 	payload = append(payload, code...)
-	frame := gocan.NewFrame(canID, payload, gocan.ResponseRequired)
-	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, recvID)
+	frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
+	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
 		return err
 	}
@@ -97,7 +97,7 @@ func (cl *Client) DeviceControlWithCode(ctx context.Context, command byte, code 
 // This sub-parameter level of operation is used to command a node to receive a block
 // transfer and (only) download the data received to the memory address specified in the
 // startingAddress[] parameter.
-func (cl *Client) TransferData(ctx context.Context, subFunc byte, length byte, startAddress int, canID, responseID uint32) error {
+func (cl *Client) TransferData(ctx context.Context, subFunc byte, length byte, startAddress int) error {
 	payload := []byte{
 		0x10, length, 0x36,
 		subFunc,                  // Byte 3 is present when the memoryAddress parameter contains 3 or 4 bytes
@@ -107,8 +107,8 @@ func (cl *Client) TransferData(ctx context.Context, subFunc byte, length byte, s
 		byte(startAddress),
 	}
 
-	f := gocan.NewFrame(canID, payload, gocan.ResponseRequired)
-	resp, err := cl.c.SendAndPoll(ctx, f, cl.defaultTimeout, responseID)
+	f := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
+	resp, err := cl.c.SendAndPoll(ctx, f, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
 		return err
 	}
@@ -131,9 +131,9 @@ The purpose of this service is to prevent a device from
 transmitting or receiving all messages which are not the direct result of a diagnostic request. The primary use
 of the service is to set up a programming event. This is a required service that must be supported by all nodes
 */
-func (cl *Client) DisableNormalCommunication(ctx context.Context, canID, recvID uint32) error {
-	frame := gocan.NewFrame(canID, []byte{0x01, 0x28}, gocan.ResponseRequired)
-	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, recvID)
+func (cl *Client) DisableNormalCommunication(ctx context.Context) error {
+	frame := gocan.NewFrame(cl.canID, []byte{0x01, 0x28}, gocan.ResponseRequired)
+	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
 		return errors.New("DisableNormalCommunication: " + err.Error())
 	}
@@ -199,10 +199,10 @@ This service allows the tester to perform the following tasks:
    to the dual wire link ECUs remains enabled as long as the diagnostic VN is active in the
    gateway (or longer if the ECU would otherwise keep t
 */
-func (cl *Client) InitiateDiagnosticOperation(ctx context.Context, subFunc byte, canID, recvID uint32) error {
+func (cl *Client) InitiateDiagnosticOperation(ctx context.Context, subFunc byte) error {
 	payload := []byte{0x02, 0x10, subFunc}
-	frame := gocan.NewFrame(canID, payload, gocan.ResponseRequired)
-	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, recvID)
+	frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
+	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
 		return errors.New("InitiateDiagnosticOperation: " + err.Error())
 	}
@@ -240,24 +240,24 @@ subFunc
   Request by the tester to have the node(s) enter into a programming event. This can only
   be sent if preceded by one of the valid requestProgrammingMode messages (above).
 */
-func (cl *Client) ProgrammingModeRequest(ctx context.Context, canID, recvID uint32) error {
-	return cl.programmingMode(ctx, 0x01, canID, recvID)
+func (cl *Client) ProgrammingModeRequest(ctx context.Context) error {
+	return cl.programmingMode(ctx, 0x01)
 }
 
-func (cl *Client) ProgrammingModeRequestHighSpeed(ctx context.Context, canID, recvID uint32) error {
-	return cl.programmingMode(ctx, 0x02, canID, recvID)
+func (cl *Client) ProgrammingModeRequestHighSpeed(ctx context.Context) error {
+	return cl.programmingMode(ctx, 0x02)
 }
 
-func (cl *Client) ProgrammingModeEnable(ctx context.Context, canID, recvID uint32) error {
-	return cl.programmingMode(ctx, 0x03, canID, recvID)
+func (cl *Client) ProgrammingModeEnable(ctx context.Context) error {
+	return cl.programmingMode(ctx, 0x03)
 }
 
-func (cl *Client) programmingMode(ctx context.Context, subFunc byte, canID, recvID uint32) error {
+func (cl *Client) programmingMode(ctx context.Context, subFunc byte) error {
 	payload := []byte{0x02, 0xA5, subFunc}
 	switch subFunc {
 	case 0x01, 0x02:
-		frame := gocan.NewFrame(canID, payload, gocan.ResponseRequired)
-		resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, recvID)
+		frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
+		resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
 		if err != nil {
 			return err
 		}
@@ -268,7 +268,7 @@ func (cl *Client) programmingMode(ctx context.Context, subFunc byte, canID, recv
 		return nil
 
 	case 0x03:
-		frame := gocan.NewFrame(canID, payload, gocan.Outgoing)
+		frame := gocan.NewFrame(cl.canID, payload, gocan.Outgoing)
 		if err := cl.c.Send(frame); err != nil {
 			return err
 		}
@@ -279,12 +279,12 @@ func (cl *Client) programmingMode(ctx context.Context, subFunc byte, canID, recv
 }
 
 // $20
-func (cl *Client) ReturnToNormalMode(ctx context.Context, canID, recvID uint32) error {
+func (cl *Client) ReturnToNormalMode(ctx context.Context) error {
 	resp, err := cl.c.SendAndPoll(
 		ctx,
-		gocan.NewFrame(canID, []byte{0x01, 0x20}, gocan.ResponseRequired),
+		gocan.NewFrame(cl.canID, []byte{0x01, 0x20}, gocan.ResponseRequired),
 		cl.defaultTimeout,
-		recvID,
+		cl.recvID...,
 	)
 	if err != nil {
 		return err
@@ -300,9 +300,9 @@ func (cl *Client) ReturnToNormalMode(ctx context.Context, canID, recvID uint32) 
 // The reportProgrammedState is used by the tester to determine:
 // * Which nodes on the link are programmable.
 // * The current programmed state of each programmable node.
-func (cl *Client) ReportProgrammedState(ctx context.Context, canID, recvID uint32) error {
-	frame := gocan.NewFrame(canID, []byte{0x01, 0xA2}, gocan.ResponseRequired)
-	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, recvID)
+func (cl *Client) ReportProgrammedState(ctx context.Context) error {
+	frame := gocan.NewFrame(cl.canID, []byte{0x01, 0xA2}, gocan.ResponseRequired)
+	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
 		return errors.New("ReportProgrammedState: " + err.Error())
 	}
@@ -322,8 +322,8 @@ func (cl *Client) ReportProgrammedState(ctx context.Context, canID, recvID uint3
 // content of pre-defined ECU data referenced by a dataIdentifier (DID) which contains static information such as
 // ECU identification data or other information which does not require real-time updates. (Real-time data is
 // intended to be retrieved via the ReadDataByPacketIdentifier ($AA) service.)
-func (cl *Client) ReadDataByIdentifierUint16(ctx context.Context, pid byte, canID, recvID uint32) (uint16, error) {
-	resp, err := cl.ReadDataByIdentifier(ctx, pid, canID, recvID)
+func (cl *Client) ReadDataByIdentifierUint16(ctx context.Context, pid byte) (uint16, error) {
+	resp, err := cl.ReadDataByIdentifier(ctx, pid)
 	if err != nil {
 		return 0, err
 	}
@@ -332,18 +332,18 @@ func (cl *Client) ReadDataByIdentifierUint16(ctx context.Context, pid byte, canI
 	return retval, nil
 }
 
-func (cl *Client) ReadDataByIdentifierString(ctx context.Context, pid byte, canID, recvID uint32) (string, error) {
-	resp, err := cl.ReadDataByIdentifier(ctx, pid, canID, recvID)
+func (cl *Client) ReadDataByIdentifierString(ctx context.Context, pid byte) (string, error) {
+	resp, err := cl.ReadDataByIdentifier(ctx, pid)
 	if err != nil {
 		return "", err
 	}
 	return strings.ReplaceAll(string(resp[:]), "\x00", ""), nil
 }
 
-func (cl *Client) ReadDataByIdentifier(ctx context.Context, pid byte, canID, recvID uint32) ([]byte, error) {
+func (cl *Client) ReadDataByIdentifier(ctx context.Context, pid byte) ([]byte, error) {
 	out := bytes.NewBuffer([]byte{})
-	f := gocan.NewFrame(canID, []byte{0x02, 0x1A, pid}, gocan.ResponseRequired)
-	resp, err := cl.c.SendAndPoll(ctx, f, cl.defaultTimeout, recvID)
+	f := gocan.NewFrame(cl.canID, []byte{0x02, 0x1A, pid}, gocan.ResponseRequired)
+	resp, err := cl.c.SendAndPoll(ctx, f, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
 		return nil, err
 	}
@@ -375,13 +375,13 @@ func (cl *Client) ReadDataByIdentifier(ctx context.Context, pid byte, canID, rec
 			left--
 		}
 
-		cl.c.SendFrame(canID, []byte{0x30, 0x00}, gocan.CANFrameType{Type: 2, Responses: int(framesToReceive)})
+		cl.c.SendFrame(cl.canID, []byte{0x30, 0x00}, gocan.CANFrameType{Type: 2, Responses: int(framesToReceive)})
 
 		var seq byte = 0x21
 
 	outer:
 		for framesToReceive > 0 {
-			resp2, err := cl.c.Poll(ctx, cl.defaultTimeout, recvID)
+			resp2, err := cl.c.Poll(ctx, cl.defaultTimeout, cl.recvID...)
 			if err != nil {
 				return nil, err
 			}
@@ -429,9 +429,9 @@ DPID scheduled can be transmitted at one of three predefined periodic rates (slo
 rates require a TesterPresent ($3E) message to be sent on the bus to keep the Periodic DPID Scheduler
 (PDS) active (reference $3E service description).
 */
-func (cl *Client) ReadDataByPacketIdentifier(ctx context.Context, canID, recvID uint32, subFunc byte, dpid ...byte) ([]byte, error) {
+func (cl *Client) ReadDataByPacketIdentifier(ctx context.Context, subFunc byte, dpid ...byte) ([]byte, error) {
 	f := gocan.NewFrame(
-		canID,
+		cl.canID,
 		append(
 			[]byte{byte(len(dpid) + 2), 0xAA, subFunc},
 			dpid...,
@@ -441,7 +441,7 @@ func (cl *Client) ReadDataByPacketIdentifier(ctx context.Context, canID, recvID 
 			Responses: len(dpid),
 		},
 	)
-	resp, err := cl.c.SendAndPoll(ctx, f, cl.defaultTimeout, recvID)
+	resp, err := cl.c.SendAndPoll(ctx, f, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
 		return nil, err
 	}
@@ -502,10 +502,10 @@ func (cl *Client) SecurityAccessRequestSeed(ctx context.Context, accessLevel byt
 	return []byte{d[3], d[4]}, nil
 }
 
-func (cl *Client) SecurityAccessSendKey(ctx context.Context, accessLevel, high, low byte, canID, recvID uint32) error {
+func (cl *Client) SecurityAccessSendKey(ctx context.Context, accessLevel, high, low byte) error {
 	respPayload := []byte{0x04, 0x27, accessLevel + 0x01, high, low}
-	frame := gocan.NewFrame(canID, respPayload, gocan.ResponseRequired)
-	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, recvID)
+	frame := gocan.NewFrame(cl.canID, respPayload, gocan.ResponseRequired)
+	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
 		return errors.New("SecurityAccessSendKey: " + err.Error())
 	}
@@ -522,7 +522,7 @@ func (cl *Client) SecurityAccessSendKey(ctx context.Context, accessLevel, high, 
 	return errors.New("/!\\ Failed to obtain security access")
 }
 
-func (cl *Client) RequestSecurityAccess(ctx context.Context, accesslevel byte, delay time.Duration, canID, recvID uint32, seedfunc func([]byte, byte) (byte, byte)) error {
+func (cl *Client) RequestSecurityAccess(ctx context.Context, accesslevel byte, delay time.Duration, seedfunc func([]byte, byte) (byte, byte)) error {
 	time.Sleep(50 * time.Millisecond)
 	seed, err := cl.SecurityAccessRequestSeed(ctx, accesslevel)
 	if err != nil {
@@ -543,7 +543,7 @@ func (cl *Client) RequestSecurityAccess(ctx context.Context, accesslevel byte, d
 
 	high, low := seedfunc(seed, accesslevel)
 
-	if err := cl.SecurityAccessSendKey(ctx, accesslevel, high, low, canID, recvID); err != nil {
+	if err := cl.SecurityAccessSendKey(ctx, accesslevel, high, low); err != nil {
 		return err
 	}
 	time.Sleep(50 * time.Millisecond)
@@ -551,15 +551,15 @@ func (cl *Client) RequestSecurityAccess(ctx context.Context, accesslevel byte, d
 }
 
 // 8.12 RequestDownload ($34) Service. This service is used in order to prepare a node to be programmed
-func (cl *Client) RequestDownload(ctx context.Context, canID, recvID uint32, z22se bool) error {
+func (cl *Client) RequestDownload(ctx context.Context, z22se bool) error {
 	payload := []byte{0x06, 0x34, 0x00, 0x00, 0x00, 0x00, 0x00}
 
 	if z22se {
 		payload[0] = 0x05
 	}
 
-	f := gocan.NewFrame(canID, payload, gocan.ResponseRequired)
-	resp, err := cl.c.SendAndPoll(ctx, f, cl.defaultTimeout, recvID)
+	f := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
+	resp, err := cl.c.SendAndPoll(ctx, f, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
 		return err
 	}
@@ -584,10 +584,10 @@ func (cl *Client) RequestDownload(ctx context.Context, canID, recvID uint32, z22
  keep the functionality of the other service active. Documentation within this specification of each diagnostic
  service indicates if a given service requires the periodic TesterPresent request to remain active
 */
-func (cl *Client) TesterPresentResponseRequired(ctx context.Context, canID, recvID uint32) error {
+func (cl *Client) TesterPresentResponseRequired(ctx context.Context) error {
 	payload := []byte{0x01, 0x3E}
-	f := gocan.NewFrame(canID, payload, gocan.ResponseRequired)
-	resp, err := cl.c.SendAndPoll(ctx, f, cl.defaultTimeout, recvID)
+	f := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
+	resp, err := cl.c.SendAndPoll(ctx, f, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
 		return fmt.Errorf("TesterPresentResponseRequired: %v", err)
 	}
@@ -611,21 +611,21 @@ func (cl *Client) TesterPresentNoResponseAllowed() {
 // write/program) the content of pre-defined ECU data referenced by a dataIdentifier (DID) which contains static
 // information like ECU identification data, or other information which does not require real-time updates.
 
-func (cl *Client) WriteDataByIdentifierUint16(ctx context.Context, pid byte, value uint16, canID, recvID uint32) error {
+func (cl *Client) WriteDataByIdentifierUint16(ctx context.Context, pid byte, value uint16) error {
 	b := make([]byte, 2)
 	binary.BigEndian.PutUint16(b, value)
-	return cl.WriteDataByIdentifier(ctx, pid, b, canID, recvID)
+	return cl.WriteDataByIdentifier(ctx, pid, b)
 }
 
-func (cl *Client) WriteDataByIdentifierUint32(ctx context.Context, pid byte, value uint32, canID, recvID uint32) error {
+func (cl *Client) WriteDataByIdentifierUint32(ctx context.Context, pid byte, value uint32) error {
 	b := make([]byte, 4)
 	binary.BigEndian.PutUint32(b, uint32(value))
-	return cl.WriteDataByIdentifier(ctx, pid, b, canID, recvID)
+	return cl.WriteDataByIdentifier(ctx, pid, b)
 }
 
-func (cl *Client) WriteDataByIdentifier(ctx context.Context, pid byte, data []byte, canID, recvID uint32) error {
+func (cl *Client) WriteDataByIdentifier(ctx context.Context, pid byte, data []byte) error {
 	if len(data) > 6 {
-		return cl.writeDataByIdentifierMultiframe(ctx, pid, data, canID, recvID)
+		return cl.writeDataByIdentifierMultiframe(ctx, pid, data)
 	}
 
 	payload := []byte{byte(len(data) + 2), 0x3B, pid}
@@ -633,8 +633,8 @@ func (cl *Client) WriteDataByIdentifier(ctx context.Context, pid byte, data []by
 	for i := len(payload); i < 8; i++ {
 		payload = append(payload, 0x00)
 	}
-	frame := gocan.NewFrame(canID, payload, gocan.ResponseRequired)
-	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, recvID)
+	frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
+	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
 		return err
 	}
@@ -647,7 +647,7 @@ func (cl *Client) WriteDataByIdentifier(ctx context.Context, pid byte, data []by
 	return nil
 }
 
-func (cl *Client) writeDataByIdentifierMultiframe(ctx context.Context, pid byte, data []byte, canID, recvID uint32) error {
+func (cl *Client) writeDataByIdentifierMultiframe(ctx context.Context, pid byte, data []byte) error {
 	r := bytes.NewReader(data)
 
 	firstPart := make([]byte, 4)
@@ -663,9 +663,9 @@ func (cl *Client) writeDataByIdentifierMultiframe(ctx context.Context, pid byte,
 	leng := byte(len(data)) + 2
 	payload := []byte{0x10, leng, 0x3B, pid}
 	payload = append(payload, firstPart...)
-	frame := gocan.NewFrame(canID, payload, gocan.ResponseRequired)
+	frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
 	log.Println(frame.String())
-	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, recvID)
+	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
 		return err
 	}
@@ -699,14 +699,14 @@ func (cl *Client) writeDataByIdentifierMultiframe(ctx context.Context, pid byte,
 		}
 
 		if r.Len() > 0 {
-			frame := gocan.NewFrame(canID, pkg, gocan.Outgoing)
+			frame := gocan.NewFrame(cl.canID, pkg, gocan.Outgoing)
 			log.Println(frame.String())
 			cl.c.Send(frame)
 			time.Sleep(time.Duration(delay) * time.Millisecond)
 		} else {
-			frame := gocan.NewFrame(canID, pkg, gocan.ResponseRequired)
+			frame := gocan.NewFrame(cl.canID, pkg, gocan.ResponseRequired)
 			log.Println(frame.String())
-			resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, recvID)
+			resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
 			if err != nil {
 				return err
 			}

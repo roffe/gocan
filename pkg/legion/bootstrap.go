@@ -68,23 +68,23 @@ func (t *Client) bootstrapPreFlight(ctx context.Context, callback model.Progress
 
 	//time.Sleep(50 * time.Millisecond)
 
-	if err := t.gm.InitiateDiagnosticOperation(ctx, 0x02, 0x7E0, 0x7E8); err != nil {
+	if err := t.gm.InitiateDiagnosticOperation(ctx, 0x02); err != nil {
 		return err
 	}
 
-	if err := t.gm.DisableNormalCommunication(ctx, 0x7E0, 0x7E8); err != nil {
+	if err := t.gm.DisableNormalCommunication(ctx); err != nil {
 		return err
 	}
 
-	if err := t.gm.ReportProgrammedState(ctx, 0x7E0, 0x7E8); err != nil {
+	if err := t.gm.ReportProgrammedState(ctx); err != nil {
 		return err
 	}
 
-	if err := t.gm.ProgrammingModeRequest(ctx, 0x7E0, 0x7E8); err != nil {
+	if err := t.gm.ProgrammingModeRequest(ctx); err != nil {
 		return err
 	}
 
-	if err := t.gm.ProgrammingModeEnable(ctx, 0x7E0, 0x7E8); err != nil {
+	if err := t.gm.ProgrammingModeEnable(ctx); err != nil {
 		return err
 	}
 
@@ -95,7 +95,7 @@ func (t *Client) bootstrapPreFlight(ctx context.Context, callback model.Progress
 	if callback != nil {
 		callback("Requesting security access")
 	}
-	if err := t.gm.RequestSecurityAccess(ctx, 0x01, 0, 0x7E0, 0x7E8, t8sec.CalculateAccessKey); err != nil {
+	if err := t.gm.RequestSecurityAccess(ctx, 0x01, 0, t8sec.CalculateAccessKey); err != nil {
 		return err
 	}
 
