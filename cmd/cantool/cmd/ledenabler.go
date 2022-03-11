@@ -30,7 +30,7 @@ var ledenablerCmd = &cobra.Command{
 		}
 		defer c.Close()
 
-		gm := gmlan.New(c)
+		gm := gmlan.New(c, 0x249, 0x649)
 
 		f, err := gm.ReadDataByIdentifier(ctx, 0x45, 0x249, 0x649) // Read REC Bulb Outage &Substitution Lighting
 		if err != nil {

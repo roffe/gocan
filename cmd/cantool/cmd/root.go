@@ -32,7 +32,7 @@ const (
 
 func init() {
 	switch strings.ToLower(os.Getenv("DEBUG")) {
-	case "true":
+	case "true", "ts":
 		log.SetFlags(log.Lshortfile | log.LstdFlags)
 	default:
 		log.SetFlags(0)

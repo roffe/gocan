@@ -4,10 +4,12 @@ package gmlan
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/roffe/gocan"
@@ -16,12 +18,16 @@ import (
 type Client struct {
 	c              *gocan.Client
 	defaultTimeout time.Duration
+	canID          uint32
+	recvID         []uint32
 }
 
-func New(c *gocan.Client) *Client {
+func New(c *gocan.Client, canID uint32, recvID ...uint32) *Client {
 	return &Client{
 		c:              c,
 		defaultTimeout: 150 * time.Millisecond,
+		canID:          canID,
+		recvID:         recvID,
 	}
 }
 
@@ -62,6 +68,20 @@ func (cl *Client) Execute(ctx context.Context, startAddress uint32, canID, respo
 
 func (cl *Client) DeviceControl(ctx context.Context, command byte, canID, recvID uint32) error {
 	payload := []byte{0x02, 0xAE, command}
+	frame := gocan.NewFrame(canID, payload, gocan.ResponseRequired)
+	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, recvID)
+	if err != nil {
+		return err
+	}
+	if err := CheckErr(resp); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (cl *Client) DeviceControlWithCode(ctx context.Context, command byte, code []byte, canID, recvID uint32) error {
+	payload := []byte{0x07, 0xAE, command}
+	payload = append(payload, code...)
 	frame := gocan.NewFrame(canID, payload, gocan.ResponseRequired)
 	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, recvID)
 	if err != nil {
@@ -302,9 +322,26 @@ func (cl *Client) ReportProgrammedState(ctx context.Context, canID, recvID uint3
 // content of pre-defined ECU data referenced by a dataIdentifier (DID) which contains static information such as
 // ECU identification data or other information which does not require real-time updates. (Real-time data is
 // intended to be retrieved via the ReadDataByPacketIdentifier ($AA) service.)
+func (cl *Client) ReadDataByIdentifierUint16(ctx context.Context, pid byte, canID, recvID uint32) (uint16, error) {
+	resp, err := cl.ReadDataByIdentifier(ctx, pid, canID, recvID)
+	if err != nil {
+		return 0, err
+	}
+	retval := uint16(resp[0]) * 256
+	retval += uint16(resp[1])
+	return retval, nil
+}
+
+func (cl *Client) ReadDataByIdentifierString(ctx context.Context, pid byte, canID, recvID uint32) (string, error) {
+	resp, err := cl.ReadDataByIdentifier(ctx, pid, canID, recvID)
+	if err != nil {
+		return "", err
+	}
+	return strings.ReplaceAll(string(resp[:]), "\x00", ""), nil
+}
+
 func (cl *Client) ReadDataByIdentifier(ctx context.Context, pid byte, canID, recvID uint32) ([]byte, error) {
 	out := bytes.NewBuffer([]byte{})
-	//resp, err := cl.c.Poll(ctx, cl.defaultTimeout, recvID) // +0x400?
 	f := gocan.NewFrame(canID, []byte{0x02, 0x1A, pid}, gocan.ResponseRequired)
 	resp, err := cl.c.SendAndPoll(ctx, f, cl.defaultTimeout, recvID)
 	if err != nil {
@@ -316,15 +353,14 @@ func (cl *Client) ReadDataByIdentifier(ctx context.Context, pid byte, canID, rec
 	d := resp.Data()
 	switch {
 	case d[1] == 0x5A: // only one frame in this response
-		//out := bytes.NewBuffer(nil)
 		length := d[0]
 		for i := 3; i <= int(length); i++ {
 			out.WriteByte(d[i])
 		}
 		return out.Bytes(), nil
 	case d[2] == 0x5A:
-		//out := bytes.NewBuffer(nil)
 		leng := d[1]
+
 		lenThisFrame := int(leng)
 		left := int(leng)
 		framesToReceive := (leng - 4) / 8
@@ -417,6 +453,28 @@ func (cl *Client) ReadDataByPacketIdentifier(ctx context.Context, canID, recvID 
 	return resp.Data(), nil
 }
 
+// 8.18 ReadDiagnosticInformation ($A9) Service.
+//
+// This service allows a tester to read the status of
+// node-resident Diagnostic Trouble Code (DTC) information from any controller, or group of controllers within a
+// vehicle. This service allows the tester to do the following:
+// 1. Retrieve the status of a specific DTC and FaultType combination.
+// 2. Retrieve the list of DTCs that match a tester defined DTC status mask.
+// 3. Enable a node resident algorithm which periodically calculates the number of DTCs that match a tester
+// defined DTC status mask. The ECU shall send a response message each time the calculation yields a
+// different result than the one calculated the previous time.
+
+func (cl *Client) sendAndReceive(ctx context.Context) (gocan.CANFrame, error) {
+	payload := []byte{}
+	frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
+	return cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
+}
+
+func (cl *Client) ReadDiagnosticInformation(ctx context.Context, DTCHighByte, DTCLowByte, DTCFailureTypeByte byte) error {
+
+	return nil
+}
+
 // 8.8 SecurityAccess ($27) Service.
 //
 // The purpose of this service is to provide a means to access data and/or
@@ -425,10 +483,10 @@ func (cl *Client) ReadDataByPacketIdentifier(ctx context.Context, canID, recvID 
 // where security access may be required. Improper routines or data downloaded into a node could potentially
 // damage the electronics or other vehicle components or risk the vehicle’s compliance to emission, safety, or
 // security standards. This mode is intended
-func (cl *Client) SecurityAccessRequestSeed(ctx context.Context, accessLevel byte, canID, recvID uint32) ([]byte, error) {
+func (cl *Client) SecurityAccessRequestSeed(ctx context.Context, accessLevel byte) ([]byte, error) {
 	payload := []byte{0x02, 0x27, accessLevel}
-	frame := gocan.NewFrame(canID, payload, gocan.ResponseRequired)
-	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, recvID)
+	frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
+	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
 		return nil, errors.New("SecurityAccessRequestSeed: " + err.Error())
 	}
@@ -466,7 +524,7 @@ func (cl *Client) SecurityAccessSendKey(ctx context.Context, accessLevel, high, 
 
 func (cl *Client) RequestSecurityAccess(ctx context.Context, accesslevel byte, delay time.Duration, canID, recvID uint32, seedfunc func([]byte, byte) (byte, byte)) error {
 	time.Sleep(50 * time.Millisecond)
-	seed, err := cl.SecurityAccessRequestSeed(ctx, accesslevel, canID, recvID)
+	seed, err := cl.SecurityAccessRequestSeed(ctx, accesslevel)
 	if err != nil {
 		return err
 	}
@@ -552,9 +610,22 @@ func (cl *Client) TesterPresentNoResponseAllowed() {
 // The purpose of this service is to provide the ability to change
 // write/program) the content of pre-defined ECU data referenced by a dataIdentifier (DID) which contains static
 // information like ECU identification data, or other information which does not require real-time updates.
+
+func (cl *Client) WriteDataByIdentifierUint16(ctx context.Context, pid byte, value uint16, canID, recvID uint32) error {
+	b := make([]byte, 2)
+	binary.BigEndian.PutUint16(b, value)
+	return cl.WriteDataByIdentifier(ctx, pid, b, canID, recvID)
+}
+
+func (cl *Client) WriteDataByIdentifierUint32(ctx context.Context, pid byte, value uint32, canID, recvID uint32) error {
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint32(b, uint32(value))
+	return cl.WriteDataByIdentifier(ctx, pid, b, canID, recvID)
+}
+
 func (cl *Client) WriteDataByIdentifier(ctx context.Context, pid byte, data []byte, canID, recvID uint32) error {
 	if len(data) > 6 {
-		return cl.WriteDataByIdentifierMultiframe(ctx, pid, data, canID, recvID)
+		return cl.writeDataByIdentifierMultiframe(ctx, pid, data, canID, recvID)
 	}
 
 	payload := []byte{byte(len(data) + 2), 0x3B, pid}
@@ -576,9 +647,11 @@ func (cl *Client) WriteDataByIdentifier(ctx context.Context, pid byte, data []by
 	return nil
 }
 
-func (cl *Client) WriteDataByIdentifierMultiframe(ctx context.Context, pid byte, data []byte, canID, recvID uint32) error {
+func (cl *Client) writeDataByIdentifierMultiframe(ctx context.Context, pid byte, data []byte, canID, recvID uint32) error {
 	r := bytes.NewReader(data)
+
 	firstPart := make([]byte, 4)
+
 	_, err := r.Read(firstPart)
 	if err != nil {
 		if err == io.EOF {
@@ -587,13 +660,16 @@ func (cl *Client) WriteDataByIdentifierMultiframe(ctx context.Context, pid byte,
 			return err
 		}
 	}
-	payload := []byte{0x10, byte(len(data) + 2), 0x3B, pid}
+	leng := byte(len(data)) + 2
+	payload := []byte{0x10, leng, 0x3B, pid}
 	payload = append(payload, firstPart...)
 	frame := gocan.NewFrame(canID, payload, gocan.ResponseRequired)
+	log.Println(frame.String())
 	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, recvID)
 	if err != nil {
 		return err
 	}
+	log.Println(resp.String())
 	d := resp.Data()
 
 	if err := CheckErr(resp); err != nil {
@@ -601,14 +677,12 @@ func (cl *Client) WriteDataByIdentifierMultiframe(ctx context.Context, pid byte,
 	}
 
 	if d[0] != 0x30 || d[1] != 0x00 {
-		log.Println(resp.String())
 		return errors.New("invalid response to initial writeDataByIdentifier")
 	}
 
 	delay := d[2]
 
 	var seq byte = 0x21
-
 	for r.Len() > 0 {
 		pkg := []byte{seq}
 	inner:
@@ -616,21 +690,36 @@ func (cl *Client) WriteDataByIdentifierMultiframe(ctx context.Context, pid byte,
 			b, err := r.ReadByte()
 			if err != nil {
 				if err == io.EOF {
-					log.Println("eof")
+					//pkg = append(pkg, 0x00)
 					break inner
 				}
 				return err
 			}
 			pkg = append(pkg, b)
 		}
-		cl.c.SendFrame(canID, pkg, gocan.Outgoing)
-		log.Printf("%X\n", pkg)
-		time.Sleep(time.Duration(delay) * time.Millisecond)
+
+		if r.Len() > 0 {
+			frame := gocan.NewFrame(canID, pkg, gocan.Outgoing)
+			log.Println(frame.String())
+			cl.c.Send(frame)
+			time.Sleep(time.Duration(delay) * time.Millisecond)
+		} else {
+			frame := gocan.NewFrame(canID, pkg, gocan.ResponseRequired)
+			log.Println(frame.String())
+			resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, recvID)
+			if err != nil {
+				return err
+			}
+			log.Println(resp.String())
+			if err := CheckErr(resp); err != nil {
+				return err
+			}
+		}
+
 		seq++
 		if seq == 0x30 {
 			seq = 0x20
 		}
 	}
-
 	return nil
 }

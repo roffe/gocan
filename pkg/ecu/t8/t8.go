@@ -2,7 +2,7 @@ package t8
 
 import (
 	"context"
-	"encoding/binary"
+	"errors"
 	"log"
 	"time"
 
@@ -30,7 +30,7 @@ func New(c *gocan.Client) *Client {
 		c:              c,
 		defaultTimeout: 150 * time.Millisecond,
 		legion:         legion.New(c),
-		gm:             gmlan.New(c),
+		gm:             gmlan.New(c, 0x7E0, 0x7E8),
 	}
 	return t
 }
@@ -58,7 +58,7 @@ func (t *Client) EraseECU(ctx context.Context, callback model.ProgressCallback) 
 
 func (t *Client) RequestSecurityAccess(ctx context.Context) error {
 	log.Println("Requesting security access")
-	return t.gm.RequestSecurityAccess(ctx, 0xFD, 0, 0x7E0, 0x7E8, t8sec.CalculateAccessKey)
+	return t.gm.RequestSecurityAccess(ctx, 0x01, 0, 0x7E0, 0x7E8, t8sec.CalculateAccessKey)
 }
 
 func (t *Client) GetOilQuality(ctx context.Context) (float64, error) {
@@ -71,49 +71,41 @@ func (t *Client) GetOilQuality(ctx context.Context) (float64, error) {
 }
 
 func (t *Client) SetOilQuality(ctx context.Context, quality float64) error {
-	quality *= 256
-	b := make([]byte, 4)
-	binary.BigEndian.PutUint32(b, uint32(quality))
-
-	return t.gm.WriteDataByIdentifier(ctx, pidOilQuality, b, 0x7E0, 0x7E8)
+	return t.gm.WriteDataByIdentifierUint32(ctx, pidOilQuality, uint32(quality*256), 0x7e0, 0x7e8)
 }
 
 func (t *Client) GetTopSpeed(ctx context.Context) (uint16, error) {
-	resp, err := t.gm.ReadDataByIdentifier(ctx, pidTopSpeed, 0x7E0, 0x7E8)
+	resp, err := t.gm.ReadDataByIdentifierUint16(ctx, pidTopSpeed, 0x7E0, 0x7E8)
 	if err != nil {
 		return 0, err
 	}
-	retval := uint16(resp[0]) * 256
-	retval += uint16(resp[1])
-	speed := retval / 10
+	speed := resp / 10
 	return speed, nil
 }
 
 func (t *Client) SetTopSpeed(ctx context.Context, speed uint16) error {
 	speed *= 10
-	b := make([]byte, 2)
-	binary.BigEndian.PutUint16(b, uint16(speed))
-	return t.gm.WriteDataByIdentifier(ctx, pidTopSpeed, b, 0x7E0, 0x7E8)
+	return t.gm.WriteDataByIdentifierUint16(ctx, pidTopSpeed, speed, 0x7e0, 0x7e8)
 }
 
-func (t *Client) GetRPMLimiter(ctx context.Context) (uint32, error) {
-	resp, err := t.gm.ReadDataByIdentifier(ctx, pidRPMLimiter, 0x7E0, 0x7E8)
-	if err != nil {
-		return 0, err
-	}
-	retval := uint32(resp[0]) * 256
-	retval += uint32(resp[1])
-	return retval, nil
+func (t *Client) GetRPMLimiter(ctx context.Context) (uint16, error) {
+	return t.gm.ReadDataByIdentifierUint16(ctx, pidRPMLimiter, 0x7E0, 0x7E8)
+
 }
 
 func (t *Client) SetRPMLimit(ctx context.Context, limit uint16) error {
-	b := make([]byte, 2)
-	binary.BigEndian.PutUint16(b, limit)
-	return t.gm.WriteDataByIdentifier(ctx, pidRPMLimiter, b, 0x7E0, 0x7E8)
+	return t.gm.WriteDataByIdentifierUint16(ctx, pidRPMLimiter, limit, 0x7e0, 0x7e8)
 }
 
 func (t *Client) GetVehicleVIN(ctx context.Context) (string, error) {
-	return t.RequestECUInfoAsString(ctx, pidVIN)
+	return t.gm.ReadDataByIdentifierString(ctx, pidVIN, 0x7e0, 0x7e8)
+}
+
+func (t *Client) SetVehicleVIN(ctx context.Context, vin string) error {
+	if len(vin) != 17 {
+		return errors.New("invalid vin length")
+	}
+	return t.gm.WriteDataByIdentifier(ctx, pidVIN, []byte(vin), 0x7e0, 0x7e8)
 }
 
 const (

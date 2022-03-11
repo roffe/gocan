@@ -3,6 +3,7 @@ package gocan
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -55,9 +56,8 @@ type Frame struct {
 func NewFrame(identifier uint32, data []byte, frameType CANFrameType) *Frame {
 	return &Frame{
 		identifier: identifier,
-
-		data:      data,
-		frameType: frameType,
+		data:       data,
+		frameType:  frameType,
 	}
 }
 
@@ -107,6 +107,8 @@ func (f *Frame) String() string {
 
 	out.WriteString(green("0x%03X", f.identifier) + " || ")
 
+	out.WriteString(strconv.Itoa(len(f.data)) + " || ")
+
 	var hexView strings.Builder
 
 	for i, b := range f.data {
@@ -131,6 +133,19 @@ func (f *Frame) String() string {
 	out.WriteString(red(fmt.Sprintf("%-72s", binView.String())))
 
 	out.WriteString(" || ")
-	out.WriteString(yellow("%8s", printable.ReplaceAllString(string(f.data), ".")))
+	out.WriteString(yellow(onlyPrintable(f.data)))
+	return out.String()
+}
+
+func onlyPrintable(data []byte) string {
+	var out strings.Builder
+	for _, b := range data {
+		if b < 32 || b > 127 {
+			out.WriteString("·")
+		} else {
+			out.WriteByte(b)
+		}
+
+	}
 	return out.String()
 }

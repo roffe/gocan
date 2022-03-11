@@ -30,7 +30,7 @@ func New(c *gocan.Client) *Client {
 	return &Client{
 		c:              c,
 		defaultTimeout: 150 * time.Millisecond,
-		gm:             gmlan.New(c),
+		gm:             gmlan.New(c, 0x7e0, 0x7e8),
 	}
 }
 

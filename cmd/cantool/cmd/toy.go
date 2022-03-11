@@ -27,7 +27,7 @@ var toyCmd = &cobra.Command{
 
 		tr := t8.New(c)
 		//leg := legion.New(c)
-		gm := gmlan.New(c)
+		gm := gmlan.New(c, 0x7E0, 0x7E8)
 
 		gm.TesterPresentNoResponseAllowed()
 
@@ -73,7 +73,7 @@ var toyCmd = &cobra.Command{
 		}
 		log.Printf("quality: %.2f", q)
 
-		if err := tr.SetTopSpeed(ctx, 270); err != nil {
+		if err := tr.SetTopSpeed(ctx, 287); err != nil {
 			return err
 		}
 
@@ -93,11 +93,17 @@ var toyCmd = &cobra.Command{
 		}
 		log.Println("rpm: ", rpm)
 
+		gm.TesterPresentNoResponseAllowed()
+
 		vin, err := tr.GetVehicleVIN(ctx)
 		if err != nil {
 			return err
 		}
 		log.Println("VIN: ", vin)
+
+		if err := tr.SetVehicleVIN(ctx, "YS3FB45FX51053565"); err != nil {
+			return err
+		}
 
 		if err := gm.DeviceControl(ctx, 0x16, 0x7E0, 0x7E8); err != nil {
 			return err
