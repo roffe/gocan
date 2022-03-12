@@ -1,4 +1,4 @@
-package t8mcp
+package ecupkg
 
 import (
 	"context"
@@ -8,10 +8,6 @@ import (
 	"github.com/roffe/gocan/pkg/model"
 )
 
-const (
-	IBusRate = 47.619
-	PBusRate = 500
-)
 
 type Client struct {
 	c              *gocan.Client
@@ -25,6 +21,12 @@ func New(c *gocan.Client) *Client {
 	}
 	return t
 }
+
+
+func (t *Client) ReadDTC(ctx context.Context) ([]model.DTC, error) {
+	return nil, nil
+}
+
 
 func (t *Client) Info(ctx context.Context, callback model.ProgressCallback) ([]model.HeaderResult, error) {
 	return nil, nil

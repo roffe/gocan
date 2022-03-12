@@ -23,12 +23,13 @@ const (
 )
 
 type Client interface {
-	Info(context.Context, model.ProgressCallback) ([]model.HeaderResult, error)
+	ReadDTC(context.Context) ([]model.DTC, error)
 	PrintECUInfo(context.Context) error
-	ResetECU(context.Context, model.ProgressCallback) error
+	Info(context.Context, model.ProgressCallback) ([]model.HeaderResult, error)
 	DumpECU(context.Context, model.ProgressCallback) ([]byte, error)
 	FlashECU(context.Context, []byte, model.ProgressCallback) error
 	EraseECU(context.Context, model.ProgressCallback) error
+	ResetECU(context.Context, model.ProgressCallback) error
 }
 
 func FromString(s string) Type {

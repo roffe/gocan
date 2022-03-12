@@ -1,6 +1,9 @@
 package cmd
 
 import (
+	"log"
+
+	"github.com/roffe/gocan/pkg/ecu"
 	"github.com/spf13/cobra"
 )
 
@@ -9,9 +12,9 @@ func init() {
 }
 
 var dtcCmd = &cobra.Command{
-	Use:   "dtc <file>",
+	Use:   "dtc",
 	Short: "show ecu DTC's",
-	Args:  cobra.ExactArgs(1),
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 		c, err := initCAN(ctx)
@@ -20,31 +23,25 @@ var dtcCmd = &cobra.Command{
 		}
 		defer c.Close()
 
-		//tr := t8.New(c)
-		//gm := gmlan.New(c, 0x7e0, 0x7e8)
-		/*
-			tr, err := ecu.New(c, getECUType())
-			if err != nil {
-				return err
-			}
+		tr, err := ecu.New(c, getECUType())
+		if err != nil {
+			return err
+		}
 
-			if err := tr.PrintECUInfo(ctx); err != nil {
-				return err
-			}
+		dtcs, err := tr.ReadDTC(ctx)
+		if err != nil {
+			return err
+		}
 
-			bin, err := tr.DumpECU(ctx, infoCallback)
-			if err != nil {
-				return err
-			}
+		if len(dtcs) == 0 {
+			log.Println("No DTC's")
+		} else {
+			log.Println("Detected DTC's:")
+		}
 
-			if err := os.WriteFile(args[0], bin, 0644); err != nil {
-				log.Printf("failed to write dump file: %v", err)
-			}
-
-			if err := tr.ResetECU(ctx, infoCallback); err != nil {
-				return err
-			}
-		*/
+		for i, dtc := range dtcs {
+			log.Printf("  #%d %s", i, dtc.String())
+		}
 		return nil
 	},
 }

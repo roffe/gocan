@@ -325,9 +325,9 @@ func (t *Client) ReadFlash(ctx context.Context, device byte, lastAddress int, z2
 	}
 
 	if callback != nil {
+		callback("Downloading " + strconv.Itoa(lastAddress) + " bytes")
 		callback(-float64(lastAddress))
 		callback(float64(0))
-		callback("Downloading " + strconv.Itoa(lastAddress) + " bytes")
 	}
 
 	startAddress := 0
@@ -335,7 +335,7 @@ func (t *Client) ReadFlash(ctx context.Context, device byte, lastAddress int, z2
 	retries := 0
 	for startAddress < lastAddress && ctx.Err() == nil {
 		if callback != nil {
-			callback(float64(startAddress + int(blockSize)))
+			callback(float64(startAddress + int(blockSize) - 1))
 		}
 		err := retry.Do(
 			func() error {
@@ -375,11 +375,6 @@ func (t *Client) ReadFlash(ctx context.Context, device byte, lastAddress int, z2
 			retry.Attempts(3),
 			retry.Context(ctx),
 			retry.LastErrorOnly(true),
-			//retry.OnRetry(func(n uint, err error) {
-			//	if callback != nil {
-			//		callback(fmt.Sprintf("Retry #%d %v", n, err))
-			//	}
-			//}),
 		)
 		if err != nil {
 			return nil, err

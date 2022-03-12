@@ -453,6 +453,30 @@ func (cl *Client) ReadDataByPacketIdentifier(ctx context.Context, subFunc byte, 
 	return resp.Data(), nil
 }
 
+//func (cl *Client) sendAndReceive(ctx context.Context, payload []byte) (gocan.CANFrame, error) {
+//	frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
+//	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
+//	if err != nil {
+//		return nil, err
+//	}
+//	return resp, CheckErr(resp)
+//}
+
+// ReadDiagnosticInformation $A9 Service
+//  readStatusOfDTCByStatusMask $81 Request
+//      DTCStatusMask $12= 0001 0010
+//        0 Bit 7 warningIndicatorRequestedState
+//        0 Bit 6 currentDTCSincePowerUp
+//        0 Bit 5 testNotPassedSinceCurrentPowerUp
+//        1 Bit 4 historyDTC
+//        0 Bit 3 testFailedSinceDTCCleared
+//        0 Bit 2 testNotPassedSinceDTCCleared
+//        1 Bit 1 currentDTC
+//        0 Bit 0 DTCSupportedByCalibration
+func (cl *Client) ReadDiagnosticInformationStatusOfDTCByStatusMask(ctx context.Context, DTCStatusMask byte) ([][]byte, error) {
+	return cl.readDiagnosticInformation(ctx, 0x81, []byte{DTCStatusMask})
+}
+
 // 8.18 ReadDiagnosticInformation ($A9) Service.
 //
 // This service allows a tester to read the status of
@@ -463,16 +487,40 @@ func (cl *Client) ReadDataByPacketIdentifier(ctx context.Context, subFunc byte, 
 // 3. Enable a node resident algorithm which periodically calculates the number of DTCs that match a tester
 // defined DTC status mask. The ECU shall send a response message each time the calculation yields a
 // different result than the one calculated the previous time.
+func (cl *Client) readDiagnosticInformation(ctx context.Context, subFunc byte, payload []byte) ([][]byte, error) {
+	if len(payload) > 3 {
+		return nil, errors.New("to big payload for readDiagnosticInformation")
+	}
+	header := []byte{0x03, 0xA9, subFunc}
+	frame := gocan.NewFrame(cl.canID, append(header, payload...), gocan.CANFrameType{Type: 2, Responses: 15})
+	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
+	if err != nil {
+		return nil, err
+	}
 
-func (cl *Client) sendAndReceive(ctx context.Context) (gocan.CANFrame, error) {
-	payload := []byte{}
-	frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
-	return cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
-}
-
-func (cl *Client) ReadDiagnosticInformation(ctx context.Context, DTCHighByte, DTCLowByte, DTCFailureTypeByte byte) error {
-
-	return nil
+	var out [][]byte
+	if err := CheckErr(resp); err != nil {
+		if err.Error() == "Response pending" {
+			ch := cl.c.Subscribe(ctx, cl.recvID...)
+		outer:
+			for {
+				select {
+				case resp := <-ch:
+					d := resp.Data()
+					// No more DTCs
+					if d[1] == 0x00 && d[2] == 0x00 && d[3] == 0x00 {
+						break outer
+					}
+					out = append(out, []byte{d[1], d[2], d[3], d[4]})
+				case <-time.After(100 * time.Millisecond):
+					break outer
+				}
+			}
+		} else {
+			return nil, err
+		}
+	}
+	return out, nil
 }
 
 // 8.8 SecurityAccess ($27) Service.
@@ -490,13 +538,12 @@ func (cl *Client) SecurityAccessRequestSeed(ctx context.Context, accessLevel byt
 	if err != nil {
 		return nil, errors.New("SecurityAccessRequestSeed: " + err.Error())
 	}
-
+	if err := CheckErr(resp); err != nil {
+		return nil, errors.New("SecurityAccessRequestSeed: " + err.Error())
+	}
 	d := resp.Data()
 	if d[1] != 0x67 || d[2] != accessLevel {
 		return nil, errors.New("invalid Response to SecurityAccessRequestSeed")
-	}
-	if err := CheckErr(resp); err != nil {
-		return nil, errors.New("SecurityAccessRequestSeed: " + err.Error())
 	}
 
 	return []byte{d[3], d[4]}, nil

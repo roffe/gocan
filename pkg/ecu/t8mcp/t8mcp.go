@@ -33,6 +33,10 @@ func New(c *gocan.Client) *Client {
 	return t
 }
 
+func (t *Client) ReadDTC(ctx context.Context) ([]model.DTC, error) {
+	return nil, errors.New("MCP cannot do this")
+}
+
 func (t *Client) Info(ctx context.Context, callback model.ProgressCallback) ([]model.HeaderResult, error) {
 	if err := t.legion.Bootstrap(ctx, callback); err != nil {
 		return nil, err

@@ -34,11 +34,12 @@ type mainWindow struct {
 	portList    *widget.Select
 	speedList   *widget.Select
 
-	refreshBTN *widget.Button
+	dtcBTN     *widget.Button
 	infoBTN    *widget.Button
 	dumpBTN    *widget.Button
 	sramBTN    *widget.Button
 	flashBTN   *widget.Button
+	refreshBTN *widget.Button
 
 	progressBar *widget.ProgressBar
 }
@@ -60,7 +61,7 @@ func newMainWindow(a fyne.App, w fyne.Window) *mainWindow {
 	m.createSelects()
 	m.createButtons()
 	w.SetContent(m.layout())
-	w.Resize(fyne.NewSize(900, 350))
+	w.Resize(fyne.NewSize(900, 450))
 	return m
 }
 
@@ -107,6 +108,7 @@ func (m *mainWindow) layout() *container.Split {
 		m.speedList,
 		layout.NewSpacer(),
 		m.infoBTN,
+		m.dtcBTN,
 		m.dumpBTN,
 		m.sramBTN,
 		m.flashBTN,
@@ -123,11 +125,12 @@ func (m *mainWindow) layout() *container.Split {
 
 func (m *mainWindow) createButtons() {
 	m.wizzardBTN = widget.NewButton("Wizzard", m.wizzard)
-	m.sramBTN = widget.NewButton("Dump SRAM", m.dumpSRAM)
-	m.refreshBTN = widget.NewButton("Refresh Ports", m.refreshPorts)
+	m.dtcBTN = widget.NewButton("Read DTC", m.readDTC)
 	m.infoBTN = widget.NewButton("Info", m.ecuInfo)
+	m.sramBTN = widget.NewButton("Dump SRAM", m.dumpSRAM)
 	m.dumpBTN = widget.NewButton("Dump", m.ecuDump)
 	m.flashBTN = widget.NewButton("Flash", m.ecuFlash)
+	m.refreshBTN = widget.NewButton("Refresh Ports", m.refreshPorts)
 }
 
 func (m *mainWindow) wizzard() {
@@ -141,11 +144,15 @@ func (m *mainWindow) createSelects() {
 		switch state.ecuType {
 		case ecu.Trionic5:
 			state.canRate = t5.PBusRate
+			m.dtcBTN.Hide()
 		case ecu.Trionic7:
+			m.dtcBTN.Hide()
 			state.canRate = t7.PBusRate
 		case ecu.Trionic8:
+			m.dtcBTN.Show()
 			state.canRate = t8.PBusRate
 		}
+
 		m.app.Preferences().SetFloat("canrate", state.canRate)
 		m.app.Preferences().SetInt("ecu", index)
 
@@ -206,6 +213,7 @@ func (m *mainWindow) disableButtons() {
 	m.portList.Disable()
 	m.speedList.Disable()
 
+	m.dtcBTN.Disable()
 	m.infoBTN.Disable()
 	m.dumpBTN.Disable()
 	m.sramBTN.Disable()
@@ -218,6 +226,7 @@ func (m *mainWindow) enableButtons() {
 	m.portList.Enable()
 	m.speedList.Enable()
 
+	m.dtcBTN.Enable()
 	m.infoBTN.Enable()
 	m.dumpBTN.Enable()
 	m.sramBTN.Enable()

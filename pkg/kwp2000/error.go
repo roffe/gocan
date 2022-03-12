@@ -1,38 +1,17 @@
-package gmlan
+package kwp2000
 
-import (
-	"errors"
-
-	"github.com/roffe/gocan"
-)
-
-func CheckErr(frame gocan.CANFrame) error {
-	d := frame.Data()
-	if d[1] == 0x7F {
-		//svc := TranslateServiceCode(d[2])
-		code := TranslateErrorCode(d[3])
-		return errors.New(code)
-	}
-	return nil
-}
-
-func TranslateServiceCode(p byte) string {
-	switch p {
-	case 0xA9:
-		return "ReadDiagnosticInformation"
-	default:
-		return "Unknown"
-	}
-}
+import "fmt"
 
 func TranslateErrorCode(p byte) string {
 	switch p {
+	case 0x00:
+		return "Affirmative response"
 	case 0x10:
 		return "General reject"
 	case 0x11:
-		return "Service not supported"
+		return "Mode not supported"
 	case 0x12:
-		return "SubFunction not supported - invalid format"
+		return "Sub-function not supported - invalid format"
 	case 0x21:
 		return "Busy, repeat request"
 	case 0x22:
@@ -43,6 +22,8 @@ func TranslateErrorCode(p byte) string {
 		return "Request out of range or session dropped"
 	case 0x33:
 		return "Security access denied"
+	case 0x34:
+		return "Security access allowed"
 	case 0x35:
 		return "Invalid key supplied"
 	case 0x36:
@@ -57,6 +38,8 @@ func TranslateErrorCode(p byte) string {
 		return "Unable to download (PC -> ECU) to specified address"
 	case 0x43:
 		return "Unable to download (PC -> ECU) number of bytes requested"
+	case 0x44:
+		return "Ready for download"
 	case 0x50:
 		return "Upload (ECU -> PC) not accepted"
 	case 0x51:
@@ -65,6 +48,16 @@ func TranslateErrorCode(p byte) string {
 		return "Unable to upload (ECU -> PC) for specified address"
 	case 0x53:
 		return "Unable to upload (ECU -> PC) number of bytes requested"
+	case 0x54:
+		return "Ready for upload"
+	case 0x61:
+		return "Normal exit with results available"
+	case 0x62:
+		return "Normal exit without results available"
+	case 0x63:
+		return "Abnormal exit with results"
+	case 0x64:
+		return "Abnormal exit without results"
 	case 0x71:
 		return "Transfer suspended"
 	case 0x72:
@@ -83,18 +76,7 @@ func TranslateErrorCode(p byte) string {
 		return "Incorrect byte count during block transfer"
 	case 0x80:
 		return "Service not supported in current diagnostics session"
-	case 0x81:
-		return "Scheduler full"
-	case 0x83:
-		return "Voltage out of range"
-	case 0x85:
-		return "General programming failure"
-	case 0x89:
-		return "Device type error"
-	case 0x99:
-		return "Ready for download"
-	case 0xE3:
-		return "DeviceControl Limits Exceeded"
+	default:
+		return fmt.Sprintf("Unknown error %X", p)
 	}
-	return "Unknown"
 }

@@ -195,7 +195,7 @@ func (cu *Canusb) sendManager(ctx context.Context) {
 				log.Printf("failed to write to com port: %q, %v", f.String(), err)
 			}
 			if debug {
-				fmt.Fprint(os.Stderr, f.String()+"\n")
+				fmt.Fprint(os.Stderr, ">> "+f.String()+"\n")
 			}
 			f.Reset()
 		case <-ctx.Done():
@@ -252,7 +252,7 @@ func (cu *Canusb) parse(ctx context.Context, readBuffer []byte, buff *bytes.Buff
 				}
 			case 't':
 				if debug {
-					fmt.Fprint(os.Stderr, buff.String()+"\n")
+					fmt.Fprint(os.Stderr, "<< "+buff.String()+"\n")
 				}
 				f, err := cu.decodeFrame(by)
 				if err != nil {

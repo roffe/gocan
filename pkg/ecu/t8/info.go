@@ -242,19 +242,3 @@ func (t *Client) SendAckMessageT8() {
 		panic(err)
 	}
 }
-
-// ReadDiagnosticInformation $A9 Service
-//  readStatusOfDTCByStatusMask $81 Request
-//      DTCStatusMask $12= 0001 0010
-//        0 Bit 7 warningIndicatorRequestedState
-//        0 Bit 6 currentDTCSincePowerUp
-//        0 Bit 5 testNotPassedSinceCurrentPowerUp
-//        1 Bit 4 historyDTC
-//        0 Bit 3 testFailedSinceDTCCleared
-//        0 Bit 2 testNotPassedSinceDTCCleared
-//        1 Bit 1 currentDTC
-//        0 Bit 0 DTCSupportedByCalibration
-
-func (t *Client) ReadDTC() {
-
-}

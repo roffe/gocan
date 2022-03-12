@@ -113,7 +113,7 @@ func (cu *SX) Init(ctx context.Context) error {
 		"ATAL",      // Allow long messages
 		"ATCFC0",    //Turn automatic CAN flow control off
 		//"ATAR",      // Automatically set the receive address.
-		//"ATCSM0",    //Turn CAN silent monitoring off
+		//"ATCSM1",  //Turn CAN silent monitoring off
 		cu.filter, // code
 		cu.mask,   // mask
 	}
@@ -130,6 +130,9 @@ func (cu *SX) Init(ctx context.Context) error {
 			continue
 		}
 		out := []byte(c + "\r")
+		if debug {
+			log.Println(c)
+		}
 		_, err := p.Write(out)
 		if err != nil {
 			log.Println(err)
@@ -248,6 +251,44 @@ type token struct{}
 
 var sendMutex = make(chan token, 1)
 
+func (cu *SX) sendManager2(ctx context.Context) {
+	f := bytes.NewBuffer(nil)
+	for {
+		select {
+		case v := <-cu.send:
+			switch v.(type) {
+			default:
+				idb := make([]byte, 4)
+				binary.BigEndian.PutUint32(idb, v.Identifier())
+
+				t := v.Type()
+				r := t.GetResponseCount()
+
+				//a := v.Identifier()
+				// write cmd and header
+				//f.Write([]byte{'S','T','P','X','h', ':',byte(a>>8) + 0x30, (byte(a) >> 4) + 0x30, ((byte(a) << 4) >> 4) + 0x30, ','})
+				//addr := strings.ToUpper(hex.EncodeToString(idb)[5:])
+				data := strings.ToUpper(hex.EncodeToString(v.Data()))
+				f.WriteString(data + " " + fmt.Sprintf("%X", r) + "\r")
+			}
+
+			sendMutex <- token{}
+			if debug {
+				fmt.Fprint(os.Stderr, "<o> "+f.String()+"\n")
+			}
+			_, err := cu.port.Write(f.Bytes())
+			if err != nil {
+				log.Printf("failed to write to com port: %q, %v", f.String(), err)
+			}
+			f.Reset()
+		case <-ctx.Done():
+			return
+		case <-cu.close:
+			return
+		}
+	}
+}
+
 func (cu *SX) sendManager(ctx context.Context) {
 	f := bytes.NewBuffer(nil)
 	for {
@@ -292,12 +333,11 @@ func (cu *SX) sendManager(ctx context.Context) {
 			return
 		}
 	}
-
 }
 
 func (cu *SX) recvManager(ctx context.Context) {
 	buff := bytes.NewBuffer(nil)
-	readBuffer := make([]byte, 19)
+	readBuffer := make([]byte, 21)
 	for ctx.Err() == nil {
 		select {
 		case <-ctx.Done():
@@ -314,7 +354,7 @@ func (cu *SX) recvManager(ctx context.Context) {
 		if n == 0 {
 			continue
 		}
-
+		//		log.Printf("%q", readBuffer[:n])
 		for _, b := range readBuffer[:n] {
 			select {
 			case <-ctx.Done():

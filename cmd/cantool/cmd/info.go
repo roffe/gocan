@@ -41,7 +41,7 @@ var infoCmd = &cobra.Command{
 			log.Printf("%-27s : %s", h.Desc, h.Value)
 		}
 
-		log.Println("Done, took", time.Since(start).String())
+		log.Println("Done, took:", time.Since(start).String())
 		if err := tr.ResetECU(ctx, infoCallback); err != nil {
 			return err
 		}
