@@ -22,10 +22,13 @@ var canCMD = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(canCMD)
 }
-func initCAN(ctx context.Context) (*gocan.Client, error) {
+func initCAN(ctx context.Context, filters ...uint32) (*gocan.Client, error) {
 	adapterName, port, baudrate, canrate, err := getAdapterOpts()
 	if err != nil {
 		return nil, err
+	}
+	if len(filters) == 0 {
+		filters = ecu.CANFilters(getECUType())
 	}
 
 	dev, err := adapter.New(
@@ -34,7 +37,7 @@ func initCAN(ctx context.Context) (*gocan.Client, error) {
 			Port:         port,
 			PortBaudrate: baudrate,
 			CANRate:      canrate,
-			CANFilter:    ecu.CANFilters(getECUType()),
+			CANFilter:    filters,
 		},
 	)
 	if err != nil {

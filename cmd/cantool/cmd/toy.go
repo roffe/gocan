@@ -1,10 +1,12 @@
 package cmd
 
 import (
+	"errors"
 	"log"
+	"time"
 
-	"github.com/roffe/gocan/pkg/ecu/t8"
-	"github.com/roffe/gocan/pkg/gmlan"
+	"github.com/roffe/gocan"
+	"github.com/roffe/gocan/pkg/sid"
 	"github.com/spf13/cobra"
 )
 
@@ -19,124 +21,150 @@ var toyCmd = &cobra.Command{
 	Args:   cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		c, err := initCAN(ctx)
+		c, err := initCAN(ctx, 0x368)
 		if err != nil {
 			return err
 		}
 		defer c.Close()
+		s := sid.New(c)
 
-		tr := t8.New(c)
-		//leg := legion.New(c)
-		gm := gmlan.New(c, 0x7E0, 0x7E8)
+		cc := c.Subscribe(ctx)
+		go func() {
+			for {
+				f := <-cc
+				if wanted(f.Identifier()) {
+					log.Println(f.String())
+				}
+			}
+		}()
 
-		gm.TesterPresentNoResponseAllowed()
+		log.SetFlags(log.LstdFlags | log.Lshortfile)
 
-		//time.Sleep(50 * time.Millisecond)
-
-		if err := gm.InitiateDiagnosticOperation(ctx, 0x02); err != nil {
-			return err
-		}
-
-		if err := gm.DisableNormalCommunication(ctx); err != nil {
-			return err
-		}
-
-		if err := gm.ReportProgrammedState(ctx); err != nil {
-			return err
-		}
-
-		//if err := gm.ProgrammingModeRequest(ctx); err != nil {
+		//if err := s.StartRadioDisplay(ctx); err != nil {
 		//	return err
 		//}
-		//
-		//if err := gm.ProgrammingModeEnable(ctx); err != nil {
+		//s.Beep()
+
+		//time.Sleep(30 * time.Millisecond)
+
+		//if err := s.StartDiagnosticSession(ctx); err != nil {
 		//	return err
 		//}
 
-		gm.TesterPresentNoResponseAllowed()
+		//var val byte = 0
+		//for ctx.Err() == nil {
+		//	log.Println(val)
+		//	c.SendFrame(0x328, []byte{0x40, 0x96, 0x03, val, val, val, val, val}, gocan.Outgoing)
+		//	time.Sleep(100 * time.Millisecond)
+		//	val++
+		//}
 
-		//log.Println("Requesting security access")
+		//status, err := bitStringToBytes("10000001")
+		//if err != nil {
+		//	log.Fatal(err)
+		//}
 
-		if err := tr.RequestSecurityAccess(ctx); err != nil {
-			return err
-		}
-
-		if err := tr.SetOilQuality(ctx, 37.30); err != nil {
-			return err
-		}
-
-		gm.TesterPresentNoResponseAllowed()
-
-		q, err := tr.GetOilQuality(ctx)
+		_, err = s.RequestAccess(ctx)
 		if err != nil {
-			return err
-		}
-		log.Printf("quality: %.2f", q)
-
-		if err := tr.SetTopSpeed(ctx, 287); err != nil {
-			return err
+			log.Println(err)
 		}
 
-		speed, err := tr.GetTopSpeed(ctx)
-		if err != nil {
-			return err
+		btext := sid.Translate("Fucking lights won't light   ")
+		for ctx.Err() == nil {
+			//c.SendFrame(0x3B0, []byte{0x80, 0x74, 0x7E, 0x20, 0x00, 0x00, 0x00, 0x00}, gocan.Outgoing)
+
+			c.SendFrame(0x4A0, []byte{0x80, 0x37, 0x00, 0x20, 0x14, 0x95, 0x00}, gocan.Outgoing)
+			s.SetRadioText(btext)
+			btext = rotate(btext, 1)
+			time.Sleep(200 * time.Millisecond)
+
 		}
-		log.Println("speed: ", speed)
-
-		if err := tr.SetRPMLimit(ctx, 1373); err != nil {
-			return err
-		}
-
-		rpm, err := tr.GetRPMLimiter(ctx)
-		if err != nil {
-			return err
-		}
-		log.Println("rpm: ", rpm)
-
-		gm.TesterPresentNoResponseAllowed()
-
-		vin, err := tr.GetVehicleVIN(ctx)
-		if err != nil {
-			return err
-		}
-		log.Println("VIN: ", vin)
-
-		if err := tr.SetVehicleVIN(ctx, "YS3FB45FX51053565"); err != nil {
-			return err
-		}
-
-		if err := gm.DeviceControl(ctx, 0x16); err != nil {
-			return err
-		}
-
-		if err := gm.ReturnToNormalMode(ctx); err != nil {
-			return err
-		}
-
-		return nil
 
 		/*
-			if err := leg.Bootstrap(ctx, infoCallback); err != nil {
-				return err
-			}
+			s.SetRDSStatus(true, false, true, false, false, false)
+			time.Sleep(600 * time.Millisecond)
+			s.SetRDSStatus(false, false, false, false, false, false)
+			time.Sleep(500 * time.Millisecond)
 
-			b, err := leg.LegionIDemand(ctx, 0x02, 0x00)
+			s.SetRDSStatus(true, false, true, false, false, false)
+			time.Sleep(400 * time.Millisecond)
+			s.SetRDSStatus(false, false, false, false, false, false)
+			time.Sleep(500 * time.Millisecond)
+
+			_, err = s.RequestAccess(ctx)
 			if err != nil {
-				return err
+				log.Println(err)
 			}
-			log.Printf("%X", b)
+			time.Sleep(30 * time.Millisecond)
+			s.SetRadioText("there's no limit!")
+			time.Sleep(800 * time.Millisecond)
 
-			b2, err := leg.LegionIDemand(ctx, 0x01, 0x00)
-			if err != nil {
-				return err
+			btext := sid.Translate("Saab power!                 ")
+			for i := 0; i < 29; i++ {
+				if ctx.Err() != nil {
+					break
+				}
+				if err := s.SetRadioText(btext); err != nil {
+					return err
+				}
+				btext = rotateString(btext, 1)
+				time.Sleep(100 * time.Millisecond)
 			}
 
-			log.Printf("%X", b2)
+			s.Beep()
 
-			if err := tr.ResetECU(ctx, nil); err != nil {
-				return err
+			for i := 0; i < 25; i++ {
+				msg := "B" + strings.Repeat("=", i) + "3"
+				if err := s.SetRadioText(msg); err != nil {
+					return err
+				}
+				time.Sleep(100 * time.Millisecond)
 			}
-			return nil
+			for i := 20; i > 0; i-- {
+				mm := strings.Repeat(" ", i) + "<o))))><"
+				if err := s.SetRadioText(mm); err != nil {
+					return err
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
 		*/
+
+		return nil
 	},
+}
+
+func wanted(id uint32) bool {
+	switch id {
+	case 0x6a6, 0x310, 0x368, 0x290, 0x410, 0x7a0, 0x730:
+		return false
+	default:
+		return true
+	}
+}
+
+func rotate(nums []byte, k int) []byte {
+	k = k % len(nums)
+	nums = append(nums[k:], nums[0:k]...)
+	return nums
+}
+
+func rotateString(str string, k int) string {
+	nums := []byte(str)
+	k = k % len(nums)
+	nums = append(nums[k:], nums[0:k]...)
+	return string(nums)
+}
+
+var ErrRange = errors.New("value out of range")
+
+func bitStringToBytes(s string) ([]byte, error) {
+	b := make([]byte, (len(s)+(8-1))/8)
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c < '0' || c > '1' {
+			return nil, ErrRange
+		}
+		b[i>>3] |= (c - '0') << uint(7-i&7)
+	}
+	return b, nil
 }

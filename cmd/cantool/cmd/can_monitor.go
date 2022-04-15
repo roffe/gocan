@@ -45,7 +45,7 @@ var monitorCMD = &cobra.Command{
 		log.Println("Entering monitoring mode")
 		ctx := cmd.Context()
 
-		c, err := initCAN(ctx)
+		c, err := initCAN(ctx, 0)
 		if err != nil {
 			return err
 		}
