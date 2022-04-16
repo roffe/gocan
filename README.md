@@ -13,11 +13,9 @@ Supported adapters:
 
 Trionic 5/7/8 ecu flasher GUI made with Fyne, [**Nightmare!**](https://doom.fandom.com/wiki/Skill_level#Doom.2C_Doom_II_and_Final_Doom_skill_levels)
 
-Most Trionic code is based on [TrionicCANFlasher](https://txsuite.org/)
-
 ### cantool
 
-CLI tool for CAN monitoring and ECU flashing
+CLI tool for CAN monitoring and ECU flashing and also home for toy code like talking to CIM and SID
 
 #### Example
 
@@ -41,5 +39,7 @@ Resetting ECU
 ```
 
 ## Credits
+
+Most Trionic code is based on [TrionicCANFlasher](https://txsuite.org/)
 
 Thanks to [TrionicTuning](https://www.trionictuning.com/), [Chriva](https://www.trionictuning.com/forum/memberlist.php?mode=viewprofile&u=3231) and [Tomi Liljemark](https://pikkupossu.1g.fi/tomi/tomi.html)
