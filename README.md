@@ -1,18 +1,25 @@
 # goCAN
 
-Golang linux/windows/osx Trionic 5/7 ecu flasher
+A Go linux/windows/osx CAN stack running in userland with low level adapter drivers written from the ground up
 
 Supported adapters:
-* OBDLinx SX ( not fully tested )
+* OBDLinx SX
 * [CANUSB](https://lawicel-shop.se/elektronik/kommunikation/can/lawicel-canusb-adapter-1m-usb-cable/) adapter running in VCP mode using [Lawicel ascii api](http://www.can232.com/docs/canusb_manual.pdf)
 
-Most code is based on [TrionicCANFlasher](https://txsuite.org/)
 
-Thanks to [TrionicTuning](https://www.trionictuning.com/), [Chriva](https://www.trionictuning.com/forum/memberlist.php?mode=viewprofile&u=3231) and [Tomi Liljemark](https://pikkupossu.1g.fi/tomi/tomi.html)
+## Included tools in repo
 
-experimental GUI made with Fyne, **I do not recommend this framework unless you are exceptionelly depraved & masochistic and like to get insulted by their community members for asking questions**
+### goCANFlasher
 
-## Example
+Trionic 5/7/8 ecu flasher GUI made with Fyne, [**Nightmare!**](https://doom.fandom.com/wiki/Skill_level#Doom.2C_Doom_II_and_Final_Doom_skill_levels)
+
+Most Trionic code is based on [TrionicCANFlasher](https://txsuite.org/)
+
+### cantool
+
+CLI tool for CAN monitoring and ECU flashing
+
+#### Example
 
 ```go
 go run .\cmd\cantool\main.go -p com3 -b 2000000 -a canusb -c t5 -t t5 info
@@ -32,3 +39,7 @@ ROM End:      0x07FFFF
 ------------------------------
 Resetting ECU
 ```
+
+## Credits
+
+Thanks to [TrionicTuning](https://www.trionictuning.com/), [Chriva](https://www.trionictuning.com/forum/memberlist.php?mode=viewprofile&u=3231) and [Tomi Liljemark](https://pikkupossu.1g.fi/tomi/tomi.html)
