@@ -141,10 +141,13 @@ func (t *Client) KnockKnock(ctx context.Context, callback model.ProgressCallback
 	if err := t.DataInitialization(ctx, callback); err != nil {
 		return false, err
 	}
-	for i := 0; i < 3; i++ {
+	for i := 0; i <= 4; i++ {
 		ok, err := t.letMeIn(ctx, i)
 		if err != nil {
-			return false, fmt.Errorf("/!\\ Failed to obtain security access: %v", err)
+			log.Printf("/!\\ Failed to obtain security access: %v", err)
+			time.Sleep(4 * time.Second)
+			continue
+
 		}
 		if ok {
 			if callback != nil {
@@ -162,7 +165,7 @@ func (t *Client) letMeIn(ctx context.Context, method int) (bool, error) {
 
 	f, err := t.c.SendAndPoll(ctx, gocan.NewFrame(0x240, msg, gocan.ResponseRequired), t.defaultTimeout, 0x258)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("request seed: %v", err)
 
 	}
 	d := f.Data()
@@ -176,7 +179,7 @@ func (t *Client) letMeIn(ctx context.Context, method int) (bool, error) {
 
 	f2, err := t.c.SendAndPoll(ctx, gocan.NewFrame(0x240, msgReply, gocan.ResponseRequired), t.defaultTimeout, 0x258)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("send seed: %v", err)
 
 	}
 	d2 := f2.Data()
@@ -184,6 +187,7 @@ func (t *Client) letMeIn(ctx context.Context, method int) (bool, error) {
 	if d2[3] == 0x67 && d2[5] == 0x34 {
 		return true, nil
 	} else {
+		log.Println(f2.String())
 		return false, errors.New("invalid response")
 	}
 }
@@ -200,6 +204,12 @@ func calcen(seed int, method int) int {
 		key -= 0x1F6F
 	case 2:
 		key ^= 0x3DC
+		key -= 0x2356
+	case 3:
+		key ^= 0x3D7
+		key -= 0x2356
+	case 4:
+		key ^= 0x409
 		key -= 0x2356
 	}
 	key &= 0xFFFF

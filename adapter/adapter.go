@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/roffe/gocan"
+	"github.com/roffe/gocan/adapter/j2534"
 	"github.com/roffe/gocan/adapter/lawicel"
 	"github.com/roffe/gocan/adapter/obdlink"
 )
@@ -12,6 +13,7 @@ import (
 const (
 	Canusb AdapterID = iota
 	OBDLinkSX
+	Mangoose
 )
 
 type AdapterID int
@@ -36,6 +38,11 @@ var adapterList = []AdapterItem{
 		New:   obdlink.NewSX,
 		Name:  "OBDLink SX",
 		Alias: []string{"obdlinksx", "sx"},
+	},
+	{
+		ID:   Mangoose,
+		New:  j2534.NewMangoose,
+		Name: "Mangoose",
 	},
 }
 

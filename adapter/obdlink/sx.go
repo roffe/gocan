@@ -118,7 +118,7 @@ func (cu *SX) Init(ctx context.Context) error {
 		cu.mask,   // mask
 	}
 
-	delay := time.Duration(5000000000000 / mode.BaudRate)
+	delay := time.Duration(2147483647 / mode.BaudRate)
 	if delay > (100 * time.Millisecond) {
 		delay = 100 * time.Millisecond
 	}

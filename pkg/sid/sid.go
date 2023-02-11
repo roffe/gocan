@@ -47,7 +47,7 @@ func (t *Client) In(b []byte) {
 }
 
 func (t *Client) StartRadioDisplay(ctx context.Context) error {
-	_, err := t.RequestAccess(ctx)
+	err := t.SIDAudioTextControl(ctx, 2, 5, 0x19)
 	if err != nil {
 		return err
 	}
@@ -79,19 +79,26 @@ func (t *Client) Beep() error {
 	return t.c.SendFrame(0x430, []byte{0x80, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, gocan.Outgoing)
 }
 
-func (t *Client) RequestAccess(ctx context.Context) ([]byte, error) {
+/*
+	Format of NODE_DISPLAY_RESOURCE_REQ frame:
 
-	// [1] FF=inget meddelande, prio.nivå
-	// [2] request type: 1 = Engineering test; 2 = Emergency; 3 = Driver action; 4 = ECU action; 5 = Static text; 0xFF = We don't want to write on SID
-	// [3] 19=IHU 12=SPA 23=ACC
-
-	req := gocan.NewFrame(0x348, []byte{0x11, 0x02, 0x05, 0x19, 0x05, 0x00, 0x00, 0x00}, gocan.ResponseRequired)
-	resp, err := t.c.SendAndPoll(ctx, req, 200*time.Millisecond, 0x368)
+ID: Node ID requesting to write on SID
+[0]: Request source
+[1]: SID object to write on; 0 = entire SID; 1 = 1st row; 2 = 2nd row
+[2]: Request type: 1 = Engineering test; 2 = Emergency; 3 = Driver action; 4 = ECU action; 5 = Static text; 0xFF = We don't want to write on SID
+[3]: Request source function ID 19=IHU 12=SPA 23=ACC 14=SID
+[4-7]: Zeroed out; not in use
+*/
+func (t *Client) SIDAudioTextControl(ctx context.Context, row, status, from byte) error {
+	var q byte = 0x00
+	req := gocan.NewFrame(0x348, []byte{0x1F, row, status, from, q, 0x00, 0x00, 0x00}, gocan.Outgoing)
+	err := t.c.Send(req)
+	//resp, err := t.c.SendAndPoll(ctx, req, 200*time.Millisecond, 0x368)
 	if err != nil {
-		return nil, err
+		return err
 	}
-
-	return resp.Data(), nil
+	log.Println(req.String())
+	return nil
 }
 
 func (t *Client) SetRadioText(text []byte) error {
@@ -99,34 +106,67 @@ func (t *Client) SetRadioText(text []byte) error {
 	r := bytes.NewReader(text)
 	pkgs := len(text) / 5
 	seq := 0x40 + pkgs
-	first := []byte{byte(seq), 0x96, byte(row)}
-	for i := 0; i < 5; i++ {
-		bb, err := r.ReadByte()
-		if err != nil {
-			if err == io.EOF {
-				bb = 0x00
-			} else {
-				return err
-			}
-		}
-		first = append(first, bb)
-	}
-	ff := gocan.NewFrame(0x328, first, gocan.Outgoing)
-	t.c.Send(ff)
-	seq -= 0x41
-
+	firstPkg := true
 	for seq >= 0 {
-		asd := make([]byte, 5)
-		_, err := r.Read(asd)
-		if err != nil {
-			if err != io.EOF {
-				return err
+		pkg := []byte{byte(seq), 0x96, byte(row)}
+		for i := 0; i < 5; i++ {
+			bb, err := r.ReadByte()
+			if err != nil {
+				if err == io.EOF {
+					bb = 0x00
+				} else {
+					return err
+				}
 			}
+			pkg = append(pkg, bb)
 		}
-		data := append([]byte{byte(seq), 0x96, byte(row)}, asd...)
-		frame := gocan.NewFrame(0x328, data, gocan.Outgoing)
+		frame := gocan.NewFrame(0x328, pkg, gocan.Outgoing)
 		t.c.Send(frame)
-		seq--
+		log.Println(frame.String())
+		if firstPkg {
+			seq -= 0x41
+			firstPkg = false
+		} else {
+			seq--
+		}
+
+	}
+	return nil
+}
+
+func (t *Client) SetFullScreen(row1, row2 string) error {
+
+	return nil
+}
+
+func (t *Client) SetText(text []byte, row int) error {
+	r := bytes.NewReader(text)
+	pkgs := len(text) / 5
+	seq := 0x40 + pkgs
+	firstPkg := true
+	for seq >= 0 {
+		pkg := []byte{byte(seq), 0x96, byte(row)}
+		for i := 0; i < 5; i++ {
+			bb, err := r.ReadByte()
+			if err != nil {
+				if err == io.EOF {
+					bb = 0x00
+				} else {
+					return err
+				}
+			}
+			pkg = append(pkg, bb)
+		}
+		frame := gocan.NewFrame(0x328, pkg, gocan.Outgoing)
+		t.c.Send(frame)
+		log.Println(frame.String())
+		if firstPkg {
+			seq -= 0x41
+			firstPkg = false
+		} else {
+			seq--
+		}
+
 	}
 	return nil
 }

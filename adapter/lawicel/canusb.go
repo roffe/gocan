@@ -78,7 +78,7 @@ func (cu *Canusb) Init(ctx context.Context) error {
 		"O", // Open the CAN channel
 	}
 
-	delay := time.Duration(5000000000000 / mode.BaudRate)
+	delay := time.Duration(2147483647 / mode.BaudRate)
 	if delay > (100 * time.Millisecond) {
 		delay = 100 * time.Millisecond
 	}

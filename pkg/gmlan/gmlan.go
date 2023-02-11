@@ -25,7 +25,7 @@ type Client struct {
 func New(c *gocan.Client, canID uint32, recvID ...uint32) *Client {
 	return &Client{
 		c:              c,
-		defaultTimeout: 150 * time.Millisecond,
+		defaultTimeout: 250 * time.Millisecond,
 		canID:          canID,
 		recvID:         recvID,
 	}
@@ -463,16 +463,17 @@ func (cl *Client) ReadDataByPacketIdentifier(ctx context.Context, subFunc byte, 
 //}
 
 // ReadDiagnosticInformation $A9 Service
-//  readStatusOfDTCByStatusMask $81 Request
-//      DTCStatusMask $12= 0001 0010
-//        0 Bit 7 warningIndicatorRequestedState
-//        0 Bit 6 currentDTCSincePowerUp
-//        0 Bit 5 testNotPassedSinceCurrentPowerUp
-//        1 Bit 4 historyDTC
-//        0 Bit 3 testFailedSinceDTCCleared
-//        0 Bit 2 testNotPassedSinceDTCCleared
-//        1 Bit 1 currentDTC
-//        0 Bit 0 DTCSupportedByCalibration
+//
+//	readStatusOfDTCByStatusMask $81 Request
+//	    DTCStatusMask $12= 0001 0010
+//	      0 Bit 7 warningIndicatorRequestedState
+//	      0 Bit 6 currentDTCSincePowerUp
+//	      0 Bit 5 testNotPassedSinceCurrentPowerUp
+//	      1 Bit 4 historyDTC
+//	      0 Bit 3 testFailedSinceDTCCleared
+//	      0 Bit 2 testNotPassedSinceDTCCleared
+//	      1 Bit 1 currentDTC
+//	      0 Bit 0 DTCSupportedByCalibration
 func (cl *Client) ReadDiagnosticInformationStatusOfDTCByStatusMask(ctx context.Context, DTCStatusMask byte) ([][]byte, error) {
 	return cl.readDiagnosticInformation(ctx, 0x81, []byte{DTCStatusMask})
 }
