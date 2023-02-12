@@ -458,12 +458,12 @@ func (j *J2534PassThru) PassThruReadVersion(deviceID uint32) (string, string, st
 }
 
 // long PassThruIoctl(unsigned long HandleID, unsigned long IoctlID, void *pInput, void *pOutput);
-func (j *J2534PassThru) PassThruIoctl(handleID uint32, ioctlID uint32, pInput uintptr, pOutput uintptr) error {
+func (j *J2534PassThru) PassThruIoctl(handleID uint32, ioctlID uint32, pInput *byte, pOutput *byte) error {
 	ret, _, _ := j.passThruIoctl.Call(
 		uintptr(handleID),
 		uintptr(ioctlID),
-		pInput,
-		pOutput,
+		uintptr(unsafe.Pointer(pInput)),
+		uintptr(unsafe.Pointer(pOutput)),
 	)
 	return CheckError(ret)
 }

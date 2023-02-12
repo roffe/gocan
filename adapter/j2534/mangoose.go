@@ -26,11 +26,10 @@ type Mangoose struct {
 
 func NewMangoose(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	ma := &Mangoose{
-		cfg:      cfg,
-		send:     make(chan gocan.CANFrame, 100),
-		recv:     make(chan gocan.CANFrame, 100),
-		close:    make(chan struct{}, 1),
-		protocol: SW_CAN_PS,
+		cfg:   cfg,
+		send:  make(chan gocan.CANFrame, 100),
+		recv:  make(chan gocan.CANFrame, 100),
+		close: make(chan struct{}, 1),
 	}
 	return ma, nil
 }
@@ -42,30 +41,57 @@ func (ma *Mangoose) Init(ctx context.Context) error {
 		return err
 	}
 	ma.printVersions()
+	var baudRate uint32
+	switch ma.cfg.CANRate {
+	case 33.3:
+		baudRate = 33300
+		ma.protocol = SW_CAN_PS
+	case 500:
+		baudRate = 500000
+		ma.protocol = CAN
+	default:
+		return errors.New("invalid CAN rate")
+	}
 
-	if err := ma.h.PassThruConnect(ma.deviceID, ma.protocol, ma.flags, 33300, &ma.channelID); err != nil {
+	if err := ma.h.PassThruConnect(ma.deviceID, ma.protocol, ma.flags, baudRate, &ma.channelID); err != nil {
 		return err
 	}
 
-	input1 := &SCONFIG_LIST{
-		NumOfParams: 1,
-		ConfigPtr: &SCONFIG{
-			Parameter: J1962_PINS,
-			Value:     0x0100,
-		},
-	}
-
-	if err := ma.h.PassThruIoctlS(ma.channelID, SET_CONFIG, uintptr(unsafe.Pointer(input1))); err != nil {
-		str, err2 := ma.h.PassThruGetLastError()
-		if err2 != nil {
-			log.Println(err2)
-		} else {
-			log.Println(str)
+	if ma.protocol == SW_CAN_PS {
+		input1 := &SCONFIG_LIST{
+			NumOfParams: 1,
+			ConfigPtr: &SCONFIG{
+				Parameter: J1962_PINS,
+				Value:     0x0100,
+			},
 		}
+
+		if err := ma.h.PassThruIoctl(ma.channelID, SET_CONFIG, (*byte)(unsafe.Pointer(input1)), nil); err != nil {
+			str, err2 := ma.h.PassThruGetLastError()
+			if err2 != nil {
+				log.Println(err2)
+			} else {
+				log.Println(str)
+			}
+			return err
+		}
+	}
+
+	if err := ma.h.PassThruIoctl(ma.channelID, CLEAR_TX_BUFFER, nil, nil); err != nil {
 		return err
 	}
 
-	ma.allowAll()
+	if err := ma.h.PassThruIoctl(ma.channelID, CLEAR_RX_BUFFER, nil, nil); err != nil {
+		return err
+	}
+
+	if len(ma.cfg.CANFilter) > 0 {
+		ma.setupFilters()
+	} else {
+		ma.allowAll()
+	}
+
+	time.Sleep(10 * time.Millisecond)
 
 	go ma.recvManager()
 	go ma.sendManager()
@@ -75,7 +101,6 @@ func (ma *Mangoose) Init(ctx context.Context) error {
 
 func (ma *Mangoose) allowAll() {
 	filterID := uint32(0)
-
 	var MaskMsg, PatternMsg PASSTHRU_MSG
 
 	mask := [4]byte{0x00, 0x00, 0x00, 0x00}
@@ -93,18 +118,54 @@ func (ma *Mangoose) allowAll() {
 	}
 }
 
+func (ma *Mangoose) setupFilters() error {
+	if len(ma.cfg.CANFilter) > 10 {
+		return errors.New("too many filters")
+	}
+
+	var MaskMsg, PatternMsg PASSTHRU_MSG
+	mask := [4]byte{0xFF, 0xFF, 0xFF, 0xFF}
+	MaskMsg.ProtocolID = ma.protocol
+	copy(MaskMsg.Data[:], mask[:])
+	MaskMsg.DataSize = 4
+
+	for i, filter := range ma.cfg.CANFilter {
+		filterID := new(uint32)
+		*filterID = uint32(i)
+		var pattern = make([]byte, 4)
+		binary.BigEndian.PutUint32(pattern, filter)
+		PatternMsg.ProtocolID = ma.protocol
+		if n := copy(PatternMsg.Data[:], pattern); n != len(pattern) {
+			return errors.New("copy failed to pattern data")
+		}
+		PatternMsg.DataSize = 4
+		log.Printf("filter: %08X", filter)
+		if err := ma.h.PassThruStartMsgFilter(ma.channelID, PASS_FILTER, &MaskMsg, &PatternMsg, nil, filterID); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func (ma *Mangoose) recvManager() {
+outer:
 	for {
 		select {
 		case <-ma.close:
+			log.Println("closing recv manager")
 			return
 		default:
 			msg := new(PASSTHRU_MSG)
 			msg.ProtocolID = ma.protocol
-			if err := ma.h.PassThruReadMsgs(ma.channelID, uintptr(unsafe.Pointer(msg)), 1, 100); err != nil {
+			if err := ma.h.PassThruReadMsgs(ma.channelID, uintptr(unsafe.Pointer(msg)), 1, 1500); err != nil {
 				if errors.Is(err, ErrBufferEmpty) {
 					continue
 				}
+				if errors.Is(err, ErrDeviceNotConnected) {
+					break outer
+				}
+
 				log.Println("read", err)
 				continue
 			}
@@ -132,8 +193,11 @@ func (ma *Mangoose) sendManager() {
 			msg := &PASSTHRU_MSG{
 				ProtocolID: ma.protocol,
 				DataSize:   uint32(buf.Len()),
-				TxFlags:    SW_CAN_HV_TX,
 			}
+			if ma.protocol == SW_CAN_PS {
+				msg.TxFlags = SW_CAN_HV_TX
+			}
+
 			copy(msg.Data[:], buf.Bytes())
 			if err := ma.h.PassThruWriteMsgs(ma.channelID, uintptr(unsafe.Pointer(msg)), 1, 1500); err != nil {
 				log.Println("send:", err)
@@ -152,10 +216,17 @@ func (ma *Mangoose) Send() chan<- gocan.CANFrame {
 
 func (ma *Mangoose) Close() error {
 	close(ma.close)
-	time.Sleep(200 * time.Millisecond)
-	if err := ma.h.PassThruDisconnect(ma.channelID); err != nil {
-		log.Fatal(err)
+	time.Sleep(100 * time.Millisecond)
+
+	if err := ma.h.PassThruIoctl(ma.channelID, CLEAR_MSG_FILTERS, nil, nil); err != nil {
+		return err
 	}
+
+	if err := ma.h.PassThruDisconnect(ma.channelID); err != nil {
+		return err
+	}
+	log.Println("disconnected")
+
 	return ma.h.PassThruClose(ma.deviceID)
 }
 

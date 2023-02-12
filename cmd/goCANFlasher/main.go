@@ -21,7 +21,7 @@ func init() {
 
 func main() {
 	a := app.NewWithID("GoCANFlasher")
-	a.Settings().SetTheme(&gocanTheme{})
+	a.Settings().SetTheme(&MyTheme{})
 	a.SetIcon(appIcon)
 	gui.ShowAndRun(context.TODO(), a)
 }

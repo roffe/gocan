@@ -82,7 +82,6 @@ func (t *Client) FlashECU(ctx context.Context, bin []byte, callback model.Progre
 	start := time.Now()
 	for _, o := range t7offsets {
 		binPos := o.binpos
-		// --
 		err := retry.Do(func() error {
 			if err := t.writeJump(ctx, o.offset, o.end-binPos); err != nil {
 				return err
@@ -103,6 +102,7 @@ func (t *Client) FlashECU(ctx context.Context, bin []byte, callback model.Progre
 				if callback != nil {
 					callback(float64(binPos))
 				}
+				time.Sleep(5 * time.Millisecond)
 			}
 			if callback != nil {
 				callback(float64(binPos))
@@ -116,7 +116,6 @@ func (t *Client) FlashECU(ctx context.Context, bin []byte, callback model.Progre
 		if err != nil {
 			return err
 		}
-
 	}
 	end, err := t.c.SendAndPoll(ctx, gocan.NewFrame(0x240, []byte{0x40, 0xA1, 0x01, 0x37, 0x00, 0x00, 0x00, 0x00}, gocan.ResponseRequired), t.defaultTimeout, 0x258)
 	if err != nil {
@@ -141,17 +140,24 @@ func (t *Client) writeJump(ctx context.Context, offset, length int) error {
 	jumpMsg := []byte{0x41, 0xA1, 0x08, 0x34, byte(offset >> 16), byte(offset >> 8), byte(offset), 0x00}
 	jumpMsg2 := []byte{0x00, 0xA1, byte(length >> 16), byte(length >> 8), byte(length), 0x00, 0x00, 0x00}
 
-	t.c.SendFrame(0x240, jumpMsg, gocan.Outgoing)
+	log.Printf("writeJump: offset=%d, length=%d", offset, length)
+	log.Printf("writeJump: jumpMsg=%X", jumpMsg)
+	if err := t.c.SendFrame(0x240, jumpMsg, gocan.Outgoing); err != nil {
+		return fmt.Errorf("failed to enable request download #1")
+	}
+	log.Printf("writeJump: jumpMsg2=%X", jumpMsg2)
+	time.Sleep(5 * time.Millisecond)
 
 	f, err := t.c.SendAndPoll(ctx, gocan.NewFrame(0x240, jumpMsg2, gocan.ResponseRequired), t.defaultTimeout, 0x258)
 	if err != nil {
-		return fmt.Errorf("failed to enable request download")
+		return fmt.Errorf("failed to enable request download #2")
 	}
 
 	d := f.Data()
 	t.Ack(d[0], gocan.Outgoing)
 
 	if d[3] != 0x74 {
+		log.Println(f.String())
 		return fmt.Errorf("invalid response enabling download mode")
 	}
 	return nil

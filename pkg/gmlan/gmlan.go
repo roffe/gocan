@@ -478,7 +478,7 @@ func (cl *Client) ReadDiagnosticInformationStatusOfDTCByStatusMask(ctx context.C
 	return cl.readDiagnosticInformation(ctx, 0x81, []byte{DTCStatusMask})
 }
 
-// 8.18 ReadDiagnosticInformation ($A9) Service.
+// 8.18 ReadDiagnosticInformation ($) Service.
 //
 // This service allows a tester to read the status of
 // node-resident Diagnostic Trouble Code (DTC) information from any controller, or group of controllers within a
@@ -498,6 +498,7 @@ func (cl *Client) readDiagnosticInformation(ctx context.Context, subFunc byte, p
 	if err != nil {
 		return nil, err
 	}
+	log.Println(resp.String())
 
 	var out [][]byte
 	if err := CheckErr(resp); err != nil {
@@ -508,16 +509,17 @@ func (cl *Client) readDiagnosticInformation(ctx context.Context, subFunc byte, p
 				select {
 				case resp := <-ch:
 					d := resp.Data()
-					// No more DTCs
-					if d[1] == 0x00 && d[2] == 0x00 && d[3] == 0x00 {
+					if d[1] == 0x00 && d[2] == 0x00 && d[3] == 0x00 { // No more DTCs
 						break outer
 					}
+					log.Println("append")
 					out = append(out, []byte{d[1], d[2], d[3], d[4]})
-				case <-time.After(100 * time.Millisecond):
+				case <-time.After(00 * time.Millisecond):
 					break outer
 				}
 			}
 		} else {
+			log.Println("not pending")
 			return nil, err
 		}
 	}
@@ -571,7 +573,7 @@ func (cl *Client) SecurityAccessSendKey(ctx context.Context, accessLevel, high, 
 }
 
 func (cl *Client) RequestSecurityAccess(ctx context.Context, accesslevel byte, delay time.Duration, seedfunc func([]byte, byte) (byte, byte)) error {
-	time.Sleep(50 * time.Millisecond)
+	//time.Sleep(50 * time.Millisecond)
 	seed, err := cl.SecurityAccessRequestSeed(ctx, accesslevel)
 	if err != nil {
 		return err

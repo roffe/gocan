@@ -1,6 +1,5 @@
 /*
 Copyright © 2022 NAME HERE <EMAIL ADDRESS>
-
 */
 package cmd
 
@@ -30,14 +29,14 @@ var ledenablerCmd = &cobra.Command{
 		}
 		defer c.Close()
 
-		gm := gmlan.New(c, 0x249, 0x649)
-
-		f, err := gm.ReadDataByIdentifier(ctx, 0x45) // Read REC Bulb Outage &Substitution Lighting
-		if err != nil {
-			return err
-		}
-		log.Println("BO REC", string(f[:]))
-
+		gm := gmlan.New(c, 0x24F, 0x64F)
+		/*
+			f, err := gm.ReadDataByIdentifier(ctx, 0x45) // Read REC Bulb Outage &Substitution Lighting
+			if err != nil {
+				return err
+			}
+			log.Println("BO REC", string(f[:]))
+		*/
 		f0, err := gm.ReadDataByIdentifier(ctx, 0x40) // Read PWM Settings for Bulbs
 		if err != nil {
 			return err
