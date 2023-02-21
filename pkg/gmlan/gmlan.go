@@ -359,8 +359,7 @@ func (cl *Client) ReadDataByIdentifier(ctx context.Context, pid byte) ([]byte, e
 		}
 		return out.Bytes(), nil
 	case d[2] == 0x5A:
-		leng := d[1]
-
+		leng := d[1] - 2
 		lenThisFrame := int(leng)
 		left := int(leng)
 		framesToReceive := (leng - 4) / 8
@@ -375,7 +374,7 @@ func (cl *Client) ReadDataByIdentifier(ctx context.Context, pid byte) ([]byte, e
 			left--
 		}
 
-		cl.c.SendFrame(cl.canID, []byte{0x30, 0x00}, gocan.CANFrameType{Type: 2, Responses: int(framesToReceive)})
+		cl.c.SendFrame(cl.canID, []byte{0x30, 0x00, 0x00}, gocan.CANFrameType{Type: 2, Responses: int(framesToReceive)})
 
 		var seq byte = 0x21
 
@@ -408,7 +407,7 @@ func (cl *Client) ReadDataByIdentifier(ctx context.Context, pid byte) ([]byte, e
 		}
 		return out.Bytes(), nil
 	}
-	log.Println(resp.String())
+	//log.Println(resp.String())
 	return nil, errors.New("unhandled response")
 }
 
@@ -498,7 +497,6 @@ func (cl *Client) readDiagnosticInformation(ctx context.Context, subFunc byte, p
 	if err != nil {
 		return nil, err
 	}
-	log.Println(resp.String())
 
 	var out [][]byte
 	if err := CheckErr(resp); err != nil {
@@ -674,23 +672,23 @@ func (cl *Client) WriteDataByIdentifierUint32(ctx context.Context, pid byte, val
 }
 
 func (cl *Client) WriteDataByIdentifier(ctx context.Context, pid byte, data []byte) error {
-	if len(data) > 6 {
+	if len(data) > 5 {
 		return cl.writeDataByIdentifierMultiframe(ctx, pid, data)
 	}
 
 	payload := []byte{byte(len(data) + 2), 0x3B, pid}
 	payload = append(payload, data...)
-	for i := len(payload); i < 8; i++ {
-		payload = append(payload, 0x00)
-	}
+	//for i := len(payload); i < 8; i++ {
+	//	payload = append(payload, 0x00)
+	//}
 	frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
 	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
 		return err
 	}
 	if err := CheckErr(resp); err != nil {
-		log.Println(frame.String())
-		log.Println(resp.String())
+		//		log.Println(frame.String())
+		//		log.Println(resp.String())
 		return err
 	}
 
@@ -714,12 +712,12 @@ func (cl *Client) writeDataByIdentifierMultiframe(ctx context.Context, pid byte,
 	payload := []byte{0x10, leng, 0x3B, pid}
 	payload = append(payload, firstPart...)
 	frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
-	log.Println(frame.String())
+	//	log.Println(frame.String())
 	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
 		return err
 	}
-	log.Println(resp.String())
+	//log.Println(resp.String())
 	d := resp.Data()
 
 	if err := CheckErr(resp); err != nil {
@@ -755,12 +753,12 @@ func (cl *Client) writeDataByIdentifierMultiframe(ctx context.Context, pid byte,
 			time.Sleep(time.Duration(delay) * time.Millisecond)
 		} else {
 			frame := gocan.NewFrame(cl.canID, pkg, gocan.ResponseRequired)
-			log.Println(frame.String())
+			// log.Println(frame.String())
 			resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
 			if err != nil {
 				return err
 			}
-			log.Println(resp.String())
+			// log.Println(resp.String())
 			if err := CheckErr(resp); err != nil {
 				return err
 			}

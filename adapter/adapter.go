@@ -13,7 +13,7 @@ import (
 const (
 	Canusb AdapterID = iota
 	OBDLinkSX
-	Mangoose
+	J2534
 )
 
 type AdapterID int
@@ -29,6 +29,11 @@ type AdapterItem struct {
 
 var adapterList = []AdapterItem{
 	{
+		ID:   J2534,
+		New:  j2534.New,
+		Name: "J2534",
+	},
+	{
 		ID:   Canusb,
 		New:  lawicel.NewCanusb,
 		Name: "Canusb",
@@ -38,11 +43,6 @@ var adapterList = []AdapterItem{
 		New:   obdlink.NewSX,
 		Name:  "OBDLink SX",
 		Alias: []string{"obdlinksx", "sx"},
-	},
-	{
-		ID:   Mangoose,
-		New:  j2534.NewMangoose,
-		Name: "Mangoose",
 	},
 }
 

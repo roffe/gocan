@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"time"
 )
 
@@ -59,7 +58,7 @@ func (h *FrameHandler) run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("exit framehandler")
+			//			log.Println("exit framehandler")
 			return
 		case sub := <-h.register:
 			h.sub(sub)

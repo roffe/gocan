@@ -91,7 +91,6 @@ func CheckError(ret uintptr) error {
 		return ErrInvalidBaudrate
 	case ERR_INVALID_DEVICE_ID:
 		return ErrInvalidDeviceID
-
 	default:
 		return ErrUnknown
 	}

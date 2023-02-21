@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/roffe/gocan/pkg/model"
 )
@@ -30,10 +31,12 @@ func (t *Client) Info(ctx context.Context, callback model.ProgressCallback) ([]m
 		if err != nil {
 			return nil, fmt.Errorf("ECU info failed: %v", err)
 		}
-		a := model.HeaderResult{Value: h}
-		a.Desc = d.Desc
-		a.ID = d.ID
-		out = append(out, a)
+		res := model.HeaderResult{
+			Value: strings.Trim(h, "\x00"),
+		}
+		res.Desc = d.Desc
+		res.ID = d.ID
+		out = append(out, res)
 	}
 	return out, nil
 }

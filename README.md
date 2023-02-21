@@ -3,6 +3,7 @@
 A Go linux/windows/osx CAN stack running in userland with low level adapter drivers written from the ground up
 
 Supported adapters:
+* J2534 (only tested with Drewtech Mongoose GM PRO II)
 * OBDLinx SX
 * [CANUSB](https://lawicel-shop.se/elektronik/kommunikation/can/lawicel-canusb-adapter-1m-usb-cable/) adapter running in VCP mode using [Lawicel ascii api](http://www.can232.com/docs/canusb_manual.pdf)
 

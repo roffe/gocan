@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -76,7 +77,8 @@ func (t *Client) Info(ctx context.Context, callback model.ProgressCallback) ([]m
 		case "string":
 			data, err := t.gm.ReadDataByIdentifierString(ctx, h.ID)
 			if err != nil {
-				return nil, err
+				log.Println(err)
+				continue
 			}
 			res := model.HeaderResult{
 				Value: data,
@@ -87,7 +89,8 @@ func (t *Client) Info(ctx context.Context, callback model.ProgressCallback) ([]m
 		case "int64":
 			data, err := t.RequestECUInfoAsInt64(ctx, h.ID)
 			if err != nil {
-				return nil, err
+				log.Println(err)
+				continue
 			}
 			res := model.HeaderResult{
 				Value: strconv.Itoa(int(data)),
@@ -98,7 +101,8 @@ func (t *Client) Info(ctx context.Context, callback model.ProgressCallback) ([]m
 		case "hex":
 			data, err := t.RequestECUInfo(ctx, h.ID)
 			if err != nil {
-				return nil, err
+				log.Println(err)
+				continue
 			}
 			res := model.HeaderResult{
 				Value: fmt.Sprintf("%X", data),
@@ -109,7 +113,8 @@ func (t *Client) Info(ctx context.Context, callback model.ProgressCallback) ([]m
 		case "uint32":
 			data, err := t.RequestECUInfoAsUint32(ctx, h.ID)
 			if err != nil {
-				return nil, err
+				log.Println(err)
+				continue
 			}
 			res := model.HeaderResult{
 				Value: strconv.Itoa(int(data)),
@@ -120,7 +125,8 @@ func (t *Client) Info(ctx context.Context, callback model.ProgressCallback) ([]m
 		case "km/h":
 			data, err := t.RequestECUInfo(ctx, h.ID)
 			if err != nil {
-				return nil, err
+				log.Println(err)
+				continue
 			}
 			var retval uint32
 			if len(data) == 2 {
@@ -137,7 +143,8 @@ func (t *Client) Info(ctx context.Context, callback model.ProgressCallback) ([]m
 		case "oilquality":
 			data, err := t.RequestECUInfoAsUint64(ctx, h.ID)
 			if err != nil {
-				return nil, err
+				log.Println(err)
+				continue
 			}
 			quality := float64(data) / 256
 			res := model.HeaderResult{
@@ -150,7 +157,8 @@ func (t *Client) Info(ctx context.Context, callback model.ProgressCallback) ([]m
 		case "ddi":
 			data, err := t.RequestECUInfo(ctx, h.ID)
 			if err != nil {
-				return nil, err
+				log.Println(err)
+				continue
 			}
 			var retval string
 			if len(data) == 2 {
@@ -165,7 +173,8 @@ func (t *Client) Info(ctx context.Context, callback model.ProgressCallback) ([]m
 		case "e85":
 			data, err := t.gm.ReadDataByPacketIdentifier(ctx, 0x01, 0x7A)
 			if err != nil && err.Error() != "Request out of range or session dropped" {
-				return nil, err
+				log.Println(err)
+				continue
 			}
 			if len(data) == 2 {
 				e85 := uint32(data[2])

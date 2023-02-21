@@ -21,6 +21,7 @@ func (m *mainWindow) initCAN(ctx context.Context) (*gocan.Client, error) {
 			PortBaudrate: state.portBaudrate,
 			CANRate:      state.canRate,
 			CANFilter:    ecu.CANFilters(state.ecuType),
+			Output:       m.output,
 		})
 	if err != nil {
 		return nil, err

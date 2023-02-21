@@ -3,12 +3,11 @@ module github.com/roffe/gocan
 go 1.17
 
 require (
-	fyne.io/fyne/v2 v2.3.0
+	fyne.io/fyne/v2 v2.3.1
 	github.com/albenik/bcd v0.0.0-20170831201648-635201416bc7
 	github.com/avast/retry-go v3.0.0+incompatible
 	github.com/fatih/color v1.13.0
 	github.com/jroimartin/gocui v0.5.0
-	github.com/manifoldco/promptui v0.9.0
 	github.com/spf13/cobra v1.3.0
 	github.com/sqweek/dialog v0.0.0-20211002065838-9a201b55ab91
 	go.bug.st/serial v1.3.5
@@ -16,10 +15,9 @@ require (
 )
 
 require (
-	fyne.io/systray v1.10.1-0.20221115204952-d16a6177e6f1 // indirect
+	fyne.io/systray v1.10.1-0.20230207085535-4a244dbb9d03 // indirect
 	github.com/TheTitanrain/w32 v0.0.0-20180517000239-4f5cfb03fabf // indirect
 	github.com/benoitkugler/textlayout v0.3.0 // indirect
-	github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.1 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/fredbi/uri v0.1.0 // indirect
@@ -49,7 +47,6 @@ require (
 	golang.org/x/mobile v0.0.0-20211207041440-4e6c2922fdee // indirect
 	golang.org/x/net v0.0.0-20211118161319-6a13c67c3ce4 // indirect
 	golang.org/x/text v0.3.7 // indirect
-	golang.org/x/time v0.0.0-20220411224347-583f2d630306 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	honnef.co/go/js/dom v0.0.0-20210725211120-f030747120f2 // indirect
@@ -67,6 +64,6 @@ require (
 	github.com/rivo/uniseg v0.2.0 // indirect
 	github.com/schollz/progressbar/v3 v3.8.5
 	golang.org/x/crypto v0.0.0-20211215153901-e495a2d5b3d3 // indirect
-	golang.org/x/sys v0.0.0-20220412211240-33da011f77ad // indirect
+	golang.org/x/sys v0.0.0-20220412211240-33da011f77ad
 	golang.org/x/term v0.0.0-20210927222741-03fcf44c2211 // indirect
 )

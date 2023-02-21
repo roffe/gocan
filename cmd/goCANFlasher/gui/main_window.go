@@ -2,12 +2,14 @@ package gui
 
 import (
 	"bytes"
+	"fmt"
 	"strconv"
 	"strings"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/data/binding"
+	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 	"github.com/roffe/gocan/adapter"
@@ -15,7 +17,6 @@ import (
 	"github.com/roffe/gocan/pkg/ecu/t5"
 	"github.com/roffe/gocan/pkg/ecu/t7"
 	"github.com/roffe/gocan/pkg/ecu/t8"
-	sdialog "github.com/sqweek/dialog"
 )
 
 const eas = "KW"
@@ -61,7 +62,7 @@ func newMainWindow(a fyne.App, w fyne.Window) *mainWindow {
 	m.createSelects()
 	m.createButtons()
 	w.SetContent(m.layout())
-	w.Resize(fyne.NewSize(900, 450))
+	w.Resize(fyne.NewSize(1024, 450))
 	return m
 }
 
@@ -201,8 +202,10 @@ func (m *mainWindow) checkSelections() bool {
 		out.WriteString("Speed\n")
 	}
 	if out.Len() > 0 {
-		sdialog.Message("Please set the following options:\n%s", out.String()).Title("error").Error()
+		//sdialog.Message("Please set the following options:\n%s", out.String()).Title("error").Error()
+		dialog.ShowError(fmt.Errorf("Please set the following options:\n%s", out.String()), m.window) //lint:ignore ST1005 ignore this error
 		return false
+
 	}
 	return true
 }
