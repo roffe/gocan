@@ -5,10 +5,8 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"log"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/roffe/gocan"
 	"github.com/roffe/gocan/pkg/model"
@@ -53,31 +51,31 @@ func (t *Client) Info(ctx context.Context, callback model.ProgressCallback) ([]m
 		callback("Initialize session")
 	}
 
-	time.Sleep(20 * time.Millisecond)
+	//time.Sleep(20 * time.Millisecond)
 
-	t.gm.DisableNormalCommunicationAllNodes()
+	//t.gm.DisableNormalCommunicationAllNodes()
 
-	if err := t.gm.DisableNormalCommunication(ctx); err != nil {
-		return nil, err
-	}
+	//if err := t.gm.DisableNormalCommunication(ctx); err != nil {
+	//	return nil, err
+	//}
 
 	if callback != nil {
 		callback(-float64(len(T8Headers)))
 		callback("Fetching ECU info")
 	}
-	n := 0
+	//n := 0
 	var out []model.HeaderResult
 	for i, h := range T8Headers {
-		n++
-		if n == 5 {
-			t.gm.TesterPresentNoResponseAllowed()
-			n = 0
-		}
+		//n++
+		//if n == 5 {
+		//	t.gm.TesterPresentNoResponseAllowed()
+		//	n = 0
+		//}
 		switch h.Type {
 		case "string":
 			data, err := t.gm.ReadDataByIdentifierString(ctx, h.ID)
 			if err != nil {
-				log.Println(err)
+				callback(err.Error())
 				continue
 			}
 			res := model.HeaderResult{
@@ -89,7 +87,7 @@ func (t *Client) Info(ctx context.Context, callback model.ProgressCallback) ([]m
 		case "int64":
 			data, err := t.RequestECUInfoAsInt64(ctx, h.ID)
 			if err != nil {
-				log.Println(err)
+				callback(err.Error())
 				continue
 			}
 			res := model.HeaderResult{
@@ -101,7 +99,7 @@ func (t *Client) Info(ctx context.Context, callback model.ProgressCallback) ([]m
 		case "hex":
 			data, err := t.RequestECUInfo(ctx, h.ID)
 			if err != nil {
-				log.Println(err)
+				callback(err.Error())
 				continue
 			}
 			res := model.HeaderResult{
@@ -113,7 +111,7 @@ func (t *Client) Info(ctx context.Context, callback model.ProgressCallback) ([]m
 		case "uint32":
 			data, err := t.RequestECUInfoAsUint32(ctx, h.ID)
 			if err != nil {
-				log.Println(err)
+				callback(err.Error())
 				continue
 			}
 			res := model.HeaderResult{
@@ -125,7 +123,7 @@ func (t *Client) Info(ctx context.Context, callback model.ProgressCallback) ([]m
 		case "km/h":
 			data, err := t.RequestECUInfo(ctx, h.ID)
 			if err != nil {
-				log.Println(err)
+				callback(err.Error())
 				continue
 			}
 			var retval uint32
@@ -143,7 +141,7 @@ func (t *Client) Info(ctx context.Context, callback model.ProgressCallback) ([]m
 		case "oilquality":
 			data, err := t.RequestECUInfoAsUint64(ctx, h.ID)
 			if err != nil {
-				log.Println(err)
+				callback(err.Error())
 				continue
 			}
 			quality := float64(data) / 256
@@ -157,7 +155,7 @@ func (t *Client) Info(ctx context.Context, callback model.ProgressCallback) ([]m
 		case "ddi":
 			data, err := t.RequestECUInfo(ctx, h.ID)
 			if err != nil {
-				log.Println(err)
+				callback(err.Error())
 				continue
 			}
 			var retval string
@@ -173,7 +171,7 @@ func (t *Client) Info(ctx context.Context, callback model.ProgressCallback) ([]m
 		case "e85":
 			data, err := t.gm.ReadDataByPacketIdentifier(ctx, 0x01, 0x7A)
 			if err != nil && err.Error() != "Request out of range or session dropped" {
-				log.Println(err)
+				callback(err.Error())
 				continue
 			}
 			if len(data) == 2 {
@@ -222,6 +220,9 @@ func (t *Client) RequestECUInfoAsInt64(ctx context.Context, pid byte) (int64, er
 	resp, err := t.RequestECUInfo(ctx, pid)
 	if err != nil {
 		return 0, err
+	}
+	if len(resp) != 4 {
+		return 0, fmt.Errorf("invalid response length")
 	}
 	retval := int64(resp[0]) * 256 * 256 * 256
 	retval += int64(resp[1]) * 256 * 256

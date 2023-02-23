@@ -71,11 +71,10 @@ var recCmd = &cobra.Command{
 				}
 		*/
 
-		data, err := gm.ReadDataByIdentifier(ctx, 0x90)
+		err = gm.WriteDataByIdentifier(ctx, 0x4d, []byte{0x8B, 0xF1, 0x6B, 0x6B, 0x40})
 		if err != nil {
 			return err
 		}
-		log.Printf("%02X: %s", 0x45, data)
 
 		time.Sleep(10 * time.Millisecond)
 

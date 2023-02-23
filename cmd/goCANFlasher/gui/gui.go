@@ -96,7 +96,7 @@ func (m *mainWindow) listPorts() []string {
 	}
 	if len(ports) == 0 {
 		m.output("No serial ports found!")
-		return []string{}
+		//return []string{}
 	}
 	for _, port := range ports {
 		m.output(fmt.Sprintf("Found port: %s", port.Name))

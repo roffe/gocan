@@ -113,8 +113,6 @@ func (ma *J2534) Init(ctx context.Context) error {
 		ma.allowAll()
 	}
 
-	time.Sleep(10 * time.Millisecond)
-
 	go ma.recvManager()
 	go ma.sendManager()
 
@@ -146,7 +144,7 @@ func (ma *J2534) setupFilters() error {
 	}
 
 	var MaskMsg, PatternMsg PassThruMsg
-	mask := [4]byte{0xFF, 0xFF, 0xFF, 0xFF}
+	mask := [4]byte{0xff, 0xff, 0xff, 0xff}
 	MaskMsg.ProtocolID = ma.protocol
 	copy(MaskMsg.Data[:], mask[:])
 	MaskMsg.DataSize = 4
@@ -171,7 +169,6 @@ func (ma *J2534) setupFilters() error {
 
 func (ma *J2534) recvManager() {
 	runtime.LockOSThread()
-outer:
 	for {
 		select {
 		case <-ma.close:
@@ -179,12 +176,12 @@ outer:
 		default:
 			msg := new(PassThruMsg)
 			msg.ProtocolID = ma.protocol
-			if err := ma.h.PassThruReadMsgs(ma.channelID, uintptr(unsafe.Pointer(msg)), 1, 100); err != nil {
+			if err := ma.h.PassThruReadMsgs(ma.channelID, uintptr(unsafe.Pointer(msg)), 1, 1); err != nil {
 				if errors.Is(err, ErrBufferEmpty) {
 					continue
 				}
 				if errors.Is(err, ErrDeviceNotConnected) {
-					break outer
+					return
 				}
 
 				ma.output("read error: " + err.Error())
@@ -203,7 +200,6 @@ outer:
 }
 
 func (ma *J2534) sendManager() {
-	runtime.LockOSThread()
 	var buf bytes.Buffer
 	for {
 		select {
@@ -219,12 +215,13 @@ func (ma *J2534) sendManager() {
 			msg := &PassThruMsg{
 				ProtocolID: ma.protocol,
 				DataSize:   uint32(buf.Len()),
+				TxFlags:    0,
 			}
 			if ma.protocol == SW_CAN_PS {
 				msg.TxFlags = SW_CAN_HV_TX
 			}
 			copy(msg.Data[:], buf.Bytes())
-			if err := ma.h.PassThruWriteMsgs(ma.channelID, uintptr(unsafe.Pointer(msg)), 1, 500); err != nil {
+			if err := ma.h.PassThruWriteMsgs(ma.channelID, uintptr(unsafe.Pointer(msg)), 1, 0); err != nil {
 				ma.output("send error: " + err.Error())
 			}
 		}
@@ -241,7 +238,7 @@ func (ma *J2534) Send() chan<- gocan.CANFrame {
 
 func (ma *J2534) Close() error {
 	close(ma.close)
-	time.Sleep(800 * time.Millisecond)
+	time.Sleep(200 * time.Millisecond)
 
 	ma.h.PassThruIoctl(ma.channelID, CLEAR_MSG_FILTERS, nil, nil)
 

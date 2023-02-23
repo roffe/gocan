@@ -74,6 +74,7 @@ func (t *Client) UploadBootloader(ctx context.Context, callback model.ProgressCa
 			pp = 0
 		}
 		if err := t.gm.TransferData(ctx, 0x00, 0xF0, startAddress); err != nil {
+			log.Println(err)
 			return err
 		}
 		seq = 0x21
@@ -196,7 +197,7 @@ func (t *Client) Exit(ctx context.Context) error {
 
 // Set inter frame latency to 0x20(32)
 func (t *Client) EnableHighSpeed(ctx context.Context) error {
-	_, err := t.IDemand(ctx, SetInterFrameLatency, 32)
+	_, err := t.IDemand(ctx, SetInterFrameLatency, 36)
 	if err != nil {
 		return err
 	}
@@ -206,41 +207,50 @@ func (t *Client) EnableHighSpeed(ctx context.Context) error {
 // Commands are as follows:
 //
 // command 00: Configure packet delay.
-//   wish:
-//   Delay ( default is 2000 )
+//
+//	wish:
+//	Delay ( default is 2000 )
 //
 // command 01: Full Checksum-32
-//   wish:
-//   00: Trionic 8.
-//   01: Trionic 8; MCP.
+//
+//	wish:
+//	00: Trionic 8.
+//	01: Trionic 8; MCP.
 //
 // command 02: Trionic 8; md5.
 // wish:
-//   00: Full md5.
-//   01: Partition 1.
+//
+//	00: Full md5.
+//	01: Partition 1.
+//
 // ..
 // 09: Partition 9.
-//   Oddballs:
-//   10: Read from 0x00000 to last address of binary + 512 bytes
-//   11: Read from 0x04000 to last address of binary + 512 bytes
-//   12: Read from 0x20000 to last address of binary + 512 bytes
+//
+//	Oddballs:
+//	10: Read from 0x00000 to last address of binary + 512 bytes
+//	11: Read from 0x04000 to last address of binary + 512 bytes
+//	12: Read from 0x20000 to last address of binary + 512 bytes
 //
 // command 03: Trionic 8 MCP; md5.
-//   wish:
-//   00: Full md5.
-//   01: Partition 1.
-//   ..
-//   09: Partition 9 aka 'Shadow'.
+//
+//	wish:
+//	00: Full md5.
+//	01: Partition 1.
+//	..
+//	09: Partition 9 aka 'Shadow'.
 //
 // command 04: Start secondary bootloader
-//   wish: None, just wish.
+//
+//	wish: None, just wish.
 //
 // command 05: Marry secondary processor
-//   wish: None, just wish.
+//
+//	wish: None, just wish.
 //
 // Command 06: Read ADC pin
-//   whish:
-//   Which pin to read.
+//
+//	whish:
+//	Which pin to read.
 func (t *Client) IDemand(ctx context.Context, command Command, wish uint16) ([]byte, error) {
 	//log.Println("Legion i demand", command.String()+"!")
 	payload := []byte{0x02, 0xA5, byte(command), 0x00, 0x00, 0x00, byte(wish >> 8), byte(wish)}
@@ -497,7 +507,6 @@ func (t *Client) ReadDataByLocalIdentifier(ctx context.Context, legionMode bool,
 	}
 
 	frame := gocan.NewFrame(t.canID, payload, gocan.ResponseRequired)
-
 	resp, err := t.c.SendAndPoll(ctx, frame, t.defaultTimeout, t.recvID...)
 	if err != nil {
 		return nil, 0, err
@@ -518,7 +527,6 @@ func (t *Client) ReadDataByLocalIdentifier(ctx context.Context, legionMode bool,
 				rx_cnt++
 			}
 		}
-		//log.Fatal("jo")
 		return retData, 0, nil
 	}
 

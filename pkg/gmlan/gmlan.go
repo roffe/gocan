@@ -25,7 +25,7 @@ type Client struct {
 func New(c *gocan.Client, canID uint32, recvID ...uint32) *Client {
 	return &Client{
 		c:              c,
-		defaultTimeout: 250 * time.Millisecond,
+		defaultTimeout: 150 * time.Millisecond,
 		canID:          canID,
 		recvID:         recvID,
 	}
@@ -359,16 +359,19 @@ func (cl *Client) ReadDataByIdentifier(ctx context.Context, pid byte) ([]byte, e
 		}
 		return out.Bytes(), nil
 	case d[2] == 0x5A:
-		leng := d[1] - 2
+		leng := d[1]
+
 		lenThisFrame := int(leng)
-		left := int(leng)
+		if lenThisFrame > 4 {
+			lenThisFrame = 4
+		}
+
+		left := int(leng) - 2
 		framesToReceive := (leng - 4) / 8
 		if (leng-4)%8 > 0 {
 			framesToReceive++
 		}
-		if lenThisFrame > 4 {
-			lenThisFrame = 4
-		}
+
 		for i := 4; i < 4+lenThisFrame; i++ {
 			out.WriteByte(d[i])
 			left--
@@ -378,37 +381,45 @@ func (cl *Client) ReadDataByIdentifier(ctx context.Context, pid byte) ([]byte, e
 
 		var seq byte = 0x21
 
-	outer:
-		for framesToReceive > 0 {
-			resp2, err := cl.c.Poll(ctx, cl.defaultTimeout, cl.recvID...)
-			if err != nil {
-				return nil, err
-			}
-			if err := CheckErr(resp2); err != nil {
-				return nil, err
-			}
-			d2 := resp2.Data()
-			if d2[0] != seq {
-				return nil, fmt.Errorf("frame sequence out of order, expected 0x%X got 0x%X", seq, d2[0])
-			}
+		cc := cl.c.Subscribe(ctx, cl.recvID...)
 
-			for i := 1; i < 8; i++ {
-				out.WriteByte(d2[i])
-				left--
-				if left == 0 {
-					break outer
+		for framesToReceive > 0 {
+			select {
+			case resp2 := <-cc:
+				//resp2, err := cl.c.Poll(ctx, cl.defaultTimeout, cl.recvID...)
+				//if err != nil {
+				//	return nil, err
+				//}
+				if err := CheckErr(resp2); err != nil {
+					return nil, err
 				}
-			}
-			framesToReceive--
-			seq++
-			if seq == 0x30 {
-				seq = 0x20
+				frameData := resp2.Data()
+				if frameData[0] != seq {
+					return nil, fmt.Errorf("frame sequence out of order, expected 0x%X got 0x%X", seq, frameData[0])
+				}
+
+				for i := 1; i < 8; i++ {
+					out.WriteByte(frameData[i])
+					left--
+					if left == 0 {
+						return out.Bytes(), nil
+					}
+				}
+				framesToReceive--
+				seq++
+				if seq == 0x30 {
+					seq = 0x20
+				}
+			case <-time.After(5 * time.Second):
+				return nil, errors.New("timeout waiting for response")
 			}
 		}
 		return out.Bytes(), nil
+	default:
+		log.Println(resp.String())
+		return nil, errors.New("unhandled response")
 	}
 	//log.Println(resp.String())
-	return nil, errors.New("unhandled response")
 }
 
 // 8.19 ReadDataByPacketIdentifier ($AA) Service.

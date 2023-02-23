@@ -1,0 +1,59 @@
+	m.EnableBtn = widget.NewButton("Enable all", m.enableBulbOutage)
+	m.EnableBtn.Icon = theme.ContentAddIcon()
+	m.DisableBtn = widget.NewButton("Disable all", m.disableBulbOutage)
+	m.DisableBtn.Icon = theme.ContentRemoveIcon()
+
+
+
+func (m *Main) enableBulbOutage() {
+	if err := m.getStates(); err != nil {
+		m.writeOutput(err.Error())
+		return
+	}
+
+	uecVAL, err := m.uecState.Get()
+	if err != nil {
+		m.writeOutput(err.Error())
+		return
+	}
+
+	uecVAL[0] = 0x8B
+
+	m.uecState.Set(uecVAL)
+
+	recVAL, err := m.recState.Get()
+	if err != nil {
+		m.writeOutput(err.Error())
+		return
+	}
+	recVAL[0] = 0x8B
+
+	m.setState()
+	m.writeOutput("All bulb outage detection enabled")
+}
+
+func (m *Main) disableBulbOutage() {
+	if err := m.getStates(); err != nil {
+		m.writeOutput(err.Error())
+		return
+	}
+
+	uecVAL, err := m.uecState.Get()
+	if err != nil {
+		m.writeOutput(err.Error())
+		return
+	}
+	uecVAL[0] = 0x0B
+	m.uecState.Set(uecVAL)
+
+	recVAL, err := m.recState.Get()
+	if err != nil {
+		m.writeOutput(err.Error())
+		return
+	}
+	recVAL[0] = 0x0B
+	m.recState.Set(recVAL)
+
+	m.setState()
+	m.writeOutput("All bulb outage detection disabled")
+}

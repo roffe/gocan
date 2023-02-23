@@ -1,11 +1,11 @@
 package window
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"strings"
 
 	"fyne.io/fyne/v2"
@@ -21,14 +21,9 @@ import (
 	"github.com/roffe/gocan/pkg/gmlan"
 )
 
-//go:embed ECU.png
+//go:embed hk_white.png
 var icon []byte
-var iconRes = fyne.NewStaticResource("ECU.png", icon)
-
-const (
-	uecID = 0x64F
-	recID = 0x649
-)
+var iconRes = fyne.NewStaticResource("hk_white.png", icon)
 
 type Main struct {
 	App    fyne.App
@@ -39,19 +34,34 @@ type Main struct {
 
 	dllSelector *widget.Select
 
-	EnableBtn  *widget.Button
-	SetBtn     *widget.Button
-	GetBtn     *widget.Button
-	DisableBtn *widget.Button
+	GetBtn *widget.Button
+	SetBtn *widget.Button
 
-	uecState []byte
-	recState []byte
+	uecInput *widget.Entry
+	recInput *widget.Entry
 
-	customUEC *widget.Entry
-	customREC *widget.Entry
+	uecCheckFreq binding.Float
+	recCheckFreq binding.Float
+
+	calculatedUECFreq *widget.Label
+	calculatedRECFreq *widget.Label
 
 	portsList   []j2534.J2534DLL
 	selectedDLL string
+
+	uecFoglightsCheckbox   *widget.Check
+	uecDippedBeamsCheckbox *widget.Check
+	uecHighBeamsCheckbox   *widget.Check
+	uecTurnSignalsCheckbox *widget.Check
+
+	ub []byte
+	rb []byte
+}
+
+const timePerTick = 14.5
+
+func freqToSeconds(f float64) float64 {
+	return timePerTick * f / 1000
 }
 
 func NewMainWindow() *Main {
@@ -60,21 +70,79 @@ func NewMainWindow() *Main {
 	w := a.NewWindow("Saab NG9-3 Halogen Check Disabler")
 
 	w.SetIcon(iconRes)
-	w.Resize(fyne.NewSize(600, 450))
-	w.SetFixedSize(true)
-	a.Settings().SetTheme(theme.DefaultTheme())
+	w.Resize(fyne.NewSize(850, 450))
+	//w.SetFixedSize(true)
+	a.Settings().SetTheme(&MyTheme{})
 
-	mw := &Main{
+	m := &Main{
 		App:        a,
 		Window:     w,
 		outputData: binding.NewStringList(),
-		uecState:   make([]byte, 4),
-		recState:   make([]byte, 6),
+
+		uecInput:          widget.NewEntry(),
+		recInput:          widget.NewEntry(),
+		uecCheckFreq:      binding.NewFloat(),
+		recCheckFreq:      binding.NewFloat(),
+		calculatedUECFreq: widget.NewLabel("0s"),
+		calculatedRECFreq: widget.NewLabel("0s"),
 	}
 
-	w.SetContent(mw.Layout())
-	mw.writeOutput("TrionicTuning Halogen Check Disabler")
-	return mw
+	m.uecFoglightsCheckbox = widget.NewCheck("", m.setUECMask(6))
+	m.uecDippedBeamsCheckbox = widget.NewCheck("", m.setUECMask(5))
+	m.uecHighBeamsCheckbox = widget.NewCheck("", m.setUECMask(4))
+	m.uecTurnSignalsCheckbox = widget.NewCheck("", m.setUECMask(0))
+
+	m.uecCheckFreq.AddListener(binding.NewDataListener(func() {
+		f, err := m.uecCheckFreq.Get()
+		if err != nil {
+			m.writeOutput(err.Error())
+			return
+		}
+		if len(m.ub) > 0 {
+			m.ub[0] = byte(f)
+		}
+		m.calculatedUECFreq.SetText(fmt.Sprintf("%.02fs", freqToSeconds(f)))
+		m.uecInput.SetText(strings.ToUpper(hex.EncodeToString(m.ub)))
+	}))
+
+	m.recCheckFreq.AddListener(binding.NewDataListener(func() {
+		f, err := m.recCheckFreq.Get()
+		if err != nil {
+			m.writeOutput(err.Error())
+			return
+		}
+		if len(m.rb) > 0 {
+			m.rb[0] = byte(f)
+		}
+		m.calculatedRECFreq.SetText(fmt.Sprintf("%.02fs", freqToSeconds(f)))
+		m.recInput.SetText(strings.ToUpper(hex.EncodeToString(m.rb)))
+	}))
+
+	m.uecInput.OnChanged = func(s string) {
+		if len(s)%2 == 0 {
+			uecData, err := hex.DecodeString(s)
+			if err != nil {
+				m.writeOutput(err.Error())
+				return
+			}
+			m.setInternalUECState(uecData)
+		}
+	}
+
+	m.recInput.OnChanged = func(s string) {
+		if len(s)%2 == 0 {
+			recData, err := hex.DecodeString(s)
+			if err != nil {
+				m.writeOutput(err.Error())
+				return
+			}
+			m.setInternalRECState(recData)
+		}
+	}
+
+	w.SetContent(m.Layout())
+	//m.writeOutput("TrionicTuning Halogen Check Disabler")
+	return m
 }
 
 func (m *Main) initCAN() (*gocan.Client, error) {
@@ -87,7 +155,7 @@ func (m *Main) initCAN() (*gocan.Client, error) {
 			Port:         m.selectedDLL,
 			PortBaudrate: 0,
 			CANRate:      33.3,
-			CANFilter:    []uint32{uecID, 0x649},
+			CANFilter:    []uint32{0x64f, 0x649},
 			Output: func(s string) {
 				m.writeOutput(s)
 			},
@@ -100,16 +168,14 @@ func (m *Main) initCAN() (*gocan.Client, error) {
 }
 
 func (m *Main) disableButtons() {
-	m.EnableBtn.Disable()
+	m.GetBtn.Disable()
 	m.SetBtn.Disable()
-	m.DisableBtn.Disable()
 
 }
 
 func (m *Main) enableButtons() {
-	m.EnableBtn.Enable()
+	m.GetBtn.Enable()
 	m.SetBtn.Enable()
-	m.DisableBtn.Enable()
 }
 
 func (m *Main) writeOutput(s string) {
@@ -118,19 +184,88 @@ func (m *Main) writeOutput(s string) {
 	m.Output.ScrollToBottom()
 }
 
-func (m *Main) enableBulbOutage() {
-	m.uecState[0] = 0x8b
-	m.recState[0] = 0x8b
-	m.setBulbOutage()
+func (m *Main) getStates() error {
+	m.disableButtons()
+	defer m.enableButtons()
+
+	c, err := m.initCAN()
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	// UEC
+	uec := gmlan.New(c, 0x24F, 0x64f)
+
+	vin, err := uec.ReadDataByIdentifierString(context.TODO(), 0x90)
+	if err != nil {
+		return err
+	}
+
+	m.writeOutput(fmt.Sprintf("VIN: %s", vin))
+
+	uecBytes, err := uec.ReadDataByIdentifier(context.TODO(), 0x4D)
+	if err != nil {
+		return err
+	}
+	m.setInternalUECState(uecBytes)
+
+	// REC
+	rec := gmlan.New(c, 0x249, 0x649)
+	recBytes, err := rec.ReadDataByIdentifier(context.TODO(), 0x45)
+	if err != nil {
+		return err
+	}
+	m.setInternalRECState(recBytes)
+
+	return nil
 }
 
-func (m *Main) disableBulbOutage() {
-	m.uecState[0] = 0x00
-	m.recState[0] = 0x00
-	m.setBulbOutage()
+func (m *Main) setInternalUECState(data []byte) {
+	if len(data) < 4 {
+		return
+	}
+	m.ub = data
+	if data[1]&0x80 == 0x80 {
+	}
+	if data[1]&0x40 == 0x40 {
+		m.uecFoglightsCheckbox.SetChecked(true)
+	} else {
+		m.uecFoglightsCheckbox.SetChecked(false)
+	}
+	if data[1]&0x20 == 0x20 {
+		m.uecDippedBeamsCheckbox.SetChecked(true)
+	} else {
+		m.uecDippedBeamsCheckbox.SetChecked(false)
+	}
+	if data[1]&0x10 == 0x10 {
+		m.uecHighBeamsCheckbox.SetChecked(true)
+	} else {
+		m.uecHighBeamsCheckbox.SetChecked(false)
+	}
+	if data[1]&0x01 == 0x01 {
+		m.uecTurnSignalsCheckbox.SetChecked(true)
+	} else {
+		m.uecTurnSignalsCheckbox.SetChecked(false)
+	}
+	if err := m.uecCheckFreq.Set(float64(data[0])); err != nil {
+		m.writeOutput(err.Error())
+	}
+	m.uecInput.SetText(strings.ToUpper(hex.EncodeToString(m.ub)))
 }
 
-func (m *Main) getBulbOutage() {
+func (m *Main) setInternalRECState(data []byte) {
+	if len(data) != 6 {
+		return
+	}
+	m.rb = data
+	if err := m.recCheckFreq.Set(float64(m.rb[0])); err != nil {
+		m.writeOutput(err.Error())
+	}
+	m.recInput.SetText(strings.ToUpper(hex.EncodeToString(m.rb)))
+}
+
+func (m *Main) setState() {
 	m.disableButtons()
 	defer m.enableButtons()
 
@@ -142,77 +277,23 @@ func (m *Main) getBulbOutage() {
 	defer c.Close()
 
 	// UEC
-	uec := gmlan.New(c, 0x24F, uecID)
-	uecBytes, err := uec.ReadDataByIdentifier(context.TODO(), 0x4D)
-	if err != nil {
-		m.writeOutput(err.Error())
+	uec := gmlan.New(c, 0x24F, 0x64f)
+	if err := uec.WriteDataByIdentifier(context.TODO(), 0x4D, m.ub); err != nil {
+		m.outputData.Append("UEC: " + err.Error())
 		return
 	}
-	m.customUEC.SetText(strings.ToUpper(hex.EncodeToString(uecBytes)))
 
 	// REC
-	rec := gmlan.New(c, 0x249, recID)
-	recBytes, err := rec.ReadDataByIdentifier(context.TODO(), 0x45)
-	if err != nil {
-		m.writeOutput(err.Error())
+	rec := gmlan.New(c, 0x249, 0x649)
+	if err := rec.WriteDataByIdentifier(context.TODO(), 0x45, m.rb); err != nil {
+		m.outputData.Append("REC: " + err.Error())
 		return
 	}
-	m.customREC.SetText(strings.ToUpper(hex.EncodeToString(recBytes)))
 
+	m.writeOutput("Set state successful")
 }
 
-func (m *Main) setBulbOutage() {
-	m.disableButtons()
-	defer m.enableButtons()
-
-	c, err := m.initCAN()
-	if err != nil {
-		m.writeOutput(err.Error())
-		return
-	}
-	defer c.Close()
-
-	m.writeOutput("Saving Registers")
-
-	// UEC
-	uec := gmlan.New(c, 0x24F, uecID)
-	uecBytes, err := uec.ReadDataByIdentifier(context.TODO(), 0x4D)
-	if err != nil {
-		m.writeOutput(err.Error())
-		return
-	}
-	m.writeOutput(fmt.Sprintf("Old UEC value: %X", uecBytes))
-
-	if !bytes.Equal(m.uecState, []byte{0x00, 0x00, 0x00, 0x00}) {
-		uecBytes = m.uecState
-	}
-
-	if err := uec.WriteDataByIdentifier(context.TODO(), 0x4D, uecBytes); err != nil {
-		m.outputData.Append(err.Error())
-		return
-	}
-	m.writeOutput(fmt.Sprintf("New UEC value: %X", uecBytes))
-
-	// REC
-	rec := gmlan.New(c, 0x249, recID)
-	recBytes, err := rec.ReadDataByIdentifier(context.TODO(), 0x45)
-	if err != nil {
-		m.writeOutput(err.Error())
-		return
-	}
-	m.writeOutput(fmt.Sprintf("Old REC value: %X", recBytes))
-
-	if !bytes.Equal(m.recState, []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00}) {
-		recBytes = m.recState
-	}
-
-	if err := rec.WriteDataByIdentifier(context.TODO(), 0x45, recBytes); err != nil {
-		m.outputData.Append(err.Error())
-		return
-	}
-	m.writeOutput(fmt.Sprintf("New REC value: %X", recBytes))
-
-}
+const prefsSelectedDLLKey = "selectedDLL"
 
 func (m *Main) Layout() fyne.CanvasObject {
 	m.portsList = j2534.FindDLLs()
@@ -230,14 +311,22 @@ func (m *Main) Layout() fyne.CanvasObject {
 	})
 	m.dllSelector.Alignment = fyne.TextAlignCenter
 
-	m.EnableBtn = widget.NewButton("Enable all", m.enableBulbOutage)
-	m.EnableBtn.Icon = theme.ContentAddIcon()
-	m.SetBtn = widget.NewButton("Set", m.setBulbOutage)
+	if selected := m.App.Preferences().String(prefsSelectedDLLKey); selected != "" {
+		m.dllSelector.SetSelected(selected)
+	}
+
+	m.dllSelector.OnChanged = func(s string) {
+		m.App.Preferences().SetString(prefsSelectedDLLKey, s)
+	}
+
+	m.SetBtn = widget.NewButton("Save configuration", m.setState)
 	m.SetBtn.Icon = theme.DocumentSaveIcon()
-	m.GetBtn = widget.NewButton("Get", m.getBulbOutage)
+	m.GetBtn = widget.NewButton("Load configuration", func() {
+		if err := m.getStates(); err != nil {
+			m.writeOutput(err.Error())
+		}
+	})
 	m.GetBtn.Icon = theme.DownloadIcon()
-	m.DisableBtn = widget.NewButton("Disable all", m.disableBulbOutage)
-	m.DisableBtn.Icon = theme.ContentRemoveIcon()
 
 	m.Output = widget.NewListWithData(
 		m.outputData,
@@ -257,61 +346,40 @@ func (m *Main) Layout() fyne.CanvasObject {
 		},
 	)
 
-	m.customUEC = &widget.Entry{
-		PlaceHolder: strings.Repeat(" ", 8),
-		OnChanged: func(s string) {
-			if len(s) == 8 {
-				b, err := hex.DecodeString(s)
-				if err != nil {
-					m.writeOutput(err.Error())
-					return
-				}
-				m.uecState = b
-			}
-			if len(s) > 8 {
-				m.customUEC.SetText(s[:8])
-			}
-		},
-	}
-
-	m.customREC = &widget.Entry{
-		Wrapping: fyne.TextWrapOff,
-		OnChanged: func(s string) {
-			if len(s) == 12 {
-				b, err := hex.DecodeString(s)
-				if err != nil {
-					m.writeOutput(err.Error())
-					return
-				}
-				m.recState = b
-			}
-			if len(s) > 12 {
-				m.customREC.SetText(s[:12])
-			}
-		},
-	}
-
-	uecv := widget.NewLabel("UEC Value:")
-	recv := widget.NewLabel("REC Value:")
 	footer := container.NewVBox(
 		container.New(layout.NewGridLayout(2),
 			container.NewMax(
-				container.NewBorder(nil, nil, uecv, nil, m.customUEC),
+				container.NewBorder(nil, nil, widget.NewLabel("UEC check interval:"), m.calculatedUECFreq, widget.NewSliderWithData(0, 255, m.uecCheckFreq)),
+				widget.NewLabel(""),
 			),
 			container.NewMax(
-				container.NewBorder(nil, nil, recv, nil, m.customREC),
+				container.NewBorder(nil, nil, widget.NewLabel("REC check interval:"), m.calculatedRECFreq, widget.NewSliderWithData(0, 255, m.recCheckFreq)),
 			),
 		),
-		container.New(layout.NewGridLayout(4), m.EnableBtn, m.GetBtn, m.SetBtn, m.DisableBtn),
+		container.New(layout.NewGridLayout(2),
+			container.NewMax(
+				container.NewBorder(nil, nil, widget.NewLabel("UEC value:"), nil, m.uecInput),
+			),
+			container.NewMax(
+				container.NewBorder(nil, nil, widget.NewLabel("REC value:"), nil, m.recInput),
+			),
+		),
+		container.New(layout.NewGridLayout(2), m.GetBtn, m.SetBtn),
 	)
 
-	return container.New(layout.NewBorderLayout(
+	/*
+		80-???
+		40-fog lights
+		20-dipped beam
+		10-main beam
+		01-direction indicators (all)
+	*/
+
+	return container.NewBorder(
 		nil,
 		footer,
 		nil,
 		nil,
-	),
-		footer,
 		&container.Split{
 			Horizontal: true,
 			Offset:     0.8,
@@ -319,11 +387,13 @@ func (m *Main) Layout() fyne.CanvasObject {
 			Trailing: container.NewVBox(
 				m.dllSelector,
 				widget.NewForm(
-					widget.NewFormItem("Fog Lights", widget.NewCheck("", m.setUECMask(7))),
-					widget.NewFormItem("High Beams", widget.NewCheck("", m.setUECMask(3))),
-					widget.NewFormItem("Low Beams", widget.NewCheck("", m.setUECMask(1))),
+					// UEC
+					widget.NewFormItem("Fog Lights", m.uecFoglightsCheckbox),
+					widget.NewFormItem("Dipped Beams", m.uecDippedBeamsCheckbox),
+					widget.NewFormItem("High Beams", m.uecHighBeamsCheckbox),
+					widget.NewFormItem("Turn Signals (all)", m.uecTurnSignalsCheckbox),
+					// REC
 					widget.NewFormItem("Position Lights", widget.NewCheck("", m.setUECMask(0))),
-					widget.NewFormItem("Turn Signals", widget.NewCheck("", m.setRECMask(7))),
 					widget.NewFormItem("Reverse Lights", widget.NewCheck("", m.setRECMask(3))),
 					widget.NewFormItem("License plate", widget.NewCheck("", m.setRECMask(1))),
 				),
@@ -334,15 +404,18 @@ func (m *Main) Layout() fyne.CanvasObject {
 
 func (m *Main) setUECMask(pos uint) func(v bool) {
 	return func(v bool) {
-		//m.uecState = setBit(m.uecState, pos, v)
-		fmt.Printf("uec: %08b\n", m.uecState)
+		if len(m.ub) < 2 {
+			return
+		}
+		m.ub[1] = setBit(m.ub[1], pos, v)
+		m.uecInput.SetText(strings.ToUpper(hex.EncodeToString(m.ub)))
 	}
 }
 
 func (m *Main) setRECMask(pos uint) func(v bool) {
 	return func(v bool) {
 		//m.recState = setBit(m.recState, pos, v)
-		fmt.Printf("rec: %08b\n", m.recState)
+		log.Printf("rec: %08b %02X\n", m.rb, m.rb)
 	}
 }
 
