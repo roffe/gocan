@@ -1,8 +1,0 @@
-Website = "https://hirschmann-koxha.de/"
-
-[Details]
-  Icon = "./window/hk_white.png"
-  Name = "Saab CIM Tool"
-  ID = "com.trionictuning.hcd"
-  Version = "0.0.1"
-  Build = 1

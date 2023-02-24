@@ -122,7 +122,6 @@ func (ma *J2534) Init(ctx context.Context) error {
 func (ma *J2534) allowAll() {
 	filterID := uint32(0)
 	var MaskMsg, PatternMsg PassThruMsg
-
 	mask := [4]byte{0x00, 0x00, 0x00, 0x00}
 	MaskMsg.ProtocolID = ma.protocol
 	copy(MaskMsg.Data[:], mask[:])
@@ -176,7 +175,7 @@ func (ma *J2534) recvManager() {
 		default:
 			msg := new(PassThruMsg)
 			msg.ProtocolID = ma.protocol
-			if err := ma.h.PassThruReadMsgs(ma.channelID, uintptr(unsafe.Pointer(msg)), 1, 1); err != nil {
+			if err := ma.h.PassThruReadMsgs(ma.channelID, uintptr(unsafe.Pointer(msg)), 1, 0); err != nil {
 				if errors.Is(err, ErrBufferEmpty) {
 					continue
 				}

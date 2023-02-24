@@ -29,7 +29,6 @@ type appState struct {
 var (
 	listData = binding.NewStringList()
 	state    *appState
-	//mw       *mainWindow
 )
 
 func init() {
@@ -111,7 +110,7 @@ func (m *mainWindow) listPorts() []string {
 	for _, dll := range dlls {
 		m.output(fmt.Sprintf("J2534 DLL: %s", dll.Name))
 		//portsList = append(portsList, filepath.Base(dll.FunctionLibrary))
-		portsList = append(portsList, dll.FunctionLibrary)
+		portsList = append(portsList, dll.Name)
 	}
 
 	state.portList = portsList

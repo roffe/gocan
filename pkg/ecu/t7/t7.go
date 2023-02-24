@@ -145,7 +145,7 @@ func (t *Client) KnockKnock(ctx context.Context, callback model.ProgressCallback
 		ok, err := t.letMeIn(ctx, i)
 		if err != nil {
 			log.Printf("/!\\ Failed to obtain security access: %v", err)
-			time.Sleep(4 * time.Second)
+			time.Sleep(3 * time.Second)
 			continue
 
 		}

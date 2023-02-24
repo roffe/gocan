@@ -197,7 +197,7 @@ func (t *Client) Exit(ctx context.Context) error {
 
 // Set inter frame latency to 0x20(32)
 func (t *Client) EnableHighSpeed(ctx context.Context) error {
-	_, err := t.IDemand(ctx, SetInterFrameLatency, 36)
+	_, err := t.IDemand(ctx, SetInterFrameLatency, 5)
 	if err != nil {
 		return err
 	}
@@ -294,7 +294,7 @@ func (t *Client) IDemand(ctx context.Context, command Command, wish uint16) ([]b
 			return nil
 		case 5:
 			// Marriage; Complete
-			//log.Println("Master, the marriage has been completed complete")
+			//log.Println("Master, the marriage has been completed")
 			return nil
 		case 6:
 			// ADC-read; complete
