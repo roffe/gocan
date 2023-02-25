@@ -8,6 +8,10 @@ import (
 	"time"
 
 	"github.com/roffe/gocan/cmd/cantool/cmd"
+	// Init adapters
+	_ "github.com/roffe/gocan/adapter/j2534"
+	_ "github.com/roffe/gocan/adapter/lawicel"
+	_ "github.com/roffe/gocan/adapter/obdlink"
 )
 
 func main() {

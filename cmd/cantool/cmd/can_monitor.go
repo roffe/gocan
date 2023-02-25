@@ -15,7 +15,6 @@ import (
 	"github.com/jroimartin/gocui"
 	"github.com/roffe/gocan"
 	"github.com/roffe/gocan/cmd/cantool/pkg/ui"
-	"github.com/roffe/gocan/pkg/ecu/t7"
 	"github.com/spf13/cobra"
 )
 
@@ -145,7 +144,7 @@ func frameParser(ctx context.Context, c *gocan.Client, g *gocui.Gui) {
 			}
 
 			fmt.Fprintf(sid, "%X %d\n", f.Identifier(), f.Identifier())
-			fmt.Fprintf(packets, " %s || %s || %s\n", time.Now().Format("15:04:05.00000"), f.String(), t7.LookupID(f.Identifier()))
+			fmt.Fprintf(packets, " %s || %s\n", time.Now().Format("15:04:05.00000"), f.String())
 			//packets.MoveCursor(0, 1)
 			atomic.AddInt64(&buffLines, 1)
 			return nil
@@ -158,18 +157,18 @@ func frameParser(ctx context.Context, c *gocan.Client, g *gocui.Gui) {
 }
 
 /*
-func updateInfo() func(g *gocui.Gui) error {
-	return func(g *gocui.Gui) error {
-		info, err := g.View("info")
-		if err != nil {
-			return err
-		}
+	func updateInfo() func(g *gocui.Gui) error {
+		return func(g *gocui.Gui) error {
+			info, err := g.View("info")
+			if err != nil {
+				return err
+			}
 
-		fmt.Fprintf(info, "frames: %d\n", frameCount)
-		fmt.Fprintf(info, "in buffer: %d\n", buffLines)
-		return nil
+			fmt.Fprintf(info, "frames: %d\n", frameCount)
+			fmt.Fprintf(info, "in buffer: %d\n", buffLines)
+			return nil
+		}
 	}
-}
 */
 func layout(g *gocui.Gui) error {
 	maxX, maxY := g.Size()

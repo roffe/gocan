@@ -3,25 +3,19 @@
 A Go linux/windows/osx CAN stack running in userland with low level adapter drivers written from the ground up
 
 Supported adapters:
-* J2534 (only tested with Drewtech Mongoose GM PRO II)
+* J2534 on Windows (only tested with Drewtech Mongoose GM PRO II & SM2 PRO)
 * OBDLinx SX
 * [CANUSB](https://lawicel-shop.se/elektronik/kommunikation/can/lawicel-canusb-adapter-1m-usb-cable/) adapter running in VCP mode using [Lawicel ascii api](http://www.can232.com/docs/canusb_manual.pdf)
 
 
-## Included tools in repo
-
-### goCANFlasher
-
-Trionic 5/7/8 ecu flasher GUI made with Fyne, [**Nightmare!**](https://doom.fandom.com/wiki/Skill_level#Doom.2C_Doom_II_and_Final_Doom_skill_levels)
-
 ### cantool
 
-CLI tool for CAN monitoring and ECU flashing and also home for toy code like talking to CIM and SID
+CLI tool for CAN monitoring and ECU flashing and also home for toy code like talking to SAAB ECM's such as CIM and SID
 
 #### Example
 
 ```go
-go run .\cmd\cantool\main.go -p com3 -b 2000000 -a canusb -c t5 -t t5 info
+go run .\cmd\cantool\main.go -p com3 -b 2000000 -a CANusb -c t5 -t t5 info
 uploading bootloader 100% [====================] (1.793 kB/s) took: 1.029s
 ------------------------------
 This is a Trionic 5.5 ECU with 256 kB of FLASH
@@ -39,8 +33,3 @@ ROM End:      0x07FFFF
 Resetting ECU
 ```
 
-## Credits
-
-Most Trionic code is based on [TrionicCANFlasher](https://txsuite.org/)
-
-Thanks to [TrionicTuning](https://www.trionictuning.com/), [Chriva](https://www.trionictuning.com/forum/memberlist.php?mode=viewprofile&u=3231) and [Tomi Liljemark](https://pikkupossu.1g.fi/tomi/tomi.html)

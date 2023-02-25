@@ -9,7 +9,7 @@ import (
 
 	"github.com/roffe/gocan"
 	"github.com/roffe/gocan/adapter"
-	"github.com/roffe/gocan/pkg/ecu"
+	"github.com/roffe/gocanflasher/pkg/ecu"
 	"github.com/spf13/cobra"
 )
 
@@ -79,6 +79,8 @@ func getAdapterOpts() (adapter string, port string, baudrate int, canrate float6
 		canrate = 500
 	case "ibus":
 		canrate = 47.619
+	case "gmlan":
+		canrate = 33.3
 	case "t5":
 		canrate = 615.384
 	default:
