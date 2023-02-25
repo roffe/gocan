@@ -8,19 +8,19 @@ import (
 
 var adapterMap = make(map[string]NewAdapterFunc)
 
-func New(adapterName string, cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
-	if adapter, found := adapterMap[adapterName]; found {
-		return adapter(cfg)
-	}
-	return nil, fmt.Errorf("unknown adapter %q", adapterName)
-}
-
 type AdapterItem struct {
 	Name string
 	New  NewAdapterFunc
 }
 
 type NewAdapterFunc func(*gocan.AdapterConfig) (gocan.Adapter, error)
+
+func New(adapterName string, cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
+	if adapter, found := adapterMap[adapterName]; found {
+		return adapter(cfg)
+	}
+	return nil, fmt.Errorf("unknown adapter %q", adapterName)
+}
 
 func List() []string {
 	var out []string
