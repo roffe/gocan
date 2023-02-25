@@ -549,7 +549,7 @@ type J2534DLL struct {
 }
 
 func FindDLLs() (dlls []J2534DLL) {
-	k, err := registry.OpenKey(registry.LOCAL_MACHINE, `SOFTWARE\WOW6432Node\PassThruSupport.04.04`, registry.QUERY_VALUE)
+	k, err := registry.OpenKey(registry.LOCAL_MACHINE, `SOFTWARE\PassThruSupport.04.04`, registry.QUERY_VALUE|registry.WOW64_32KEY)
 	if err != nil {
 		log.Println(err)
 		return
@@ -565,7 +565,7 @@ func FindDLLs() (dlls []J2534DLL) {
 		return
 	}
 
-	k2, err := registry.OpenKey(registry.LOCAL_MACHINE, `SOFTWARE\WOW6432Node\PassThruSupport.04.04`, registry.ENUMERATE_SUB_KEYS)
+	k2, err := registry.OpenKey(registry.LOCAL_MACHINE, `SOFTWARE\PassThruSupport.04.04`, registry.ENUMERATE_SUB_KEYS|registry.WOW64_32KEY)
 	if err != nil {
 		log.Println(err)
 		return
@@ -578,7 +578,7 @@ func FindDLLs() (dlls []J2534DLL) {
 	}
 
 	for _, adapter := range adapters {
-		k3, err := registry.OpenKey(registry.LOCAL_MACHINE, `SOFTWARE\WOW6432Node\PassThruSupport.04.04\`+adapter, registry.QUERY_VALUE)
+		k3, err := registry.OpenKey(registry.LOCAL_MACHINE, `SOFTWARE\PassThruSupport.04.04\`+adapter, registry.QUERY_VALUE|registry.WOW64_32KEY)
 		if err != nil {
 			continue
 		}
