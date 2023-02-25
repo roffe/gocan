@@ -31,18 +31,18 @@ func (t *Client) DumpECU(ctx context.Context, callback model.ProgressCallback) (
 		callback("Verifying md5..")
 	}
 
-	ecumd5bytes, err := t.legion.IDemand(ctx, legion.GetTrionic8MD5, 0x00)
+	ecuMD5bytes, err := t.legion.IDemand(ctx, legion.GetTrionic8MD5, 0x00)
 	if err != nil {
 		return nil, err
 	}
 	calculatedMD5 := md5.Sum(bin)
 
 	if callback != nil {
-		callback(fmt.Sprintf("Legion md5 : %X", ecumd5bytes))
-		callback(fmt.Sprintf("Local md5  : %X", calculatedMD5))
+		callback(fmt.Sprintf("Legion MD5 : %X", ecuMD5bytes))
+		callback(fmt.Sprintf("Local MD5  : %X", calculatedMD5))
 	}
 
-	if !bytes.Equal(ecumd5bytes, calculatedMD5[:]) {
+	if !bytes.Equal(ecuMD5bytes, calculatedMD5[:]) {
 		return nil, errors.New("md5 Verification failed")
 	}
 

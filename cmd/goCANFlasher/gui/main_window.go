@@ -159,7 +159,7 @@ func (m *mainWindow) createSelects() {
 
 	})
 
-	m.adapterList = widget.NewSelect(adapter.ListAdapterStrings(), func(s string) {
+	m.adapterList = widget.NewSelect(adapter.List(), func(s string) {
 		state.adapter = s
 		m.app.Preferences().SetString("adapter", s)
 	})

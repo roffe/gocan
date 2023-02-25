@@ -2,84 +2,37 @@ package adapter
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/roffe/gocan"
-	"github.com/roffe/gocan/adapter/j2534"
-	"github.com/roffe/gocan/adapter/lawicel"
-	"github.com/roffe/gocan/adapter/obdlink"
 )
 
-const (
-	Canusb AdapterID = iota
-	OBDLinkSX
-	J2534
-)
+var adapterMap = make(map[string]NewAdapterFunc)
 
-type AdapterID int
+func New(adapterName string, cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
+	if adapter, found := adapterMap[adapterName]; found {
+		return adapter(cfg)
+	}
+	return nil, fmt.Errorf("unknown adapter %q", adapterName)
+}
+
+type AdapterItem struct {
+	Name string
+	New  NewAdapterFunc
+}
 
 type NewAdapterFunc func(*gocan.AdapterConfig) (gocan.Adapter, error)
 
-type AdapterItem struct {
-	ID    AdapterID
-	New   NewAdapterFunc
-	Name  string
-	Alias []string
-}
-
-var adapterList = []AdapterItem{
-	{
-		ID:   J2534,
-		New:  j2534.New,
-		Name: "J2534",
-	},
-	{
-		ID:   Canusb,
-		New:  lawicel.NewCanusb,
-		Name: "Canusb",
-	},
-	{
-		ID:    OBDLinkSX,
-		New:   obdlink.NewSX,
-		Name:  "OBDLink SX",
-		Alias: []string{"obdlinksx", "sx"},
-	},
-}
-
-func ListAdapters() []AdapterItem {
-	return adapterList
-}
-
-func ListAdapterStrings() []string {
+func List() []string {
 	var out []string
-	for _, a := range adapterList {
-		out = append(out, a.Name)
+	for name := range adapterMap {
+		out = append(out, name)
 	}
 	return out
 }
 
-func New(adapter interface{}, cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
-	switch t := adapter.(type) {
-	case string:
-		normalized := strings.ToLower(t)
-		for _, a := range adapterList {
-			if strings.ToLower(a.Name) == normalized {
-				return a.New(cfg)
-			}
-			for _, alias := range a.Alias {
-				if normalized == strings.ToLower(alias) {
-					return a.New(cfg)
-				}
-			}
-		}
-	case int, AdapterID:
-		for _, a := range adapterList {
-			if t == a.ID {
-				return a.New(cfg)
-			}
-		}
-	default:
-		return nil, fmt.Errorf("invalid type %t", t)
+func RegisterAdapter(name string, initFunc NewAdapterFunc) {
+	if _, ok := adapterMap[name]; ok {
+		panic("adapter already registered")
 	}
-	return nil, fmt.Errorf("unknown adapter %q", adapter)
+	adapterMap[name] = initFunc
 }

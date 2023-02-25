@@ -45,7 +45,7 @@ func (t *Client) Bootstrap(ctx context.Context, callback model.ProgressCallback)
 		}
 
 		if callback != nil {
-			callback("Start bootloader")
+			callback("Starting bootloader")
 		}
 		if err := t.StartBootloader(ctx, 0x102400); err != nil {
 			return err
