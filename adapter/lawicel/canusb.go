@@ -15,14 +15,12 @@ import (
 
 	"github.com/albenik/bcd"
 	"github.com/roffe/gocan"
-	"github.com/roffe/gocan/adapter"
 	"go.bug.st/serial"
 )
 
 var debug bool
 
 func init() {
-	adapter.RegisterAdapter("CANusb", NewCanusb)
 	if strings.ToLower(os.Getenv("DEBUG")) == "true" {
 		debug = true
 	}

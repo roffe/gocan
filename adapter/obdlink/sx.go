@@ -16,7 +16,6 @@ import (
 
 	"github.com/avast/retry-go"
 	"github.com/roffe/gocan"
-	"github.com/roffe/gocan/adapter"
 	"go.bug.st/serial"
 	"golang.org/x/sync/errgroup"
 )
@@ -29,7 +28,6 @@ func init() {
 	if strings.ToLower(os.Getenv("DEBUG")) == "true" {
 		debug = true
 	}
-	adapter.RegisterAdapter(Name, NewSX)
 }
 
 type SX struct {

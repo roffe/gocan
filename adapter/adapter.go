@@ -4,16 +4,18 @@ import (
 	"fmt"
 
 	"github.com/roffe/gocan"
+	"github.com/roffe/gocan/adapter/j2534"
+	"github.com/roffe/gocan/adapter/lawicel"
+	"github.com/roffe/gocan/adapter/obdlink"
 )
 
-var adapterMap = make(map[string]NewAdapterFunc)
-
-type AdapterItem struct {
-	Name string
-	New  NewAdapterFunc
-}
-
 type NewAdapterFunc func(*gocan.AdapterConfig) (gocan.Adapter, error)
+
+var adapterMap = map[string]NewAdapterFunc{
+	"J2534":     j2534.New,
+	"CANusb":    lawicel.NewCanusb,
+	"OBDLinkSX": obdlink.NewSX,
+}
 
 func New(adapterName string, cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	if adapter, found := adapterMap[adapterName]; found {
@@ -28,11 +30,4 @@ func List() []string {
 		out = append(out, name)
 	}
 	return out
-}
-
-func RegisterAdapter(name string, initFunc NewAdapterFunc) {
-	if _, ok := adapterMap[name]; ok {
-		panic("adapter already registered")
-	}
-	adapterMap[name] = initFunc
 }

@@ -13,12 +13,7 @@ import (
 	"unsafe"
 
 	"github.com/roffe/gocan"
-	"github.com/roffe/gocan/adapter"
 )
-
-func init() {
-	adapter.RegisterAdapter("J2534", New)
-}
 
 type J2534 struct {
 	h                                    *PassThru
