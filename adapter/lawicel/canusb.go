@@ -171,9 +171,8 @@ func calcAcceptanceFilters(idList []uint32) (string, string) {
 	return fmt.Sprintf("M%08X", code), fmt.Sprintf("m%08X", mask)
 }
 
-type token struct{}
-
-var sendMutex = make(chan token, 1)
+//type token struct{}
+//var sendMutex = make(chan token, 1)
 
 func (cu *Canusb) sendManager(ctx context.Context) {
 	t := time.NewTicker(600 * time.Millisecond)
@@ -182,7 +181,7 @@ func (cu *Canusb) sendManager(ctx context.Context) {
 		select {
 		case <-t.C:
 			if !cu.closed {
-				sendMutex <- token{}
+				//sendMutex <- token{}
 				cu.port.Write([]byte{'F', '\r'})
 			}
 
@@ -192,7 +191,7 @@ func (cu *Canusb) sendManager(ctx context.Context) {
 			f.WriteString("t" + hex.EncodeToString(idb)[5:] +
 				strconv.Itoa(v.Length()) +
 				hex.EncodeToString(v.Data()) + "\r")
-			sendMutex <- token{}
+			//sendMutex <- token{}
 			_, err := cu.port.Write(f.Bytes())
 			if err != nil {
 				log.Printf("failed to write to com port: %q, %v", f.String(), err)
@@ -240,10 +239,10 @@ func (cu *Canusb) parse(ctx context.Context, readBuffer []byte, buff *bytes.Buff
 		default:
 		}
 		if b == 0x0D {
-			select {
-			case <-sendMutex:
-			default:
-			}
+			//select {
+			//case <-sendMutex:
+			//default:
+			//}
 			if buff.Len() == 0 {
 				continue
 			}
@@ -267,13 +266,11 @@ func (cu *Canusb) parse(ctx context.Context, readBuffer []byte, buff *bytes.Buff
 				default:
 					log.Println("dropped frame")
 				}
-
 				buff.Reset()
-
 			case 'z': // last command ok
 			case 0x07: // bell, last command was error
 			case 'V':
-				log.Println("H/W version", buff.String())
+				cu.cfg.Output("H/W version " + buff.String())
 			case 'N':
 				log.Println("H/W serial ", buff.String())
 			default:
@@ -330,28 +327,16 @@ func checkBitSet(n, k int) bool {
 }
 
 func (*Canusb) decodeFrame(buff []byte) (gocan.CANFrame, error) {
-	idBytes, err := hex.DecodeString(fmt.Sprintf("%08s", buff[1:4]))
+	id, err := strconv.ParseUint(string(buff[1:4]), 16, 32)
 	if err != nil {
 		return nil, fmt.Errorf("filed to decode identifier: %v", err)
 	}
-	recvBytes := len(buff[5:])
-
-	leng, err := strconv.ParseUint(string(buff[4:5]), 0, 8)
-	if err != nil {
-		return nil, err
-	}
-
-	if uint64(recvBytes/2) != leng {
-		return nil, errors.New("frame received bytes does not match header")
-	}
-
-	var data = make([]byte, hex.DecodedLen(recvBytes))
+	data := make([]byte, hex.DecodedLen(int(buff[4]-0x30)*2))
 	if _, err := hex.Decode(data, buff[5:]); err != nil {
 		return nil, fmt.Errorf("failed to decode frame body: %v", err)
 	}
-
 	return gocan.NewFrame(
-		binary.BigEndian.Uint32(idBytes),
+		uint32(id),
 		data,
 		gocan.Incoming,
 	), nil
