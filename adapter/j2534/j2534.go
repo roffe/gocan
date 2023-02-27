@@ -203,6 +203,10 @@ func (ma *J2534) recvManager() {
 				ma.output("read CAN ID error: " + err.Error())
 				continue
 			}
+			if msg.DataSize == 0 {
+				log.Println("empty message", id)
+				continue
+			}
 			f := gocan.NewFrame(id, msg.Data[4:msg.DataSize], gocan.Incoming)
 			ma.recv <- f
 		}
