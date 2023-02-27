@@ -86,7 +86,7 @@ func (ma *J2534) Init(ctx context.Context) error {
 	//	return err
 	//}
 
-	if err := ma.h.PassThruConnect(ma.deviceID, ma.protocol, 0x1000000, baudRate, &ma.channelID); err != nil {
+	if err := ma.h.PassThruConnect(ma.deviceID, ma.protocol, ma.flags, baudRate, &ma.channelID); err != nil {
 		ma.Close()
 		return fmt.Errorf("PassThruConnect: %w", err)
 	}
