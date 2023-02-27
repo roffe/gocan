@@ -44,9 +44,9 @@ type SX struct {
 func NewSX(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	sx := &SX{
 		cfg:   cfg,
-		send:  make(chan gocan.CANFrame, 100),
-		recv:  make(chan gocan.CANFrame, 100),
-		close: make(chan struct{}, 10),
+		send:  make(chan gocan.CANFrame, 10),
+		recv:  make(chan gocan.CANFrame, 10),
+		close: make(chan struct{}, 1),
 	}
 
 	if err := sx.setCANrate(cfg.CANRate); err != nil {
@@ -56,6 +56,10 @@ func NewSX(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	sx.setCANfilter(cfg.CANFilter)
 
 	return sx, nil
+}
+
+func (cu *SX) Name() string {
+	return "OBDLinkSX"
 }
 
 var adapterSpeeds = []int{115200, 230400, 921600, 2000000, 1000000, 57600, 38400}
@@ -83,7 +87,7 @@ func (cu *SX) Init(ctx context.Context) error {
 	err = retry.Do(func() error {
 		to := cu.cfg.PortBaudrate
 		for _, from := range adapterSpeeds {
-			if err := setSpeed(p, mode, from, to); err == nil {
+			if err := cu.setSpeed(p, mode, from, to); err == nil {
 				log.Printf("Switched adapter baudrate from %d to %d bps", from, to)
 				return nil
 			} else {
@@ -120,12 +124,7 @@ func (cu *SX) Init(ctx context.Context) error {
 		cu.mask,   // mask
 	}
 
-	delay := time.Duration(2147483647 / mode.BaudRate)
-	if delay > (100 * time.Millisecond) {
-		delay = 100 * time.Millisecond
-	}
-
-	time.Sleep(delay)
+	delay := 20 * time.Millisecond
 
 	for _, c := range initCmds {
 		if c == "" {
@@ -149,7 +148,7 @@ func (cu *SX) Init(ctx context.Context) error {
 	return nil
 }
 
-func setSpeed(p serial.Port, mode *serial.Mode, from, to int) error {
+func (cu *SX) setSpeed(p serial.Port, mode *serial.Mode, from, to int) error {
 	mode.BaudRate = from
 	p.SetMode(mode)
 	start := time.Now()
@@ -180,7 +179,9 @@ func setSpeed(p serial.Port, mode *serial.Mode, from, to int) error {
 						continue
 					}
 					if strings.Contains(buff.String(), "ELM327") || strings.Contains(buff.String(), "STN") {
-						log.Printf("%q, %s", buff.String(), time.Since(start).String())
+						if cu.cfg.Output != nil {
+							cu.cfg.Output(buff.String())
+						}
 						return nil
 					}
 					buff.Reset()
@@ -240,7 +241,7 @@ func (cu *SX) Send() chan<- gocan.CANFrame {
 
 func (cu *SX) Close() error {
 	cu.closed = true
-	cu.close <- token{}
+	//cu.close <- token{}
 	time.Sleep(100 * time.Millisecond)
 	cu.port.Write([]byte("ATZ\r"))
 	time.Sleep(100 * time.Millisecond)
@@ -252,44 +253,6 @@ func (cu *SX) Close() error {
 type token struct{}
 
 var sendMutex = make(chan token, 1)
-
-func (cu *SX) sendManager2(ctx context.Context) {
-	f := bytes.NewBuffer(nil)
-	for {
-		select {
-		case v := <-cu.send:
-			switch v.(type) {
-			default:
-				idb := make([]byte, 4)
-				binary.BigEndian.PutUint32(idb, v.Identifier())
-
-				t := v.Type()
-				r := t.GetResponseCount()
-
-				//a := v.Identifier()
-				// write cmd and header
-				//f.Write([]byte{'S','T','P','X','h', ':',byte(a>>8) + 0x30, (byte(a) >> 4) + 0x30, ((byte(a) << 4) >> 4) + 0x30, ','})
-				//addr := strings.ToUpper(hex.EncodeToString(idb)[5:])
-				data := strings.ToUpper(hex.EncodeToString(v.Data()))
-				f.WriteString(data + " " + fmt.Sprintf("%X", r) + "\r")
-			}
-
-			sendMutex <- token{}
-			if debug {
-				fmt.Fprint(os.Stderr, "<o> "+f.String()+"\n")
-			}
-			_, err := cu.port.Write(f.Bytes())
-			if err != nil {
-				log.Printf("failed to write to com port: %q, %v", f.String(), err)
-			}
-			f.Reset()
-		case <-ctx.Done():
-			return
-		case <-cu.close:
-			return
-		}
-	}
-}
 
 func (cu *SX) sendManager(ctx context.Context) {
 	f := bytes.NewBuffer(nil)
@@ -414,35 +377,17 @@ func (cu *SX) recvManager(ctx context.Context) {
 }
 
 func (*SX) decodeFrame(buff []byte) (gocan.CANFrame, error) {
-	idBytes, err := hex.DecodeString(fmt.Sprintf("%08s", buff[0:3]))
+	id, err := strconv.ParseUint(string(buff[0:3]), 16, 32)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode identifier: %v", err)
 	}
-
 	data, err := hex.DecodeString(string(buff[3:]))
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode frame body: %v", err)
 	}
-
 	return gocan.NewFrame(
-		binary.BigEndian.Uint32(idBytes),
+		uint32(id),
 		data,
 		gocan.Incoming,
 	), nil
 }
-
-/*func (*SX) decodeFrame(buff []byte) (gocan.CANFrame, error) {
-	data, err := hex.DecodeString(string(buff[3:]))
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode frame body: %v", err)
-	}
-
-	id := uint32(buff[0]-0x30)<<8 | uint32(buff[1]-0x30)<<4 | uint32(buff[2]-0x30)
-
-	return gocan.NewFrame(
-		id,
-		data,
-		gocan.Incoming,
-	), nil
-}
-*/

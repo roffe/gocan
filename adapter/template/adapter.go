@@ -21,6 +21,10 @@ func New(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	}, nil
 }
 
+func (a *Adapter) Name() string {
+	return "Template"
+}
+
 func (a *Adapter) Init(ctx context.Context) error {
 	return nil
 }

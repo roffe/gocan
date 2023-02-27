@@ -12,6 +12,7 @@ const (
 
 type Adapter interface {
 	Init(context.Context) error
+	Name() string
 	Recv() <-chan CANFrame
 	Send() chan<- CANFrame
 	Close() error
@@ -40,6 +41,10 @@ func New(ctx context.Context, adapter Adapter) (*Client, error) {
 	}
 	go c.fh.run(ctx)
 	return c, nil
+}
+
+func (c *Client) Adapter() Adapter {
+	return c.adapter
 }
 
 func (c *Client) Close() error {

@@ -37,8 +37,8 @@ type Adapter struct {
 func New(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	adapter := &Adapter{
 		cfg:   cfg,
-		send:  make(chan gocan.CANFrame, 100),
-		recv:  make(chan gocan.CANFrame, 100),
+		send:  make(chan gocan.CANFrame, 10),
+		recv:  make(chan gocan.CANFrame, 10),
 		close: make(chan struct{}, 1),
 	}
 
@@ -62,6 +62,10 @@ func New(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	}
 
 	return adapter, nil
+}
+
+func (a *Adapter) Name() string {
+	return "Just4Trionic"
 }
 
 func (a *Adapter) Init(ctx context.Context) error {
@@ -187,7 +191,7 @@ func (a *Adapter) parse(ctx context.Context, readBuffer []byte, buff *bytes.Buff
 			return
 		default:
 		}
-		if b == 0x0D {
+		if b == 0x0D || b == 0x0A {
 			if buff.Len() == 0 {
 				continue
 			}

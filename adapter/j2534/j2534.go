@@ -28,11 +28,15 @@ type J2534 struct {
 func New(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	ma := &J2534{
 		cfg:   cfg,
-		send:  make(chan gocan.CANFrame, 100),
-		recv:  make(chan gocan.CANFrame, 100),
+		send:  make(chan gocan.CANFrame, 10),
+		recv:  make(chan gocan.CANFrame, 10),
 		close: make(chan struct{}, 1),
 	}
 	return ma, nil
+}
+
+func (ma *J2534) Name() string {
+	return "J2534"
 }
 
 func (ma *J2534) output(str string) {
@@ -50,36 +54,44 @@ func (ma *J2534) Init(ctx context.Context) error {
 		return err
 	}
 
+	var swcan bool
 	var baudRate uint32
 	switch ma.cfg.CANRate {
 	case 33.3:
 		baudRate = 33300
 		ma.protocol = SW_CAN_PS
+		swcan = true
 	case 500:
 		baudRate = 500000
 		ma.protocol = CAN
 	case 615.384:
 		baudRate = 615384
-		ma.protocol = CAN_PS
+		ma.protocol = CAN
 	default:
 		return errors.New("invalid CAN rate")
 	}
+
 	if err := ma.h.PassThruOpen("", &ma.deviceID); err != nil {
-		return err
+		str, err2 := ma.h.PassThruGetLastError()
+		if err2 != nil {
+			ma.output(err2.Error())
+		} else {
+			ma.output("LR" + str)
+		}
+		ma.Close()
+		return fmt.Errorf("PassThruOpen: %w", err)
 	}
 
 	//if err := ma.printVersions(); err != nil {
 	//	return err
 	//}
 
-	if err := ma.h.PassThruConnect(ma.deviceID, ma.protocol, ma.flags, baudRate, &ma.channelID); err != nil {
-		if err := ma.Close(); err != nil {
-			ma.output(err.Error())
-		}
-		return err
+	if err := ma.h.PassThruConnect(ma.deviceID, ma.protocol, 0x1000000, baudRate, &ma.channelID); err != nil {
+		ma.Close()
+		return fmt.Errorf("PassThruConnect: %w", err)
 	}
 
-	if ma.protocol == SW_CAN_PS {
+	if swcan {
 		input1 := &SCONFIG_LIST{
 			NumOfParams: 1,
 			ConfigPtr: &SCONFIG{
@@ -89,22 +101,19 @@ func (ma *J2534) Init(ctx context.Context) error {
 		}
 
 		if err := ma.h.PassThruIoctl(ma.channelID, SET_CONFIG, (*byte)(unsafe.Pointer(input1)), nil); err != nil {
-			str, err2 := ma.h.PassThruGetLastError()
-			if err2 != nil {
-				ma.output(err2.Error())
-			} else {
-				ma.output(str)
-			}
-			return err
+			ma.Close()
+			return fmt.Errorf("PassThruIoctl set SWCAN: %w", err)
 		}
 	}
 
 	if err := ma.h.PassThruIoctl(ma.channelID, CLEAR_TX_BUFFER, nil, nil); err != nil {
-		return err
+		ma.Close()
+		return fmt.Errorf("PassThruIoctl clear tx buffer: %w", err)
 	}
 
 	if err := ma.h.PassThruIoctl(ma.channelID, CLEAR_RX_BUFFER, nil, nil); err != nil {
-		return err
+		ma.Close()
+		return fmt.Errorf("PassThruIoctl clear rx buffer: %w", err)
 	}
 
 	if len(ma.cfg.CANFilter) > 0 {
@@ -155,10 +164,12 @@ func (ma *J2534) setupFilters() error {
 		binary.BigEndian.PutUint32(pattern, filter)
 		PatternMsg.ProtocolID = ma.protocol
 		if n := copy(PatternMsg.Data[:], pattern); n != len(pattern) {
+			ma.Close()
 			return errors.New("copy failed to pattern data")
 		}
 		PatternMsg.DataSize = 4
 		if err := ma.h.PassThruStartMsgFilter(ma.channelID, PASS_FILTER, &MaskMsg, &PatternMsg, nil, filterID); err != nil {
+			ma.Close()
 			return err
 		}
 	}
@@ -238,11 +249,8 @@ func (ma *J2534) Send() chan<- gocan.CANFrame {
 func (ma *J2534) Close() error {
 	close(ma.close)
 	time.Sleep(200 * time.Millisecond)
-
 	ma.h.PassThruIoctl(ma.channelID, CLEAR_MSG_FILTERS, nil, nil)
-
 	ma.h.PassThruDisconnect(ma.channelID)
-
 	ma.h.PassThruClose(ma.deviceID)
 	return ma.h.Close()
 }

@@ -2,6 +2,7 @@ package j2534
 
 import (
 	"errors"
+	"fmt"
 )
 
 var (
@@ -92,7 +93,7 @@ func CheckError(ret uintptr) error {
 	case ERR_INVALID_DEVICE_ID:
 		return ErrInvalidDeviceID
 	default:
-		return ErrUnknown
+		return fmt.Errorf("unknown error: %d", ret)
 	}
 }
 

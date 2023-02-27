@@ -413,6 +413,7 @@ func NewJ2534(dllName string) (*PassThru, error) {
 }
 
 func (j *PassThru) Close() error {
+	log.Println("DLL Release")
 	return j.dll.Release()
 }
 
