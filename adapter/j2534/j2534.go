@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 	"unsafe"
@@ -53,6 +54,10 @@ func (ma *J2534) Init(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	var t2 bool
+	if strings.HasSuffix(ma.cfg.Port, "Tech2_32.dll") {
+		t2 = true
+	}
 
 	var swcan bool
 	var baudRate uint32
@@ -86,6 +91,10 @@ func (ma *J2534) Init(ctx context.Context) error {
 	//	return err
 	//}
 
+	if t2 {
+		time.Sleep(5 * time.Second)
+	}
+
 	if err := ma.h.PassThruConnect(ma.deviceID, ma.protocol, ma.flags, baudRate, &ma.channelID); err != nil {
 		ma.Close()
 		return fmt.Errorf("PassThruConnect: %w", err)
@@ -104,24 +113,33 @@ func (ma *J2534) Init(ctx context.Context) error {
 			ma.Close()
 			return fmt.Errorf("PassThruIoctl set SWCAN: %w", err)
 		}
+		if t2 {
+			time.Sleep(5 * time.Second)
+		}
 	}
 
 	if err := ma.h.PassThruIoctl(ma.channelID, CLEAR_TX_BUFFER, nil, nil); err != nil {
 		ma.Close()
 		return fmt.Errorf("PassThruIoctl clear tx buffer: %w", err)
 	}
-
+	if t2 {
+		time.Sleep(5 * time.Second)
+	}
 	if err := ma.h.PassThruIoctl(ma.channelID, CLEAR_RX_BUFFER, nil, nil); err != nil {
 		ma.Close()
 		return fmt.Errorf("PassThruIoctl clear rx buffer: %w", err)
 	}
-
+	if t2 {
+		time.Sleep(5 * time.Second)
+	}
 	if len(ma.cfg.CANFilter) > 0 {
 		ma.setupFilters()
 	} else {
 		ma.allowAll()
 	}
-
+	if t2 {
+		time.Sleep(5 * time.Second)
+	}
 	go ma.recvManager()
 	go ma.sendManager()
 
