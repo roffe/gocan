@@ -120,8 +120,8 @@ func (cu *SX) Init(ctx context.Context) error {
 		"ATCFC0",    //Turn automatic CAN flow control off
 		//"ATAR",      // Automatically set the receive address.
 		//"ATCSM1",  //Turn CAN silent monitoring off
-		cu.filter, // code
 		cu.mask,   // mask
+		cu.filter, // code
 	}
 
 	delay := 20 * time.Millisecond
@@ -208,6 +208,9 @@ func (cu *SX) setSpeed(p serial.Port, mode *serial.Mode, from, to int) error {
 
 func (cu *SX) setCANrate(rate float64) error {
 	switch rate {
+	case 33.3: //MX ony feature
+		cu.protocol = "STP61"
+		cu.canrate = "STCSWM2"
 	case 500:
 		cu.protocol = "STP33"
 	case 615.384:
