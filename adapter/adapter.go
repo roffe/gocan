@@ -15,7 +15,8 @@ type NewAdapterFunc func(*gocan.AdapterConfig) (gocan.Adapter, error)
 var adapterMap = map[string]NewAdapterFunc{
 	"J2534":        j2534.New,
 	"CANusb":       lawicel.NewCanusb,
-	"OBDLinkSX":    obdlink.NewSX,
+	"OBDLink SX":   obdlink.NewSX,
+	"OBDLink MX":   obdlink.NewSX,
 	"Just4Trionic": just4trionic.New,
 }
 

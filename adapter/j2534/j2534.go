@@ -28,10 +28,12 @@ type J2534 struct {
 
 func New(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	ma := &J2534{
-		cfg:   cfg,
-		send:  make(chan gocan.CANFrame, 10),
-		recv:  make(chan gocan.CANFrame, 10),
-		close: make(chan struct{}, 1),
+		cfg:       cfg,
+		send:      make(chan gocan.CANFrame, 10),
+		recv:      make(chan gocan.CANFrame, 10),
+		close:     make(chan struct{}, 1),
+		channelID: 1,
+		deviceID:  1,
 	}
 	return ma, nil
 }
@@ -83,7 +85,6 @@ func (ma *J2534) Init(ctx context.Context) error {
 		} else {
 			ma.output("LR" + str)
 		}
-		ma.Close()
 		return fmt.Errorf("PassThruOpen: %w", err)
 	}
 
@@ -92,11 +93,10 @@ func (ma *J2534) Init(ctx context.Context) error {
 	//}
 
 	if t2 {
-		time.Sleep(5 * time.Second)
+		time.Sleep(1 * time.Second)
 	}
 
 	if err := ma.h.PassThruConnect(ma.deviceID, ma.protocol, ma.flags, baudRate, &ma.channelID); err != nil {
-		ma.Close()
 		return fmt.Errorf("PassThruConnect: %w", err)
 	}
 
@@ -110,35 +110,24 @@ func (ma *J2534) Init(ctx context.Context) error {
 		}
 
 		if err := ma.h.PassThruIoctl(ma.channelID, SET_CONFIG, (*byte)(unsafe.Pointer(input1)), nil); err != nil {
-			ma.Close()
 			return fmt.Errorf("PassThruIoctl set SWCAN: %w", err)
 		}
 		if t2 {
-			time.Sleep(5 * time.Second)
+			time.Sleep(2 * time.Second)
 		}
 	}
 
-	if err := ma.h.PassThruIoctl(ma.channelID, CLEAR_TX_BUFFER, nil, nil); err != nil {
-		ma.Close()
-		return fmt.Errorf("PassThruIoctl clear tx buffer: %w", err)
-	}
-	if t2 {
-		time.Sleep(5 * time.Second)
-	}
 	if err := ma.h.PassThruIoctl(ma.channelID, CLEAR_RX_BUFFER, nil, nil); err != nil {
-		ma.Close()
 		return fmt.Errorf("PassThruIoctl clear rx buffer: %w", err)
 	}
-	if t2 {
-		time.Sleep(5 * time.Second)
-	}
+
 	if len(ma.cfg.CANFilter) > 0 {
 		ma.setupFilters()
 	} else {
 		ma.allowAll()
 	}
 	if t2 {
-		time.Sleep(5 * time.Second)
+		time.Sleep(2 * time.Second)
 	}
 	go ma.recvManager()
 	go ma.sendManager()
@@ -168,7 +157,6 @@ func (ma *J2534) setupFilters() error {
 	if len(ma.cfg.CANFilter) > 10 {
 		return errors.New("too many filters")
 	}
-
 	var MaskMsg, PatternMsg PassThruMsg
 	mask := [4]byte{0xff, 0xff, 0xff, 0xff}
 	MaskMsg.ProtocolID = ma.protocol
@@ -182,12 +170,10 @@ func (ma *J2534) setupFilters() error {
 		binary.BigEndian.PutUint32(pattern, filter)
 		PatternMsg.ProtocolID = ma.protocol
 		if n := copy(PatternMsg.Data[:], pattern); n != len(pattern) {
-			ma.Close()
 			return errors.New("copy failed to pattern data")
 		}
 		PatternMsg.DataSize = 4
 		if err := ma.h.PassThruStartMsgFilter(ma.channelID, PASS_FILTER, &MaskMsg, &PatternMsg, nil, filterID); err != nil {
-			ma.Close()
 			return err
 		}
 	}
