@@ -23,7 +23,8 @@ type AdapterConfig struct {
 	PortBaudrate int
 	CANRate      float64
 	CANFilter    []uint32
-	Output       func(string)
+	OutputFunc   func(string)
+	ErrorFunc    func(error)
 }
 
 type Client struct {
@@ -74,16 +75,13 @@ func (c *Client) SendFrame(identifier uint32, data []byte, f CANFrameType) error
 func (c *Client) SendAndPoll(ctx context.Context, frame CANFrame, timeout time.Duration, identifiers ...uint32) (CANFrame, error) {
 	frame.SetTimeout(timeout)
 	p := newSub(1, identifiers...)
-
 	c.fh.register <- p
 	defer func() {
 		c.fh.unregister <- p
 	}()
-
 	if err := c.Send(frame); err != nil {
 		return nil, err
 	}
-
 	return p.Wait(ctx, timeout)
 }
 

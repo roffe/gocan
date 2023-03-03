@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
-	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -99,7 +98,7 @@ func (a *Adapter) Init(ctx context.Context) error {
 			p.ResetInputBuffer()
 		}
 		if debug {
-			log.Printf("sending: %s", c)
+			a.cfg.OutputFunc(fmt.Sprintf("sending: %s", c))
 		}
 		_, err := p.Write([]byte(c + "\r"))
 		if err != nil {
@@ -156,7 +155,6 @@ func (a *Adapter) setCANrate(rate float64) error {
 		a.canRate = "S8"
 	default:
 		return fmt.Errorf("unknown rate: %f", rate)
-
 	}
 	return nil
 }
@@ -173,7 +171,7 @@ func (a *Adapter) recvManager(ctx context.Context) {
 		n, err := a.port.Read(readBuffer)
 		if err != nil {
 			if !a.closed {
-				log.Printf("failed to read com port: %v", err)
+				a.cfg.ErrorFunc(fmt.Errorf("failed to read com port: %w", err))
 			}
 			return
 		}
@@ -202,13 +200,13 @@ func (a *Adapter) parse(ctx context.Context, readBuffer []byte, buff *bytes.Buff
 			case 'w':
 				f, err := a.decodeFrame(by[1 : buff.Len()-1])
 				if err != nil {
-					log.Printf("failed to decode frame: %v %s", err, by)
+					a.cfg.ErrorFunc(fmt.Errorf("failed to decode frame: %w %X", err, by))
 					continue
 				}
 				select {
 				case a.recv <- f:
 				default:
-					log.Println("dropped frame")
+					a.cfg.ErrorFunc(fmt.Errorf("dropped frame: %v", f))
 				}
 				buff.Reset()
 			default:
@@ -224,11 +222,11 @@ func (a *Adapter) parse(ctx context.Context, readBuffer []byte, buff *bytes.Buff
 func (*Adapter) decodeFrame(buff []byte) (gocan.CANFrame, error) {
 	id, err := strconv.ParseUint(string(buff[0:3]), 16, 32)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode identifier: %v", err)
+		return nil, fmt.Errorf("failed to decode identifier: %w", err)
 	}
 	data := make([]byte, hex.DecodedLen(int(buff[3]-0x30)*2))
 	if _, err := hex.Decode(data, buff[4:]); err != nil {
-		return nil, fmt.Errorf("failed to decode frame body: %v", err)
+		return nil, fmt.Errorf("failed to decode frame body: %w", err)
 	}
 	return gocan.NewFrame(
 		uint32(id),
@@ -252,10 +250,10 @@ func (a *Adapter) sendManager(ctx context.Context) {
 			f += "\r"
 			_, err := a.port.Write([]byte(f))
 			if err != nil {
-				log.Printf("failed to write to com port: %q, %v", f, err)
+				a.cfg.ErrorFunc(fmt.Errorf("failed to write to com port: %q, %w", f, err))
 			}
 			if debug {
-				log.Printf("%q\n", f)
+				a.cfg.OutputFunc(fmt.Sprintf("sent: %q", f))
 			}
 			f = ""
 		case <-ctx.Done():

@@ -3,7 +3,6 @@ package j2534
 import (
 	"bytes"
 	"fmt"
-	"log"
 	"syscall"
 	"unsafe"
 
@@ -551,29 +550,29 @@ type J2534DLL struct {
 func FindDLLs() (dlls []J2534DLL) {
 	k, err := registry.OpenKey(registry.LOCAL_MACHINE, `SOFTWARE\PassThruSupport.04.04`, registry.QUERY_VALUE|registry.WOW64_32KEY)
 	if err != nil {
-		log.Println(err)
+		//log.Println(err)
 		return
 	}
 	ki, err := k.Stat()
 	if err != nil {
-		log.Println(err)
+		//log.Println(err)
 		return
 	}
 
 	if err := k.Close(); err != nil {
-		log.Println(err)
+		//log.Println(err)
 		return
 	}
 
 	k2, err := registry.OpenKey(registry.LOCAL_MACHINE, `SOFTWARE\PassThruSupport.04.04`, registry.ENUMERATE_SUB_KEYS|registry.WOW64_32KEY)
 	if err != nil {
-		log.Println(err)
+		//log.Println(err)
 		return
 	}
 
 	adapters, err := k2.ReadSubKeyNames(int(ki.SubKeyCount))
 	if err != nil {
-		log.Println(err)
+		//log.Println(err)
 		return
 	}
 

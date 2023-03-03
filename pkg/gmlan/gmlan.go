@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"strings"
 	"time"
 
@@ -416,7 +415,7 @@ func (cl *Client) ReadDataByIdentifier(ctx context.Context, pid byte) ([]byte, e
 		}
 		return out.Bytes(), nil
 	default:
-		log.Println(resp.String())
+		//log.Println(resp.String())
 		return nil, errors.New("unhandled response")
 	}
 	//log.Println(resp.String())
@@ -521,14 +520,14 @@ func (cl *Client) readDiagnosticInformation(ctx context.Context, subFunc byte, p
 					if d[1] == 0x00 && d[2] == 0x00 && d[3] == 0x00 { // No more DTCs
 						break outer
 					}
-					log.Println("append")
+					//log.Println("append")
 					out = append(out, []byte{d[1], d[2], d[3], d[4]})
 				case <-time.After(00 * time.Millisecond):
 					break outer
 				}
 			}
 		} else {
-			log.Println("not pending")
+			//log.Println("not pending")
 			return nil, err
 		}
 	}
@@ -589,7 +588,7 @@ func (cl *Client) RequestSecurityAccess(ctx context.Context, accesslevel byte, d
 	}
 
 	if seed[0] == 0x00 && seed[1] == 0x00 {
-		log.Println("Security access already granted")
+		//log.Println("Security access already granted")
 		return nil
 	}
 
@@ -759,7 +758,7 @@ func (cl *Client) writeDataByIdentifierMultiframe(ctx context.Context, pid byte,
 
 		if r.Len() > 0 {
 			frame := gocan.NewFrame(cl.canID, pkg, gocan.Outgoing)
-			log.Println(frame.String())
+			//log.Println(frame.String())
 			cl.c.Send(frame)
 			time.Sleep(time.Duration(delay) * time.Millisecond)
 		} else {

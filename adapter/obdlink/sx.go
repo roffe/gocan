@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -88,10 +87,10 @@ func (cu *SX) Init(ctx context.Context) error {
 		to := cu.cfg.PortBaudrate
 		for _, from := range adapterSpeeds {
 			if err := cu.setSpeed(p, mode, from, to); err == nil {
-				log.Printf("Switched adapter baudrate from %d to %d bps", from, to)
+				cu.cfg.OutputFunc(fmt.Sprintf("Switched adapter baudrate from %d to %d bps", from, to))
 				return nil
 			} else {
-				log.Println(err)
+				cu.cfg.ErrorFunc(fmt.Errorf("failed to switch adapter baudrate from %d to %d bps: %w", from, to, err))
 			}
 		}
 		return errors.New("/!\\ Could not init adapter")
@@ -99,7 +98,7 @@ func (cu *SX) Init(ctx context.Context) error {
 		retry.Context(ctx),
 		retry.Attempts(2),
 		retry.OnRetry(func(n uint, err error) {
-			log.Printf("Retry #%d: %v", n, err)
+			cu.cfg.ErrorFunc(fmt.Errorf("retry #%d: %w", n, err))
 		}),
 		retry.LastErrorOnly(true),
 	)
@@ -132,11 +131,11 @@ func (cu *SX) Init(ctx context.Context) error {
 		}
 		out := []byte(c + "\r")
 		if debug {
-			log.Println(c)
+			cu.cfg.OutputFunc(c)
 		}
 		_, err := p.Write(out)
 		if err != nil {
-			log.Println(err)
+			cu.cfg.ErrorFunc(err)
 		}
 		time.Sleep(delay)
 	}
@@ -179,9 +178,7 @@ func (cu *SX) setSpeed(p serial.Port, mode *serial.Mode, from, to int) error {
 						continue
 					}
 					if strings.Contains(buff.String(), "ELM327") || strings.Contains(buff.String(), "STN") {
-						if cu.cfg.Output != nil {
-							cu.cfg.Output(buff.String())
-						}
+						cu.cfg.OutputFunc(buff.String())
 						return nil
 					}
 					buff.Reset()
@@ -288,11 +285,11 @@ func (cu *SX) sendManager(ctx context.Context) {
 
 			sendMutex <- token{}
 			if debug {
-				fmt.Fprint(os.Stderr, "<o> "+f.String()+"\n")
+				cu.cfg.OutputFunc("<o> " + f.String())
 			}
 			_, err := cu.port.Write(f.Bytes())
 			if err != nil {
-				log.Printf("failed to write to com port: %q, %v", f.String(), err)
+				cu.cfg.ErrorFunc(fmt.Errorf("failed to write to com port: %q, %w", f.String(), err))
 			}
 			f.Reset()
 		case <-ctx.Done():
@@ -315,14 +312,13 @@ func (cu *SX) recvManager(ctx context.Context) {
 		n, err := cu.port.Read(readBuffer)
 		if err != nil {
 			if !cu.closed {
-				log.Printf("failed to read com port: %v", err)
+				cu.cfg.ErrorFunc(fmt.Errorf("failed to read com port: %w", err))
 			}
 			return
 		}
 		if n == 0 {
 			continue
 		}
-		//		log.Printf("%q", readBuffer[:n])
 		for _, b := range readBuffer[:n] {
 			select {
 			case <-ctx.Done():
@@ -343,32 +339,31 @@ func (cu *SX) recvManager(ctx context.Context) {
 					continue
 				}
 				if debug {
-					fmt.Fprint(os.Stderr, "<i> ", buff.String()+"\n")
+					cu.cfg.OutputFunc("<i> " + buff.String())
 				}
 				switch buff.String() {
 				case "CAN ERROR":
-					log.Println("CAN ERROR")
+					cu.cfg.ErrorFunc(errors.New("CAN ERROR"))
 					buff.Reset()
 				case "STOPPED":
 					buff.Reset()
 				case "?":
-					log.Println("UNKNOWN COMMAND")
+					cu.cfg.ErrorFunc(errors.New("UNKNOWN COMMAND"))
 					buff.Reset()
 				case "NO DATA":
-					//log.Println("NO DATA")
 					buff.Reset()
 				case "OK":
 					buff.Reset()
 				default:
 					f, err := cu.decodeFrame(buff.Bytes())
 					if err != nil {
-						log.Printf("%v: %q\n", err, buff.String())
+						cu.cfg.ErrorFunc(fmt.Errorf("failed to decode frame: %s %w", buff.String(), err))
 						continue
 					}
 					select {
 					case cu.recv <- f:
 					default:
-						log.Println("dropped frame")
+						cu.cfg.ErrorFunc(fmt.Errorf("dropped frame: %s", f.String()))
 					}
 					buff.Reset()
 				}

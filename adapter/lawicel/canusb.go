@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -199,7 +198,7 @@ func (cu *Canusb) sendManager(ctx context.Context) {
 			sendMutex <- token{}
 			_, err := cu.port.Write(f.Bytes())
 			if err != nil {
-				log.Printf("failed to write to com port: %q, %v", f.String(), err)
+				cu.cfg.ErrorFunc(fmt.Errorf("failed to write to com port: %s, %w", f.String(), err))
 			}
 			if debug {
 				fmt.Fprint(os.Stderr, ">> "+f.String()+"\n")
@@ -225,7 +224,7 @@ func (cu *Canusb) recvManager(ctx context.Context) {
 		n, err := cu.port.Read(readBuffer)
 		if err != nil {
 			if !cu.closed {
-				log.Printf("failed to read com port: %v", err)
+				cu.cfg.ErrorFunc(fmt.Errorf("failed to read com port: %w", err))
 			}
 			return
 		}
@@ -255,7 +254,7 @@ func (cu *Canusb) parse(ctx context.Context, readBuffer []byte, buff *bytes.Buff
 			switch by[0] {
 			case 'F':
 				if err := decodeStatus(by); err != nil {
-					log.Println("CAN status error", err)
+					cu.cfg.ErrorFunc(fmt.Errorf("CAN status error: %w", err))
 				}
 			case 't':
 				if debug {
@@ -263,13 +262,13 @@ func (cu *Canusb) parse(ctx context.Context, readBuffer []byte, buff *bytes.Buff
 				}
 				f, err := cu.decodeFrame(by)
 				if err != nil {
-					log.Printf("failed to decode frame: %q\n", buff.String())
+					cu.cfg.ErrorFunc(fmt.Errorf("failed to decode frame: %X", buff.Bytes()))
 					continue
 				}
 				select {
 				case cu.recv <- f:
 				default:
-					log.Println("dropped frame")
+					cu.cfg.ErrorFunc(errors.New("dropped frame"))
 				}
 				buff.Reset()
 			case 'z': // last command ok
@@ -279,17 +278,11 @@ func (cu *Canusb) parse(ctx context.Context, readBuffer []byte, buff *bytes.Buff
 				}
 			case 0x07: // bell, last command was error
 			case 'V':
-				if cu.cfg.Output != nil {
-					cu.cfg.Output("H/W version " + buff.String())
-				}
+				cu.cfg.OutputFunc("H/W version " + buff.String())
 			case 'N':
-				if cu.cfg.Output != nil {
-					cu.cfg.Output("H/W serial " + buff.String())
-				}
+				cu.cfg.OutputFunc("H/W serial " + buff.String())
 			default:
-				if cu.cfg.Output != nil {
-					cu.cfg.Output("Unknown>> " + buff.String())
-				}
+				cu.cfg.OutputFunc("Unknown>> " + buff.String())
 			}
 			buff.Reset()
 			continue

@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"log"
 	"runtime"
 	"strings"
 	"syscall"
@@ -42,14 +41,6 @@ func (ma *J2534) Name() string {
 	return "J2534"
 }
 
-func (ma *J2534) output(str string) {
-	if ma.cfg.Output != nil {
-		ma.cfg.Output(str)
-	} else {
-		log.Println(str)
-	}
-}
-
 func (ma *J2534) Init(ctx context.Context) error {
 	var err error
 	ma.h, err = NewJ2534(ma.cfg.Port)
@@ -65,7 +56,7 @@ func (ma *J2534) Init(ctx context.Context) error {
 	var baudRate uint32
 	switch ma.cfg.CANRate {
 	case 33.3:
-		baudRate = 33300
+		baudRate = 33333
 		ma.protocol = SW_CAN_PS
 		swcan = true
 	case 500:
@@ -81,9 +72,9 @@ func (ma *J2534) Init(ctx context.Context) error {
 	if err := ma.h.PassThruOpen("", &ma.deviceID); err != nil {
 		str, err2 := ma.h.PassThruGetLastError()
 		if err2 != nil {
-			ma.output(err2.Error())
+			ma.cfg.ErrorFunc(fmt.Errorf("PassThruOpenGetLastError: %w", err))
 		} else {
-			ma.output("LR" + str)
+			ma.cfg.OutputFunc("PassThruOpen: " + str)
 		}
 		return fmt.Errorf("PassThruOpen: %w", err)
 	}
@@ -96,25 +87,39 @@ func (ma *J2534) Init(ctx context.Context) error {
 		time.Sleep(1 * time.Second)
 	}
 
+	//ma.cfg.OutputFunc(fmt.Sprintf("PassThruConnect: %d %X %X %d", ma.deviceID, ma.protocol, ma.flags, baudRate))
 	if err := ma.h.PassThruConnect(ma.deviceID, ma.protocol, ma.flags, baudRate, &ma.channelID); err != nil {
 		return fmt.Errorf("PassThruConnect: %w", err)
 	}
 
 	if swcan {
-		input1 := &SCONFIG_LIST{
+		opts := &SCONFIG_LIST{
 			NumOfParams: 1,
 			ConfigPtr: &SCONFIG{
 				Parameter: J1962_PINS,
 				Value:     0x0100,
 			},
 		}
-
-		if err := ma.h.PassThruIoctl(ma.channelID, SET_CONFIG, (*byte)(unsafe.Pointer(input1)), nil); err != nil {
+		if err := ma.h.PassThruIoctl(ma.channelID, SET_CONFIG, (*byte)(unsafe.Pointer(opts)), nil); err != nil {
 			return fmt.Errorf("PassThruIoctl set SWCAN: %w", err)
 		}
 		if t2 {
-			time.Sleep(2 * time.Second)
+			time.Sleep(1 * time.Second)
 		}
+	}
+
+	if t2 {
+		opts := &SCONFIG_LIST{
+			NumOfParams: 1,
+			ConfigPtr: &SCONFIG{
+				Parameter: LOOPBACK,
+				Value:     0x1,
+			},
+		}
+		if err := ma.h.PassThruIoctl(ma.channelID, SET_CONFIG, (*byte)(unsafe.Pointer(opts)), nil); err != nil {
+			return fmt.Errorf("PassThruIoctl set SWCAN: %w", err)
+		}
+		time.Sleep(1 * time.Second)
 	}
 
 	if err := ma.h.PassThruIoctl(ma.channelID, CLEAR_RX_BUFFER, nil, nil); err != nil {
@@ -127,7 +132,7 @@ func (ma *J2534) Init(ctx context.Context) error {
 		ma.allowAll()
 	}
 	if t2 {
-		time.Sleep(2 * time.Second)
+		time.Sleep(1 * time.Second)
 	}
 	go ma.recvManager()
 	go ma.sendManager()
@@ -149,7 +154,7 @@ func (ma *J2534) allowAll() {
 	PatternMsg.DataSize = 4
 
 	if err := ma.h.PassThruStartMsgFilter(ma.channelID, PASS_FILTER, &MaskMsg, &PatternMsg, nil, &filterID); err != nil {
-		log.Fatal(err)
+		ma.cfg.ErrorFunc(fmt.Errorf("PassThruStartMsgFilter: %w", err))
 	}
 }
 
@@ -197,18 +202,17 @@ func (ma *J2534) recvManager() {
 				if errors.Is(err, ErrDeviceNotConnected) {
 					return
 				}
-
-				ma.output("read error: " + err.Error())
+				ma.cfg.ErrorFunc(fmt.Errorf("read error: %w", err))
 				continue
 			}
 			var id uint32
 
 			if err := binary.Read(bytes.NewReader(msg.Data[:]), binary.BigEndian, &id); err != nil {
-				ma.output("read CAN ID error: " + err.Error())
+				ma.cfg.ErrorFunc(fmt.Errorf("read CAN ID error: %w", err))
 				continue
 			}
 			if msg.DataSize == 0 {
-				log.Println("empty message", id)
+				ma.cfg.ErrorFunc(fmt.Errorf("empty message: %d", id))
 				continue
 			}
 			f := gocan.NewFrame(id, msg.Data[4:msg.DataSize], gocan.Incoming)
@@ -226,7 +230,7 @@ func (ma *J2534) sendManager() {
 		case f := <-ma.send:
 			buf.Reset()
 			if err := binary.Write(&buf, binary.BigEndian, f.Identifier()); err != nil {
-				ma.output("unable to write CAN ID to buffer: " + err.Error())
+				ma.cfg.ErrorFunc(fmt.Errorf("unable to write CAN ID to buffer:  %w", err))
 				continue
 			}
 			buf.Write(f.Data())
@@ -240,7 +244,7 @@ func (ma *J2534) sendManager() {
 			}
 			copy(msg.Data[:], buf.Bytes())
 			if err := ma.h.PassThruWriteMsgs(ma.channelID, uintptr(unsafe.Pointer(msg)), 1, 0); err != nil {
-				ma.output("send error: " + err.Error())
+				ma.cfg.ErrorFunc(fmt.Errorf("send error: %w", err))
 			}
 		}
 	}
@@ -268,15 +272,8 @@ func (ma *J2534) printVersions() error {
 	if err != nil {
 		return err
 	}
-	if ma.cfg.Output != nil {
-		ma.cfg.Output(fmt.Sprintf("Firmware version: %s", firmwareVersion))
-		ma.cfg.Output(fmt.Sprintf("DLL version: %s", dllVersion))
-		ma.cfg.Output(fmt.Sprintf("API version: %s", apiVersion))
-
-	} else {
-		fmt.Println("Firmware version:", firmwareVersion)
-		fmt.Println("DLL version:", dllVersion)
-		fmt.Println("API version:", apiVersion)
-	}
+	ma.cfg.OutputFunc(fmt.Sprintf("Firmware version: %s", firmwareVersion))
+	ma.cfg.OutputFunc(fmt.Sprintf("DLL version: %s", dllVersion))
+	ma.cfg.OutputFunc(fmt.Sprintf("API version: %s", apiVersion))
 	return nil
 }
