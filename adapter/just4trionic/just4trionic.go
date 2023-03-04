@@ -98,7 +98,7 @@ func (a *Adapter) Init(ctx context.Context) error {
 			p.ResetInputBuffer()
 		}
 		if debug {
-			a.cfg.OutputFunc(fmt.Sprintf("sending: %s", c))
+			a.cfg.OutputFunc("sending: " + c)
 		}
 		_, err := p.Write([]byte(c + "\r"))
 		if err != nil {
@@ -211,6 +211,7 @@ func (a *Adapter) parse(ctx context.Context, readBuffer []byte, buff *bytes.Buff
 				buff.Reset()
 			default:
 				//log.Printf("COM>> %q\n", buff.String())
+				a.cfg.OutputFunc("<< " + buff.String())
 			}
 			buff.Reset()
 			continue
@@ -253,7 +254,7 @@ func (a *Adapter) sendManager(ctx context.Context) {
 				a.cfg.ErrorFunc(fmt.Errorf("failed to write to com port: %q, %w", f, err))
 			}
 			if debug {
-				a.cfg.OutputFunc(fmt.Sprintf("sent: %q", f))
+				a.cfg.OutputFunc(">> " + f)
 			}
 			f = ""
 		case <-ctx.Done():
