@@ -199,7 +199,9 @@ func (ma *J2534) recvManager() {
 				}
 				continue
 			}
-			dllMutex.Unlock()
+			if ma.tech2passThru {
+				dllMutex.Unlock()
+			}
 			var id uint32
 
 			if err := binary.Read(bytes.NewReader(msg.Data[:]), binary.BigEndian, &id); err != nil {
