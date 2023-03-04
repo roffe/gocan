@@ -229,8 +229,10 @@ func (ma *J2534) sendManager() {
 }
 
 func (ma *J2534) sendMsg(msg *passthru.PassThruMsg) error {
-	ma.Lock()
-	defer ma.Unlock()
+	if ma.tech2passThru {
+		ma.Lock()
+		defer ma.Unlock()
+	}
 	if err := ma.h.PassThruWriteMsgs(ma.channelID, uintptr(unsafe.Pointer(msg)), 1, 0); err != nil {
 		if errStr, err2 := ma.h.PassThruGetLastError(); err2 == nil {
 			return errors.New(errStr)
