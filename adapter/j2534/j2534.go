@@ -6,22 +6,26 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"log"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unsafe"
 
 	"github.com/roffe/gocan"
+	"github.com/roffe/gocan/adapter/passthru"
 )
 
 type J2534 struct {
-	h                                    *PassThru
+	h                                    *passthru.PassThru
 	channelID, deviceID, flags, protocol uint32
 	cfg                                  *gocan.AdapterConfig
 	send, recv                           chan gocan.CANFrame
 	close                                chan struct{}
 
+	tech2passThru bool
 	*syscall.LazyProc
 }
 
@@ -43,13 +47,13 @@ func (ma *J2534) Name() string {
 
 func (ma *J2534) Init(ctx context.Context) error {
 	var err error
-	ma.h, err = NewJ2534(ma.cfg.Port)
+	ma.h, err = passthru.NewJ2534(ma.cfg.Port)
 	if err != nil {
 		return err
 	}
-	var t2 bool
+
 	if strings.HasSuffix(ma.cfg.Port, "Tech2_32.dll") {
-		t2 = true
+		ma.tech2passThru = true
 	}
 
 	var swcan bool
@@ -57,14 +61,14 @@ func (ma *J2534) Init(ctx context.Context) error {
 	switch ma.cfg.CANRate {
 	case 33.3:
 		baudRate = 33333
-		ma.protocol = SW_CAN_PS
+		ma.protocol = passthru.SW_CAN_PS
 		swcan = true
 	case 500:
 		baudRate = 500000
-		ma.protocol = CAN
+		ma.protocol = passthru.CAN
 	case 615.384:
 		baudRate = 615384
-		ma.protocol = CAN
+		ma.protocol = passthru.CAN
 	default:
 		return errors.New("invalid CAN rate")
 	}
@@ -83,46 +87,24 @@ func (ma *J2534) Init(ctx context.Context) error {
 	//	return err
 	//}
 
-	if t2 {
-		time.Sleep(1 * time.Second)
-	}
-
-	//ma.cfg.OutputFunc(fmt.Sprintf("PassThruConnect: %d %X %X %d", ma.deviceID, ma.protocol, ma.flags, baudRate))
 	if err := ma.h.PassThruConnect(ma.deviceID, ma.protocol, ma.flags, baudRate, &ma.channelID); err != nil {
 		return fmt.Errorf("PassThruConnect: %w", err)
 	}
 
 	if swcan {
-		opts := &SCONFIG_LIST{
+		opts := &passthru.SCONFIG_LIST{
 			NumOfParams: 1,
-			ConfigPtr: &SCONFIG{
-				Parameter: J1962_PINS,
+			ConfigPtr: &passthru.SCONFIG{
+				Parameter: passthru.J1962_PINS,
 				Value:     0x0100,
 			},
 		}
-		if err := ma.h.PassThruIoctl(ma.channelID, SET_CONFIG, (*byte)(unsafe.Pointer(opts)), nil); err != nil {
+		if err := ma.h.PassThruIoctl(ma.channelID, passthru.SET_CONFIG, (*byte)(unsafe.Pointer(opts)), nil); err != nil {
 			return fmt.Errorf("PassThruIoctl set SWCAN: %w", err)
-		}
-		if t2 {
-			time.Sleep(1 * time.Second)
 		}
 	}
 
-	if t2 {
-		opts := &SCONFIG_LIST{
-			NumOfParams: 1,
-			ConfigPtr: &SCONFIG{
-				Parameter: LOOPBACK,
-				Value:     0x1,
-			},
-		}
-		if err := ma.h.PassThruIoctl(ma.channelID, SET_CONFIG, (*byte)(unsafe.Pointer(opts)), nil); err != nil {
-			return fmt.Errorf("PassThruIoctl set SWCAN: %w", err)
-		}
-		time.Sleep(1 * time.Second)
-	}
-
-	if err := ma.h.PassThruIoctl(ma.channelID, CLEAR_RX_BUFFER, nil, nil); err != nil {
+	if err := ma.h.PassThruIoctl(ma.channelID, passthru.CLEAR_RX_BUFFER, nil, nil); err != nil {
 		return fmt.Errorf("PassThruIoctl clear rx buffer: %w", err)
 	}
 
@@ -130,9 +112,6 @@ func (ma *J2534) Init(ctx context.Context) error {
 		ma.setupFilters()
 	} else {
 		ma.allowAll()
-	}
-	if t2 {
-		time.Sleep(1 * time.Second)
 	}
 	go ma.recvManager()
 	go ma.sendManager()
@@ -142,7 +121,7 @@ func (ma *J2534) Init(ctx context.Context) error {
 
 func (ma *J2534) allowAll() {
 	filterID := uint32(0)
-	var MaskMsg, PatternMsg PassThruMsg
+	var MaskMsg, PatternMsg passthru.PassThruMsg
 	mask := [4]byte{0x00, 0x00, 0x00, 0x00}
 	MaskMsg.ProtocolID = ma.protocol
 	copy(MaskMsg.Data[:], mask[:])
@@ -153,7 +132,7 @@ func (ma *J2534) allowAll() {
 	copy(PatternMsg.Data[:], pattern[:])
 	PatternMsg.DataSize = 4
 
-	if err := ma.h.PassThruStartMsgFilter(ma.channelID, PASS_FILTER, &MaskMsg, &PatternMsg, nil, &filterID); err != nil {
+	if err := ma.h.PassThruStartMsgFilter(ma.channelID, passthru.PASS_FILTER, &MaskMsg, &PatternMsg, nil, &filterID); err != nil {
 		ma.cfg.ErrorFunc(fmt.Errorf("PassThruStartMsgFilter: %w", err))
 	}
 }
@@ -162,7 +141,7 @@ func (ma *J2534) setupFilters() error {
 	if len(ma.cfg.CANFilter) > 10 {
 		return errors.New("too many filters")
 	}
-	var MaskMsg, PatternMsg PassThruMsg
+	var MaskMsg, PatternMsg passthru.PassThruMsg
 	mask := [4]byte{0xff, 0xff, 0xff, 0xff}
 	MaskMsg.ProtocolID = ma.protocol
 	copy(MaskMsg.Data[:], mask[:])
@@ -178,13 +157,15 @@ func (ma *J2534) setupFilters() error {
 			return errors.New("copy failed to pattern data")
 		}
 		PatternMsg.DataSize = 4
-		if err := ma.h.PassThruStartMsgFilter(ma.channelID, PASS_FILTER, &MaskMsg, &PatternMsg, nil, filterID); err != nil {
+		if err := ma.h.PassThruStartMsgFilter(ma.channelID, passthru.PASS_FILTER, &MaskMsg, &PatternMsg, nil, filterID); err != nil {
 			return err
 		}
 	}
 
 	return nil
 }
+
+var dllMutex sync.Mutex
 
 func (ma *J2534) recvManager() {
 	runtime.LockOSThread()
@@ -193,18 +174,32 @@ func (ma *J2534) recvManager() {
 		case <-ma.close:
 			return
 		default:
-			msg := new(PassThruMsg)
+			msg := new(passthru.PassThruMsg)
 			msg.ProtocolID = ma.protocol
+			if ma.tech2passThru {
+				dllMutex.Lock()
+			}
 			if err := ma.h.PassThruReadMsgs(ma.channelID, uintptr(unsafe.Pointer(msg)), 1, 0); err != nil {
-				if errors.Is(err, ErrBufferEmpty) {
+				if errors.Is(err, passthru.ErrBufferEmpty) {
+					if ma.tech2passThru {
+						dllMutex.Unlock()
+					}
 					continue
 				}
-				if errors.Is(err, ErrDeviceNotConnected) {
+				if errors.Is(err, passthru.ErrDeviceNotConnected) {
+					ma.cfg.ErrorFunc(fmt.Errorf("device not connected: %w", err))
+					if ma.tech2passThru {
+						dllMutex.Unlock()
+					}
 					return
 				}
 				ma.cfg.ErrorFunc(fmt.Errorf("read error: %w", err))
+				if ma.tech2passThru {
+					dllMutex.Unlock()
+				}
 				continue
 			}
+			dllMutex.Unlock()
 			var id uint32
 
 			if err := binary.Read(bytes.NewReader(msg.Data[:]), binary.BigEndian, &id); err != nil {
@@ -222,6 +217,7 @@ func (ma *J2534) recvManager() {
 }
 
 func (ma *J2534) sendManager() {
+	runtime.LockOSThread()
 	var buf bytes.Buffer
 	for {
 		select {
@@ -234,17 +230,26 @@ func (ma *J2534) sendManager() {
 				continue
 			}
 			buf.Write(f.Data())
-			msg := &PassThruMsg{
+			msg := &passthru.PassThruMsg{
 				ProtocolID: ma.protocol,
 				DataSize:   uint32(buf.Len()),
 				TxFlags:    0,
 			}
-			if ma.protocol == SW_CAN_PS {
-				msg.TxFlags = SW_CAN_HV_TX
+			if ma.protocol == passthru.SW_CAN_PS && !ma.tech2passThru {
+				msg.TxFlags = passthru.SW_CAN_HV_TX
 			}
 			copy(msg.Data[:], buf.Bytes())
+			if ma.tech2passThru {
+				dllMutex.Lock()
+			}
 			if err := ma.h.PassThruWriteMsgs(ma.channelID, uintptr(unsafe.Pointer(msg)), 1, 0); err != nil {
+				if msg, err2 := ma.h.PassThruGetLastError(); err2 == nil {
+					log.Println("send error: " + msg)
+				}
 				ma.cfg.ErrorFunc(fmt.Errorf("send error: %w", err))
+			}
+			if ma.tech2passThru {
+				dllMutex.Unlock()
 			}
 		}
 	}
@@ -261,7 +266,7 @@ func (ma *J2534) Send() chan<- gocan.CANFrame {
 func (ma *J2534) Close() error {
 	close(ma.close)
 	time.Sleep(200 * time.Millisecond)
-	ma.h.PassThruIoctl(ma.channelID, CLEAR_MSG_FILTERS, nil, nil)
+	ma.h.PassThruIoctl(ma.channelID, passthru.CLEAR_MSG_FILTERS, nil, nil)
 	ma.h.PassThruDisconnect(ma.channelID)
 	ma.h.PassThruClose(ma.deviceID)
 	return ma.h.Close()

@@ -1,4 +1,4 @@
-package j2534
+package passthru
 
 import (
 	"errors"
