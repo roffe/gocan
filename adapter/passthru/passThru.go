@@ -280,8 +280,8 @@ type SCONFIG struct {
 }
 
 type SCONFIG_LIST struct {
-	NumOfParams uint32   // Number of SCONFIG elements
-	ConfigPtr   *SCONFIG // Array of SCONFIG
+	NumOfParams uint32    // Number of SCONFIG elements
+	Params      []SCONFIG // Array of SCONFIG
 }
 
 type SBYTE_ARRAY struct {
@@ -512,23 +512,12 @@ func (j *PassThru) PassThruReadVersion(deviceID uint32) (string, string, string,
 }
 
 // long PassThruIoctl(unsigned long HandleID, unsigned long IoctlID, void *pInput, void *pOutput);
-func (j *PassThru) PassThruIoctl(handleID uint32, ioctlID uint32, pInput *byte, pOutput *byte) error {
+func (j *PassThru) PassThruIoctl(handleID uint32, ioctlID uint32, pInput *SCONFIG_LIST, pOutput *byte) error {
 	ret, _, _ := j.passThruIoctl.Call(
 		uintptr(handleID),
 		uintptr(ioctlID),
 		uintptr(unsafe.Pointer(pInput)),
 		uintptr(unsafe.Pointer(pOutput)),
-	)
-	return CheckError(ret)
-}
-
-// long PassThruIoctl(unsigned long HandleID, unsigned long IoctlID, void *pInput, void *pOutput);
-func (j *PassThru) PassThruIoctlS(handleID uint32, ioctlID uint32, pInput uintptr) error {
-	ret, _, _ := j.passThruIoctl.Call(
-		uintptr(handleID),
-		uintptr(ioctlID),
-		pInput,
-		uintptr(0),
 	)
 	return CheckError(ret)
 }

@@ -91,12 +91,14 @@ func (ma *J2534) Init(ctx context.Context) error {
 	if swcan {
 		opts := &passthru.SCONFIG_LIST{
 			NumOfParams: 1,
-			ConfigPtr: &passthru.SCONFIG{
-				Parameter: passthru.J1962_PINS,
-				Value:     0x0100,
+			Params: []passthru.SCONFIG{
+				{
+					Parameter: passthru.J1962_PINS,
+					Value:     0x0100,
+				},
 			},
 		}
-		if err := ma.h.PassThruIoctl(ma.channelID, passthru.SET_CONFIG, (*byte)(unsafe.Pointer(opts)), nil); err != nil {
+		if err := ma.h.PassThruIoctl(ma.channelID, passthru.SET_CONFIG, opts, nil); err != nil {
 			return fmt.Errorf("PassThruIoctl set SWCAN: %w", err)
 		}
 	}
@@ -235,7 +237,7 @@ func (ma *J2534) sendMsg(msg *passthru.PassThruMsg) error {
 	}
 	if err := ma.h.PassThruWriteMsgs(ma.channelID, uintptr(unsafe.Pointer(msg)), 1, 0); err != nil {
 		if errStr, err2 := ma.h.PassThruGetLastError(); err2 == nil {
-			return errors.New(errStr)
+			return fmt.Errorf("%w: %s", err, errStr)
 		}
 		return err
 	}
