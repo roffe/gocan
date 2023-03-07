@@ -17,7 +17,7 @@ import (
 )
 
 func init() {
-	Register("CANusb", NewCanusb)
+	Register("CANUSB", NewCanusb)
 }
 
 type Canusb struct {
@@ -48,7 +48,7 @@ func NewCanusb(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 }
 
 func (cu *Canusb) Name() string {
-	return "CANusb"
+	return "CANUSB"
 }
 
 func (cu *Canusb) Init(ctx context.Context) error {
