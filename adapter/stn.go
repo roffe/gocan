@@ -1,4 +1,4 @@
-package obdlink
+package adapter
 
 import (
 	"bytes"
@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -19,17 +18,14 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-const Name = "OBDLinkSX"
-
-var debug bool
+var stnAdapterSpeeds = []int{115200, 230400, 921600, 2000000, 1000000, 57600, 38400}
 
 func init() {
-	if strings.ToLower(os.Getenv("DEBUG")) == "true" {
-		debug = true
-	}
+	Register("OBDLink SX", NewSTN)
+	Register("OBDLink MX", NewSTN)
 }
 
-type SX struct {
+type STN struct {
 	cfg          *gocan.AdapterConfig
 	port         serial.Port
 	canrate      string
@@ -38,14 +34,16 @@ type SX struct {
 	close        chan struct{}
 	closed       bool
 	filter, mask string
+	sendMutex    chan token
 }
 
-func NewSX(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
-	sx := &SX{
-		cfg:   cfg,
-		send:  make(chan gocan.CANFrame, 10),
-		recv:  make(chan gocan.CANFrame, 10),
-		close: make(chan struct{}, 1),
+func NewSTN(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
+	sx := &STN{
+		cfg:       cfg,
+		send:      make(chan gocan.CANFrame, 10),
+		recv:      make(chan gocan.CANFrame, 10),
+		close:     make(chan struct{}, 1),
+		sendMutex: make(chan token, 1),
 	}
 
 	if err := sx.setCANrate(cfg.CANRate); err != nil {
@@ -57,13 +55,11 @@ func NewSX(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	return sx, nil
 }
 
-func (cu *SX) Name() string {
-	return "OBDLinkSX"
+func (cu *STN) Name() string {
+	return "STN"
 }
 
-var adapterSpeeds = []int{115200, 230400, 921600, 2000000, 1000000, 57600, 38400}
-
-func (cu *SX) Init(ctx context.Context) error {
+func (cu *STN) Init(ctx context.Context) error {
 	mode := &serial.Mode{
 		BaudRate: cu.cfg.PortBaudrate,
 		Parity:   serial.NoParity,
@@ -85,7 +81,7 @@ func (cu *SX) Init(ctx context.Context) error {
 
 	err = retry.Do(func() error {
 		to := cu.cfg.PortBaudrate
-		for _, from := range adapterSpeeds {
+		for _, from := range stnAdapterSpeeds {
 			if err := cu.setSpeed(p, mode, from, to); err == nil {
 				cu.cfg.OutputFunc(fmt.Sprintf("Switched adapter baudrate from %d to %d bps", from, to))
 				return nil
@@ -147,7 +143,7 @@ func (cu *SX) Init(ctx context.Context) error {
 	return nil
 }
 
-func (cu *SX) setSpeed(p serial.Port, mode *serial.Mode, from, to int) error {
+func (cu *STN) setSpeed(p serial.Port, mode *serial.Mode, from, to int) error {
 	mode.BaudRate = from
 	p.SetMode(mode)
 	start := time.Now()
@@ -203,7 +199,7 @@ func (cu *SX) setSpeed(p serial.Port, mode *serial.Mode, from, to int) error {
 	return nil
 }
 
-func (cu *SX) setCANrate(rate float64) error {
+func (cu *STN) setCANrate(rate float64) error {
 	switch rate {
 	case 33.3: //MX ony feature
 		cu.protocol = "STP61"
@@ -219,7 +215,7 @@ func (cu *SX) setCANrate(rate float64) error {
 	return nil
 }
 
-func (cu *SX) setCANfilter(ids []uint32) {
+func (cu *STN) setCANfilter(ids []uint32) {
 	var filt uint32 = 0xFFF
 	var mask uint32 = 0x000
 	for _, id := range ids {
@@ -231,15 +227,15 @@ func (cu *SX) setCANfilter(ids []uint32) {
 	cu.mask = fmt.Sprintf("ATCM%03X", mask)
 }
 
-func (cu *SX) Recv() <-chan gocan.CANFrame {
+func (cu *STN) Recv() <-chan gocan.CANFrame {
 	return cu.recv
 }
 
-func (cu *SX) Send() chan<- gocan.CANFrame {
+func (cu *STN) Send() chan<- gocan.CANFrame {
 	return cu.send
 }
 
-func (cu *SX) Close() error {
+func (cu *STN) Close() error {
 	cu.closed = true
 	//cu.close <- token{}
 	time.Sleep(100 * time.Millisecond)
@@ -250,11 +246,7 @@ func (cu *SX) Close() error {
 	return cu.port.Close()
 }
 
-type token struct{}
-
-var sendMutex = make(chan token, 1)
-
-func (cu *SX) sendManager(ctx context.Context) {
+func (cu *STN) sendManager(ctx context.Context) {
 	f := bytes.NewBuffer(nil)
 	for {
 		select {
@@ -282,8 +274,7 @@ func (cu *SX) sendManager(ctx context.Context) {
 				// write reply
 				f.WriteString("r:" + strconv.Itoa(r) + "\r")
 			}
-
-			sendMutex <- token{}
+			cu.sendMutex <- token{}
 			if debug {
 				cu.cfg.OutputFunc("<o> " + f.String())
 			}
@@ -300,7 +291,7 @@ func (cu *SX) sendManager(ctx context.Context) {
 	}
 }
 
-func (cu *SX) recvManager(ctx context.Context) {
+func (cu *STN) recvManager(ctx context.Context) {
 	buff := bytes.NewBuffer(nil)
 	readBuffer := make([]byte, 21)
 	for ctx.Err() == nil {
@@ -328,7 +319,7 @@ func (cu *SX) recvManager(ctx context.Context) {
 
 			if b == '>' {
 				select {
-				case <-sendMutex:
+				case <-cu.sendMutex:
 				default:
 				}
 				continue
@@ -374,7 +365,7 @@ func (cu *SX) recvManager(ctx context.Context) {
 	}
 }
 
-func (*SX) decodeFrame(buff []byte) (gocan.CANFrame, error) {
+func (*STN) decodeFrame(buff []byte) (gocan.CANFrame, error) {
 	id, err := strconv.ParseUint(string(buff[0:3]), 16, 32)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode identifier: %v", err)

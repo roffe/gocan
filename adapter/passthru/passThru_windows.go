@@ -347,7 +347,7 @@ type PassThru struct {
 	passThruGetLastError    *syscall.Proc
 }
 
-func NewJ2534(dllName string) (*PassThru, error) {
+func New(dllName string) (*PassThru, error) {
 	dll, err := syscall.LoadDLL(dllName)
 	if err != nil {
 		return nil, err

@@ -3,23 +3,25 @@ package adapter
 import (
 	"fmt"
 	"log"
+	"os"
+	"strings"
 
 	"github.com/roffe/gocan"
-	"github.com/roffe/gocan/adapter/j2534"
-	"github.com/roffe/gocan/adapter/just4trionic"
-	"github.com/roffe/gocan/adapter/lawicel"
-	"github.com/roffe/gocan/adapter/obdlink"
 )
 
-var adapterMap = map[string]AdapterFunc{
-	"J2534":        j2534.New,
-	"CANusb":       lawicel.NewCanusb,
-	"OBDLink SX":   obdlink.NewSX,
-	"OBDLink MX":   obdlink.NewSX,
-	"Just4Trionic": just4trionic.New,
+var (
+	debug      bool
+	adapterMap = make(map[string]AdapterFunc)
+)
+
+func init() {
+	if strings.ToLower(os.Getenv("DEBUG")) == "true" {
+		debug = true
+	}
 }
 
 type AdapterFunc func(*gocan.AdapterConfig) (gocan.Adapter, error)
+type token struct{}
 
 func New(adapterName string, cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	if cfg.OutputFunc == nil {

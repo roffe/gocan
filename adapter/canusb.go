@@ -1,4 +1,4 @@
-package lawicel
+package adapter
 
 import (
 	"bytes"
@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"os"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/albenik/bcd"
@@ -17,12 +16,8 @@ import (
 	"go.bug.st/serial"
 )
 
-var debug bool
-
 func init() {
-	if strings.ToLower(os.Getenv("DEBUG")) == "true" {
-		debug = true
-	}
+	Register("CANusb", NewCanusb)
 }
 
 type Canusb struct {
@@ -33,14 +28,17 @@ type Canusb struct {
 	send, recv   chan gocan.CANFrame
 	close        chan struct{}
 	closed       bool
+
+	sendMutex chan token
 }
 
 func NewCanusb(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	cu := &Canusb{
-		cfg:   cfg,
-		send:  make(chan gocan.CANFrame, 10),
-		recv:  make(chan gocan.CANFrame, 10),
-		close: make(chan struct{}, 1),
+		cfg:       cfg,
+		send:      make(chan gocan.CANFrame, 10),
+		recv:      make(chan gocan.CANFrame, 10),
+		close:     make(chan struct{}, 1),
+		sendMutex: make(chan token, 1),
 	}
 	if err := cu.setCANrate(cfg.CANRate); err != nil {
 		return nil, err
@@ -174,10 +172,6 @@ func calcAcceptanceFilters(idList []uint32) (string, string) {
 	return fmt.Sprintf("M%08X", code), fmt.Sprintf("m%08X", mask)
 }
 
-type token struct{}
-
-var sendMutex = make(chan token, 1)
-
 func (cu *Canusb) sendManager(ctx context.Context) {
 	t := time.NewTicker(600 * time.Millisecond)
 	f := bytes.NewBuffer(nil)
@@ -185,7 +179,7 @@ func (cu *Canusb) sendManager(ctx context.Context) {
 		select {
 		case <-t.C:
 			if !cu.closed {
-				sendMutex <- token{}
+				cu.sendMutex <- token{}
 				cu.port.Write([]byte{'F', '\r'})
 			}
 
@@ -195,7 +189,7 @@ func (cu *Canusb) sendManager(ctx context.Context) {
 			f.WriteString("t" + hex.EncodeToString(idb)[5:] +
 				strconv.Itoa(v.Length()) +
 				hex.EncodeToString(v.Data()) + "\r")
-			sendMutex <- token{}
+			cu.sendMutex <- token{}
 			_, err := cu.port.Write(f.Bytes())
 			if err != nil {
 				cu.cfg.ErrorFunc(fmt.Errorf("failed to write to com port: %s, %w", f.String(), err))
@@ -244,7 +238,7 @@ func (cu *Canusb) parse(ctx context.Context, readBuffer []byte, buff *bytes.Buff
 		}
 		if b == 0x0D {
 			select {
-			case <-sendMutex:
+			case <-cu.sendMutex:
 			default:
 			}
 			if buff.Len() == 0 {
@@ -273,7 +267,7 @@ func (cu *Canusb) parse(ctx context.Context, readBuffer []byte, buff *bytes.Buff
 				buff.Reset()
 			case 'z': // last command ok
 				select {
-				case <-sendMutex:
+				case <-cu.sendMutex:
 				default:
 				}
 			case 0x07: // bell, last command was error

@@ -1,4 +1,4 @@
-package just4trionic
+package adapter
 
 import (
 	"context"
@@ -6,24 +6,18 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
-	"os"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/roffe/gocan"
 	"go.bug.st/serial"
 )
 
-var debug bool
-
 func init() {
-	if strings.ToLower(os.Getenv("DEBUG")) == "true" {
-		debug = true
-	}
+	Register("Just4Trionic", NewJust4Trionic)
 }
 
-type Adapter struct {
+type Just4Trionic struct {
 	cfg        *gocan.AdapterConfig
 	port       serial.Port
 	send, recv chan gocan.CANFrame
@@ -33,8 +27,8 @@ type Adapter struct {
 	closed          bool
 }
 
-func New(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
-	adapter := &Adapter{
+func NewJust4Trionic(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
+	adapter := &Just4Trionic{
 		cfg:   cfg,
 		send:  make(chan gocan.CANFrame, 10),
 		recv:  make(chan gocan.CANFrame, 10),
@@ -63,11 +57,11 @@ func New(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	return adapter, nil
 }
 
-func (a *Adapter) Name() string {
+func (a *Just4Trionic) Name() string {
 	return "Just4Trionic"
 }
 
-func (a *Adapter) Init(ctx context.Context) error {
+func (a *Just4Trionic) Init(ctx context.Context) error {
 	mode := &serial.Mode{
 		BaudRate: 115200,
 		Parity:   serial.NoParity,
@@ -114,15 +108,15 @@ func (a *Adapter) Init(ctx context.Context) error {
 	return nil
 }
 
-func (a *Adapter) Recv() <-chan gocan.CANFrame {
+func (a *Just4Trionic) Recv() <-chan gocan.CANFrame {
 	return a.recv
 }
 
-func (a *Adapter) Send() chan<- gocan.CANFrame {
+func (a *Just4Trionic) Send() chan<- gocan.CANFrame {
 	return a.send
 }
 
-func (a *Adapter) Close() error {
+func (a *Just4Trionic) Close() error {
 	a.closed = true
 	a.close <- struct{}{}
 	time.Sleep(50 * time.Millisecond)
@@ -131,7 +125,7 @@ func (a *Adapter) Close() error {
 	return a.port.Close()
 }
 
-func (a *Adapter) setCANrate(rate float64) error {
+func (a *Just4Trionic) setCANrate(rate float64) error {
 	switch rate {
 	case 10:
 		a.canRate = "S0"
@@ -159,7 +153,7 @@ func (a *Adapter) setCANrate(rate float64) error {
 	return nil
 }
 
-func (a *Adapter) recvManager(ctx context.Context) {
+func (a *Just4Trionic) recvManager(ctx context.Context) {
 	buff := bytes.NewBuffer(nil)
 	readBuffer := make([]byte, 8)
 	for {
@@ -182,7 +176,7 @@ func (a *Adapter) recvManager(ctx context.Context) {
 	}
 }
 
-func (a *Adapter) parse(ctx context.Context, readBuffer []byte, buff *bytes.Buffer) {
+func (a *Just4Trionic) parse(ctx context.Context, readBuffer []byte, buff *bytes.Buffer) {
 	for _, b := range readBuffer {
 		select {
 		case <-ctx.Done():
@@ -220,7 +214,7 @@ func (a *Adapter) parse(ctx context.Context, readBuffer []byte, buff *bytes.Buff
 	}
 }
 
-func (*Adapter) decodeFrame(buff []byte) (gocan.CANFrame, error) {
+func (*Just4Trionic) decodeFrame(buff []byte) (gocan.CANFrame, error) {
 	id, err := strconv.ParseUint(string(buff[0:3]), 16, 32)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode identifier: %w", err)
@@ -236,7 +230,7 @@ func (*Adapter) decodeFrame(buff []byte) (gocan.CANFrame, error) {
 	), nil
 }
 
-func (a *Adapter) sendManager(ctx context.Context) {
+func (a *Just4Trionic) sendManager(ctx context.Context) {
 	var f string
 	for {
 		select {

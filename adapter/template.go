@@ -1,4 +1,4 @@
-package template
+package adapter
 
 import (
 	"context"
@@ -6,14 +6,14 @@ import (
 	"github.com/roffe/gocan"
 )
 
-type Adapter struct {
+type Template struct {
 	cfg        *gocan.AdapterConfig
 	send, recv chan gocan.CANFrame
 	close      chan struct{}
 }
 
-func New(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
-	return &Adapter{
+func NewTemplate(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
+	return &Template{
 		cfg:   cfg,
 		send:  make(chan gocan.CANFrame, 100),
 		recv:  make(chan gocan.CANFrame, 100),
@@ -21,22 +21,22 @@ func New(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	}, nil
 }
 
-func (a *Adapter) Name() string {
+func (a *Template) Name() string {
 	return "Template"
 }
 
-func (a *Adapter) Init(ctx context.Context) error {
+func (a *Template) Init(ctx context.Context) error {
 	return nil
 }
 
-func (a *Adapter) Recv() <-chan gocan.CANFrame {
+func (a *Template) Recv() <-chan gocan.CANFrame {
 	return a.recv
 }
 
-func (a *Adapter) Send() chan<- gocan.CANFrame {
+func (a *Template) Send() chan<- gocan.CANFrame {
 	return a.send
 }
 
-func (a *Adapter) Close() error {
+func (a *Template) Close() error {
 	return nil
 }

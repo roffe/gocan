@@ -1,4 +1,4 @@
-package j2534
+package adapter
 
 import (
 	"context"
@@ -15,6 +15,10 @@ import (
 	"github.com/roffe/gocan/adapter/passthru"
 )
 
+func init() {
+	Register("J2534", NewJ2534)
+}
+
 type J2534 struct {
 	h                                    *passthru.PassThru
 	channelID, deviceID, flags, protocol uint32
@@ -26,7 +30,7 @@ type J2534 struct {
 	sync.Mutex
 }
 
-func New(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
+func NewJ2534(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	ma := &J2534{
 		cfg:       cfg,
 		send:      make(chan gocan.CANFrame, 10),
@@ -44,7 +48,7 @@ func (ma *J2534) Name() string {
 
 func (ma *J2534) Init(ctx context.Context) error {
 	var err error
-	ma.h, err = passthru.NewJ2534(ma.cfg.Port)
+	ma.h, err = passthru.New(ma.cfg.Port)
 	if err != nil {
 		return err
 	}
