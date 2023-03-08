@@ -18,7 +18,7 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-var stnAdapterSpeeds = []int{115200, 230400, 921600, 2000000, 1000000, 57600, 38400}
+var stnAdapterSpeeds = []int{115200, 38400, 230400, 921600, 2000000, 1000000, 57600}
 
 func init() {
 	Register("OBDLink SX", NewSTN)
@@ -55,46 +55,46 @@ func NewSTN(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	return sx, nil
 }
 
-func (cu *STN) Name() string {
+func (stn *STN) Name() string {
 	return "STN"
 }
 
-func (cu *STN) Init(ctx context.Context) error {
+func (stn *STN) Init(ctx context.Context) error {
 	mode := &serial.Mode{
-		BaudRate: cu.cfg.PortBaudrate,
+		BaudRate: stn.cfg.PortBaudrate,
 		Parity:   serial.NoParity,
 		DataBits: 8,
 		StopBits: serial.OneStopBit,
 	}
 
-	p, err := serial.Open(cu.cfg.Port, mode)
+	p, err := serial.Open(stn.cfg.Port, mode)
 	if err != nil {
-		return fmt.Errorf("failed to open com port %q : %v", cu.cfg.Port, err)
+		return fmt.Errorf("failed to open com port %q : %v", stn.cfg.Port, err)
 	}
 
 	p.SetReadTimeout(1 * time.Millisecond)
 
-	cu.port = p
+	stn.port = p
 
 	p.ResetOutputBuffer()
 	p.ResetInputBuffer()
 
 	err = retry.Do(func() error {
-		to := cu.cfg.PortBaudrate
+		to := stn.cfg.PortBaudrate
 		for _, from := range stnAdapterSpeeds {
-			if err := cu.setSpeed(p, mode, from, to); err == nil {
-				cu.cfg.OutputFunc(fmt.Sprintf("Switched adapter baudrate from %d to %d bps", from, to))
+			if err := stn.setSpeed(p, mode, from, to); err == nil {
+				stn.cfg.OutputFunc(fmt.Sprintf("Switched adapter baudrate from %d to %d bps", from, to))
 				return nil
 			} else {
-				cu.cfg.ErrorFunc(fmt.Errorf("failed to switch adapter baudrate from %d to %d bps: %w", from, to, err))
+				stn.cfg.ErrorFunc(err)
 			}
 		}
-		return errors.New("/!\\ Could not init adapter")
+		return errors.New("Failed to switch adapter baudrate") //lint:ignore ST1005 ignore this
 	},
 		retry.Context(ctx),
 		retry.Attempts(2),
 		retry.OnRetry(func(n uint, err error) {
-			cu.cfg.ErrorFunc(fmt.Errorf("retry #%d: %w", n, err))
+			stn.cfg.ErrorFunc(fmt.Errorf("retry #%d: %w", n, err))
 		}),
 		retry.LastErrorOnly(true),
 	)
@@ -104,19 +104,19 @@ func (cu *STN) Init(ctx context.Context) error {
 	}
 
 	var initCmds = []string{
-		"ATE0",      // turn off echo
-		"ATS0",      // turn of spaces
-		cu.protocol, // Set canbus protocol
-		"ATH1",      // Headers on
-		"ATAT2",     // Set adaptive timing mode, Adaptive timing on, aggressive mode. This option may increase throughput on slower connections, at the expense of slightly increasing the risk of missing frames.
-		"ATCAF0",    // Automatic formatting of
-		cu.canrate,  // Set CANrate
-		"ATAL",      // Allow long messages
-		"ATCFC0",    //Turn automatic CAN flow control off
+		"ATE0",       // turn off echo
+		"ATS0",       // turn of spaces
+		stn.protocol, // Set canbus protocol
+		"ATH1",       // Headers on
+		"ATAT2",      // Set adaptive timing mode, Adaptive timing on, aggressive mode. This option may increase throughput on slower connections, at the expense of slightly increasing the risk of missing frames.
+		"ATCAF0",     // Automatic formatting of
+		stn.canrate,  // Set CANrate
+		"ATAL",       // Allow long messages
+		"ATCFC0",     //Turn automatic CAN flow control off
 		//"ATAR",      // Automatically set the receive address.
 		//"ATCSM1",  //Turn CAN silent monitoring off
-		cu.mask,   // mask
-		cu.filter, // code
+		stn.mask,   // mask
+		stn.filter, // code
 	}
 
 	delay := 20 * time.Millisecond
@@ -127,23 +127,23 @@ func (cu *STN) Init(ctx context.Context) error {
 		}
 		out := []byte(c + "\r")
 		if debug {
-			cu.cfg.OutputFunc(c)
+			stn.cfg.OutputFunc(c)
 		}
 		_, err := p.Write(out)
 		if err != nil {
-			cu.cfg.ErrorFunc(err)
+			stn.cfg.ErrorFunc(err)
 		}
 		time.Sleep(delay)
 	}
 	p.ResetInputBuffer()
 
-	go cu.recvManager(ctx)
-	go cu.sendManager(ctx)
+	go stn.recvManager(ctx)
+	go stn.sendManager(ctx)
 
 	return nil
 }
 
-func (cu *STN) setSpeed(p serial.Port, mode *serial.Mode, from, to int) error {
+func (stn *STN) setSpeed(p serial.Port, mode *serial.Mode, from, to int) error {
 	mode.BaudRate = from
 	p.SetMode(mode)
 	start := time.Now()
@@ -174,7 +174,7 @@ func (cu *STN) setSpeed(p serial.Port, mode *serial.Mode, from, to int) error {
 						continue
 					}
 					if strings.Contains(buff.String(), "ELM327") || strings.Contains(buff.String(), "STN") {
-						cu.cfg.OutputFunc(buff.String())
+						stn.cfg.OutputFunc(buff.String())
 						return nil
 					}
 					buff.Reset()
@@ -183,7 +183,7 @@ func (cu *STN) setSpeed(p serial.Port, mode *serial.Mode, from, to int) error {
 				buff.WriteByte(b)
 			}
 		}
-		return fmt.Errorf("/!\\ Init timeout: %q", buff.String())
+		return fmt.Errorf("failed to change adapter baudrate from %d to %d bps", from, to)
 	})
 
 	p.Write([]byte("STBR" + strconv.Itoa(to) + "\r"))
@@ -199,23 +199,23 @@ func (cu *STN) setSpeed(p serial.Port, mode *serial.Mode, from, to int) error {
 	return nil
 }
 
-func (cu *STN) setCANrate(rate float64) error {
+func (stn *STN) setCANrate(rate float64) error {
 	switch rate {
 	case 33.3: //MX ony feature
-		cu.protocol = "STP61"
-		cu.canrate = "STCSWM2"
+		stn.protocol = "STP61"
+		stn.canrate = "STCSWM2"
 	case 500:
-		cu.protocol = "STP33"
+		stn.protocol = "STP33"
 	case 615.384:
-		cu.protocol = "STP33"
-		cu.canrate = "STCTR8101FC"
+		stn.protocol = "STP33"
+		stn.canrate = "STCTR8101FC"
 	default:
 		return fmt.Errorf("/!\\ Unhandled CANBus rate: %f", rate)
 	}
 	return nil
 }
 
-func (cu *STN) setCANfilter(ids []uint32) {
+func (stn *STN) setCANfilter(ids []uint32) {
 	var filt uint32 = 0xFFF
 	var mask uint32 = 0x000
 	for _, id := range ids {
@@ -223,34 +223,34 @@ func (cu *STN) setCANfilter(ids []uint32) {
 		mask |= id
 	}
 	mask = (^mask & 0x7FF) | filt
-	cu.filter = fmt.Sprintf("ATCF%03X", filt)
-	cu.mask = fmt.Sprintf("ATCM%03X", mask)
+	stn.filter = fmt.Sprintf("ATCF%03X", filt)
+	stn.mask = fmt.Sprintf("ATCM%03X", mask)
 }
 
-func (cu *STN) Recv() <-chan gocan.CANFrame {
-	return cu.recv
+func (stn *STN) Recv() <-chan gocan.CANFrame {
+	return stn.recv
 }
 
-func (cu *STN) Send() chan<- gocan.CANFrame {
-	return cu.send
+func (stn *STN) Send() chan<- gocan.CANFrame {
+	return stn.send
 }
 
-func (cu *STN) Close() error {
-	cu.closed = true
-	//cu.close <- token{}
+func (stn *STN) Close() error {
+	stn.closed = true
+	//stn.close <- token{}
 	time.Sleep(100 * time.Millisecond)
-	cu.port.Write([]byte("ATZ\r"))
+	stn.port.Write([]byte("ATZ\r"))
 	time.Sleep(100 * time.Millisecond)
-	cu.port.ResetInputBuffer()
+	stn.port.ResetInputBuffer()
 
-	return cu.port.Close()
+	return stn.port.Close()
 }
 
-func (cu *STN) sendManager(ctx context.Context) {
+func (stn *STN) sendManager(ctx context.Context) {
 	f := bytes.NewBuffer(nil)
 	for {
 		select {
-		case v := <-cu.send:
+		case v := <-stn.send:
 			switch v.(type) {
 			default:
 				idb := make([]byte, 4)
@@ -274,24 +274,24 @@ func (cu *STN) sendManager(ctx context.Context) {
 				// write reply
 				f.WriteString("r:" + strconv.Itoa(r) + "\r")
 			}
-			cu.sendMutex <- token{}
+			stn.sendMutex <- token{}
 			if debug {
-				cu.cfg.OutputFunc("<o> " + f.String())
+				stn.cfg.OutputFunc("<o> " + f.String())
 			}
-			_, err := cu.port.Write(f.Bytes())
+			_, err := stn.port.Write(f.Bytes())
 			if err != nil {
-				cu.cfg.ErrorFunc(fmt.Errorf("failed to write to com port: %q, %w", f.String(), err))
+				stn.cfg.ErrorFunc(fmt.Errorf("failed to write to com port: %q, %w", f.String(), err))
 			}
 			f.Reset()
 		case <-ctx.Done():
 			return
-		case <-cu.close:
+		case <-stn.close:
 			return
 		}
 	}
 }
 
-func (cu *STN) recvManager(ctx context.Context) {
+func (stn *STN) recvManager(ctx context.Context) {
 	buff := bytes.NewBuffer(nil)
 	readBuffer := make([]byte, 21)
 	for ctx.Err() == nil {
@@ -300,10 +300,10 @@ func (cu *STN) recvManager(ctx context.Context) {
 			return
 		default:
 		}
-		n, err := cu.port.Read(readBuffer)
+		n, err := stn.port.Read(readBuffer)
 		if err != nil {
-			if !cu.closed {
-				cu.cfg.ErrorFunc(fmt.Errorf("failed to read com port: %w", err))
+			if !stn.closed {
+				stn.cfg.ErrorFunc(fmt.Errorf("failed to read com port: %w", err))
 			}
 			return
 		}
@@ -319,7 +319,7 @@ func (cu *STN) recvManager(ctx context.Context) {
 
 			if b == '>' {
 				select {
-				case <-cu.sendMutex:
+				case <-stn.sendMutex:
 				default:
 				}
 				continue
@@ -330,31 +330,31 @@ func (cu *STN) recvManager(ctx context.Context) {
 					continue
 				}
 				if debug {
-					cu.cfg.OutputFunc("<i> " + buff.String())
+					stn.cfg.OutputFunc("<i> " + buff.String())
 				}
 				switch buff.String() {
 				case "CAN ERROR":
-					cu.cfg.ErrorFunc(errors.New("CAN ERROR"))
+					stn.cfg.ErrorFunc(errors.New("CAN ERROR"))
 					buff.Reset()
 				case "STOPPED":
 					buff.Reset()
 				case "?":
-					cu.cfg.ErrorFunc(errors.New("UNKNOWN COMMAND"))
+					stn.cfg.ErrorFunc(errors.New("UNKNOWN COMMAND"))
 					buff.Reset()
 				case "NO DATA":
 					buff.Reset()
 				case "OK":
 					buff.Reset()
 				default:
-					f, err := cu.decodeFrame(buff.Bytes())
+					f, err := stn.decodeFrame(buff.Bytes())
 					if err != nil {
-						cu.cfg.ErrorFunc(fmt.Errorf("failed to decode frame: %s %w", buff.String(), err))
+						stn.cfg.ErrorFunc(fmt.Errorf("failed to decode frame: %s %w", buff.String(), err))
 						continue
 					}
 					select {
-					case cu.recv <- f:
+					case stn.recv <- f:
 					default:
-						cu.cfg.ErrorFunc(fmt.Errorf("dropped frame: %s", f.String()))
+						stn.cfg.ErrorFunc(fmt.Errorf("dropped frame: %s", f.String()))
 					}
 					buff.Reset()
 				}
