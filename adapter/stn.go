@@ -34,16 +34,16 @@ type STN struct {
 	close        chan struct{}
 	closed       bool
 	filter, mask string
-	sendMutex    chan token
+	semChan      chan token
 }
 
 func NewSTN(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	sx := &STN{
-		cfg:       cfg,
-		send:      make(chan gocan.CANFrame, 10),
-		recv:      make(chan gocan.CANFrame, 10),
-		close:     make(chan struct{}, 1),
-		sendMutex: make(chan token, 1),
+		cfg:     cfg,
+		send:    make(chan gocan.CANFrame, 10),
+		recv:    make(chan gocan.CANFrame, 20),
+		close:   make(chan struct{}),
+		semChan: make(chan token, 1),
 	}
 
 	if err := sx.setCANrate(cfg.CANRate); err != nil {
@@ -109,7 +109,7 @@ func (stn *STN) Init(ctx context.Context) error {
 		stn.protocol, // Set canbus protocol
 		"ATH1",       // Headers on
 		"ATAT2",      // Set adaptive timing mode, Adaptive timing on, aggressive mode. This option may increase throughput on slower connections, at the expense of slightly increasing the risk of missing frames.
-		"ATCAF0",     // Automatic formatting of
+		"ATCAF0",     // Automatic formatting off
 		stn.canrate,  // Set CANrate
 		"ATAL",       // Allow long messages
 		"ATCFC0",     //Turn automatic CAN flow control off
@@ -119,8 +119,9 @@ func (stn *STN) Init(ctx context.Context) error {
 		stn.filter, // code
 	}
 
-	delay := 20 * time.Millisecond
+	delay := 15 * time.Millisecond
 
+	time.Sleep(delay)
 	for _, c := range initCmds {
 		if c == "" {
 			continue
@@ -129,8 +130,7 @@ func (stn *STN) Init(ctx context.Context) error {
 		if debug {
 			stn.cfg.OutputFunc(c)
 		}
-		_, err := p.Write(out)
-		if err != nil {
+		if _, err := p.Write(out); err != nil {
 			stn.cfg.ErrorFunc(err)
 		}
 		time.Sleep(delay)
@@ -145,7 +145,9 @@ func (stn *STN) Init(ctx context.Context) error {
 
 func (stn *STN) setSpeed(p serial.Port, mode *serial.Mode, from, to int) error {
 	mode.BaudRate = from
-	p.SetMode(mode)
+	if err := p.SetMode(mode); err != nil {
+		return err
+	}
 	start := time.Now()
 	for i := 0; i < 2; i++ {
 		p.Write([]byte("ATI\r"))
@@ -154,7 +156,7 @@ func (stn *STN) setSpeed(p serial.Port, mode *serial.Mode, from, to int) error {
 	}
 	errg, _ := errgroup.WithContext(context.Background())
 	errg.Go(func() error {
-		readbuff := make([]byte, 4)
+		readbuff := make([]byte, 8)
 		buff := bytes.NewBuffer(nil)
 		for time.Since(start) < 300*time.Millisecond {
 			n, err := p.Read(readbuff)
@@ -173,7 +175,7 @@ func (stn *STN) setSpeed(p serial.Port, mode *serial.Mode, from, to int) error {
 					if buff.Len() == 0 {
 						continue
 					}
-					if strings.Contains(buff.String(), "ELM327") || strings.Contains(buff.String(), "STN") {
+					if strings.HasPrefix(buff.String(), "ELM327") || strings.HasPrefix(buff.String(), "STN") {
 						stn.cfg.OutputFunc(buff.String())
 						return nil
 					}
@@ -187,9 +189,11 @@ func (stn *STN) setSpeed(p serial.Port, mode *serial.Mode, from, to int) error {
 	})
 
 	p.Write([]byte("STBR" + strconv.Itoa(to) + "\r"))
-	time.Sleep(15 * time.Millisecond)
+	time.Sleep(5 * time.Millisecond)
 	mode.BaudRate = to
-	p.SetMode(mode)
+	if err := p.SetMode(mode); err != nil {
+		return err
+	}
 
 	if err := errg.Wait(); err != nil {
 		return err
@@ -210,7 +214,7 @@ func (stn *STN) setCANrate(rate float64) error {
 		stn.protocol = "STP33"
 		stn.canrate = "STCTR8101FC"
 	default:
-		return fmt.Errorf("/!\\ Unhandled CANBus rate: %f", rate)
+		return fmt.Errorf("unhandled CANBus rate: %f", rate)
 	}
 	return nil
 }
@@ -237,7 +241,7 @@ func (stn *STN) Send() chan<- gocan.CANFrame {
 
 func (stn *STN) Close() error {
 	stn.closed = true
-	//stn.close <- token{}
+	close(stn.close)
 	time.Sleep(100 * time.Millisecond)
 	stn.port.Write([]byte("ATZ\r"))
 	time.Sleep(100 * time.Millisecond)
@@ -257,8 +261,6 @@ func (stn *STN) sendManager(ctx context.Context) {
 				binary.BigEndian.PutUint32(idb, v.Identifier())
 
 				t := v.Type()
-				r := t.GetResponseCount()
-
 				timeout := v.Timeout().Milliseconds()
 
 				//a := v.Identifier()
@@ -272,9 +274,9 @@ func (stn *STN) sendManager(ctx context.Context) {
 					f.WriteString("t:" + strconv.Itoa(int(timeout)) + ",")
 				}
 				// write reply
-				f.WriteString("r:" + strconv.Itoa(r) + "\r")
+				f.WriteString("r:" + strconv.Itoa(t.GetResponseCount()) + "\r")
 			}
-			stn.sendMutex <- token{}
+			stn.semChan <- token{}
 			if debug {
 				stn.cfg.OutputFunc("<o> " + f.String())
 			}
@@ -294,7 +296,7 @@ func (stn *STN) sendManager(ctx context.Context) {
 func (stn *STN) recvManager(ctx context.Context) {
 	buff := bytes.NewBuffer(nil)
 	readBuffer := make([]byte, 21)
-	for ctx.Err() == nil {
+	for {
 		select {
 		case <-ctx.Done():
 			return
@@ -319,7 +321,7 @@ func (stn *STN) recvManager(ctx context.Context) {
 
 			if b == '>' {
 				select {
-				case <-stn.sendMutex:
+				case <-stn.semChan:
 				default:
 				}
 				continue
@@ -366,7 +368,7 @@ func (stn *STN) recvManager(ctx context.Context) {
 }
 
 func (*STN) decodeFrame(buff []byte) (gocan.CANFrame, error) {
-	id, err := strconv.ParseUint(string(buff[0:3]), 16, 32)
+	id, err := strconv.ParseUint(string(buff[:3]), 16, 32)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode identifier: %v", err)
 	}

@@ -265,7 +265,7 @@ func (ma *J2534) Close() error {
 	return ma.h.Close()
 }
 
-func (ma *J2534) printVersions() error {
+func (ma *J2534) PrintVersions() error {
 	firmwareVersion, dllVersion, apiVersion, err := ma.h.PassThruReadVersion(ma.deviceID)
 	if err != nil {
 		return err

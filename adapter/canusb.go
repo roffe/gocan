@@ -36,7 +36,7 @@ func NewCanusb(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	cu := &Canusb{
 		cfg:       cfg,
 		send:      make(chan gocan.CANFrame, 10),
-		recv:      make(chan gocan.CANFrame, 10),
+		recv:      make(chan gocan.CANFrame, 30),
 		close:     make(chan struct{}, 1),
 		sendMutex: make(chan token, 1),
 	}
