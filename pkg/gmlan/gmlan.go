@@ -38,7 +38,7 @@ func New(c *gocan.Client, canID uint32, recvID ...uint32) *Client {
 // 80 downloadAndExecuteOrExecute
 // This sub-parameter level of operation is used to command a node to receive a block
 // transfer, download the data received to the memory address specified in the
-// startingAddress[] parameter, and execute the data (program) downloaded. This subparameter command can also be used to execute a previously downloaded program by
+// startingAddress[] parameter, and execute the data (program) downloaded. This subparameter command can also be used to execute a previously downloaded program by
 // sending the request message with no data in the dataRecord[ ].
 
 func (cl *Client) Execute(ctx context.Context, startAddress uint32) error {
@@ -53,10 +53,7 @@ func (cl *Client) Execute(ctx context.Context, startAddress uint32) error {
 	if err != nil {
 		return err
 	}
-	if err := CheckErr(resp); err != nil {
-		return err
-	}
-	return nil
+	return CheckErr(resp)
 }
 
 //8.20 DeviceControl ($AE) Service.
@@ -72,10 +69,7 @@ func (cl *Client) DeviceControl(ctx context.Context, command byte) error {
 	if err != nil {
 		return err
 	}
-	if err := CheckErr(resp); err != nil {
-		return err
-	}
-	return nil
+	return CheckErr(resp)
 }
 
 func (cl *Client) DeviceControlWithCode(ctx context.Context, command byte, code []byte) error {
@@ -86,10 +80,7 @@ func (cl *Client) DeviceControlWithCode(ctx context.Context, command byte, code 
 	if err != nil {
 		return err
 	}
-	if err := CheckErr(resp); err != nil {
-		return err
-	}
-	return nil
+	return CheckErr(resp)
 }
 
 // 00 Download
@@ -113,7 +104,7 @@ func (cl *Client) TransferData(ctx context.Context, subFunc byte, length byte, s
 	}
 
 	if err := CheckErr(resp); err != nil {
-		return errors.New("TransferData: " + err.Error())
+		return err
 	}
 
 	d := resp.Data()
@@ -134,10 +125,10 @@ func (cl *Client) DisableNormalCommunication(ctx context.Context) error {
 	frame := gocan.NewFrame(cl.canID, []byte{0x01, 0x28}, gocan.ResponseRequired)
 	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
-		return errors.New("DisableNormalCommunication: " + err.Error())
+		return fmt.Errorf("DisableNormalCommunication: %w", err)
 	}
 	if err := CheckErr(resp); err != nil {
-		return errors.New("DisableNormalCommunication: " + err.Error())
+		return err
 	}
 	d := resp.Data()
 	if d[0] != 0x01 || d[1] != 0x68 {
@@ -203,12 +194,11 @@ func (cl *Client) InitiateDiagnosticOperation(ctx context.Context, subFunc byte)
 	frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
 	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
-		return errors.New("InitiateDiagnosticOperation: " + err.Error())
+		return fmt.Errorf("InitiateDiagnosticOperation: %w", err)
 	}
 	if err := CheckErr(resp); err != nil {
-		return errors.New("InitiateDiagnosticOperation: " + err.Error())
+		return err
 	}
-
 	d := resp.Data()
 	if d[0] != 0x01 || d[1] != 0x50 {
 		return errors.New("invalid response to InitiateDiagnosticOperation request")
@@ -286,12 +276,9 @@ func (cl *Client) ReturnToNormalMode(ctx context.Context) error {
 		cl.recvID...,
 	)
 	if err != nil {
-		return err
+		return fmt.Errorf("ReturnToNormalMode: %w", err)
 	}
-	if err := CheckErr(resp); err != nil {
-		return err
-	}
-	return nil
+	return CheckErr(resp)
 }
 
 // 8.16 ReportProgrammedState ($A2) Service.
@@ -303,10 +290,10 @@ func (cl *Client) ReportProgrammedState(ctx context.Context) error {
 	frame := gocan.NewFrame(cl.canID, []byte{0x01, 0xA2}, gocan.ResponseRequired)
 	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
-		return errors.New("ReportProgrammedState: " + err.Error())
+		return fmt.Errorf("ReportProgrammedState: %w", err)
 	}
 	if err := CheckErr(resp); err != nil {
-		return errors.New("ReportProgrammedState: " + err.Error())
+		return err
 	}
 	d := resp.Data()
 	if d[0] != 0x02 || d[1] != 0xE2 {
@@ -452,7 +439,7 @@ func (cl *Client) ReadDataByPacketIdentifier(ctx context.Context, subFunc byte, 
 	)
 	resp, err := cl.c.SendAndPoll(ctx, f, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("ReadDataByPacketIdentifier: %w", err)
 	}
 
 	if err := CheckErr(resp); err != nil {
@@ -510,7 +497,7 @@ func (cl *Client) readDiagnosticInformation(ctx context.Context, subFunc byte, p
 
 	var out [][]byte
 	if err := CheckErr(resp); err != nil {
-		if err.Error() == "Response pending" {
+		if strings.Contains(err.Error(), "Response pending") {
 			ch := cl.c.Subscribe(ctx, cl.recvID...)
 		outer:
 			for {
@@ -547,10 +534,10 @@ func (cl *Client) SecurityAccessRequestSeed(ctx context.Context, accessLevel byt
 	frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
 	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
-		return nil, errors.New("SecurityAccessRequestSeed: " + err.Error())
+		return nil, fmt.Errorf("SecurityAccessRequestSeed: %w", err)
 	}
 	if err := CheckErr(resp); err != nil {
-		return nil, errors.New("SecurityAccessRequestSeed: " + err.Error())
+		return nil, err
 	}
 	d := resp.Data()
 	if d[1] != 0x67 || d[2] != accessLevel {
@@ -565,11 +552,11 @@ func (cl *Client) SecurityAccessSendKey(ctx context.Context, accessLevel, high, 
 	frame := gocan.NewFrame(cl.canID, respPayload, gocan.ResponseRequired)
 	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
-		return errors.New("SecurityAccessSendKey: " + err.Error())
+		return fmt.Errorf("SecurityAccessSendKey: %w", err)
 	}
 
 	if err := CheckErr(resp); err != nil {
-		return errors.New("SecurityAccessSendKey: " + err.Error())
+		return err
 	}
 
 	d := resp.Data()
@@ -623,12 +610,12 @@ func (cl *Client) RequestDownload(ctx context.Context, z22se bool) error {
 	}
 
 	if err := CheckErr(resp); err != nil {
-		return errors.New("RequestDownload: " + err.Error())
+		return err
 	}
 
 	d := resp.Data()
 	if d[0] != 0x01 || d[1] != 0x74 {
-		return errors.New("/!\\ Did not receive correct response from RequestDownload")
+		return errors.New("Did not receive correct response from RequestDownload") //lint:ignore ST1005 ignore this
 	}
 
 	return nil
@@ -649,10 +636,7 @@ func (cl *Client) TesterPresentResponseRequired(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("TesterPresentResponseRequired: %v", err)
 	}
-	if err := CheckErr(resp); err != nil {
-		return err
-	}
-	return nil
+	return CheckErr(resp)
 }
 
 func (cl *Client) TesterPresentNoResponseAllowed() {
@@ -694,7 +678,7 @@ func (cl *Client) WriteDataByIdentifier(ctx context.Context, pid byte, data []by
 	frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
 	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
-		return err
+		return fmt.Errorf("WriteDataByIdentifier: %w", err)
 	}
 	if err := CheckErr(resp); err != nil {
 		//		log.Println(frame.String())

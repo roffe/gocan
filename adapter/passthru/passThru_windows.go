@@ -512,14 +512,34 @@ func (j *PassThru) PassThruReadVersion(deviceID uint32) (string, string, string,
 }
 
 // long PassThruIoctl(unsigned long HandleID, unsigned long IoctlID, void *pInput, void *pOutput);
-func (j *PassThru) PassThruIoctl(handleID uint32, ioctlID uint32, pInput *SCONFIG_LIST, pOutput *byte) error {
-	ret, _, _ := j.passThruIoctl.Call(
-		uintptr(handleID),
-		uintptr(ioctlID),
-		uintptr(unsafe.Pointer(pInput)),
-		uintptr(unsafe.Pointer(pOutput)),
-	)
-	return CheckError(ret)
+func (j *PassThru) PassThruIoctl(handleID uint32, ioctlID uint32, opts ...interface{}) error {
+	switch ioctlID {
+	case SET_CONFIG, GET_CONFIG:
+		ret, _, _ := j.passThruIoctl.Call(
+			uintptr(handleID),
+			uintptr(ioctlID),
+			uintptr(unsafe.Pointer(opts[0].(*SCONFIG_LIST))),
+			uintptr(0),
+		)
+		return CheckError(ret)
+	case CLEAR_MSG_FILTERS, CLEAR_RX_BUFFER, CLEAR_TX_BUFFER:
+		ret, _, _ := j.passThruIoctl.Call(
+			uintptr(handleID),
+			uintptr(ioctlID),
+			uintptr(0),
+			uintptr(0),
+		)
+		return CheckError(ret)
+	case FAST_INIT:
+		ret, _, _ := j.passThruIoctl.Call(
+			uintptr(handleID),
+			uintptr(ioctlID),
+			uintptr(unsafe.Pointer(opts[0].(*PassThruMsg))),
+			uintptr(unsafe.Pointer(opts[1].(*PassThruMsg))),
+		)
+		return CheckError(ret)
+	}
+	return ErrNotSupported
 }
 
 // long PassThruGetLastError(char *pErrorDescription);

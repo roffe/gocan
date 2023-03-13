@@ -9,17 +9,53 @@ import (
 func CheckErr(frame gocan.CANFrame) error {
 	d := frame.Data()
 	if d[1] == 0x7F {
-		//svc := TranslateServiceCode(d[2])
-		code := TranslateErrorCode(d[3])
-		return errors.New(code)
+		return errors.New("Service " + TranslateServiceCode(d[2]) + " returned error code " + TranslateErrorCode(d[3]))
 	}
 	return nil
 }
 
 func TranslateServiceCode(p byte) string {
 	switch p {
+	case 0x04:
+		return "ClearDiagnosticInformation"
+	case 0x10:
+		return "InitiateDiagnosticOperation"
+	case 0x12:
+		return "ReadFailureRecordData"
+	case 0x1A:
+		return "ReadDataByIdentifier"
+	case 0x20:
+		return "ReturnToNormalMode"
+	case 0x22:
+		return "ReadDataByParameterIdentifier"
+	case 0x23:
+		return "ReadMemoryByAddress"
+	case 0x27:
+		return "SecurityAccess"
+	case 0x28:
+		return "DisableNormalCommunication"
+	case 0x2C:
+		return "DynamicallyDefineMessage"
+	case 0x2D:
+		return "DefinePIDByAddress"
+	case 0x34:
+		return "RequestDownload"
+	case 0x36:
+		return "TransferData"
+	case 0x3B:
+		return "WriteDataByIdentifier"
+	case 0x3E:
+		return "TesterPresent"
+	case 0xA2:
+		return "ReportProgrammedState"
+	case 0xA5:
+		return "ProgrammingMode"
 	case 0xA9:
 		return "ReadDiagnosticInformation"
+	case 0xAA:
+		return "ReadDataByPacketIdentifier"
+	case 0xAE:
+		return "DeviceControl"
 	default:
 		return "Unknown"
 	}
@@ -36,7 +72,7 @@ func TranslateErrorCode(p byte) string {
 	case 0x21:
 		return "Busy, repeat request"
 	case 0x22:
-		return "conditions not correct or request sequence error"
+		return "Conditions not correct or request sequence error"
 	case 0x23:
 		return "Routine not completed or service in progress"
 	case 0x31:

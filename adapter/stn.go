@@ -21,8 +21,8 @@ import (
 var stnAdapterSpeeds = []int{115200, 38400, 230400, 921600, 2000000, 1000000, 57600}
 
 func init() {
-	Register("OBDLink SX", NewSTN)
-	Register("OBDLink MX", NewSTN)
+	Register("STN1170", NewSTN)
+	Register("STN2120", NewSTN)
 }
 
 type STN struct {
