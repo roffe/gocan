@@ -81,6 +81,9 @@ func (ma *J2534) Init(ctx context.Context) error {
 		} else {
 			ma.cfg.OutputFunc("PassThruOpen: " + str)
 		}
+		if errg := ma.h.Close(); errg != nil {
+			ma.cfg.ErrorFunc(errg)
+		}
 		return fmt.Errorf("PassThruOpen: %w", err)
 	}
 
@@ -89,6 +92,9 @@ func (ma *J2534) Init(ctx context.Context) error {
 	//}
 
 	if err := ma.h.PassThruConnect(ma.deviceID, ma.protocol, ma.flags, baudRate, &ma.channelID); err != nil {
+		if errg := ma.h.Close(); errg != nil {
+			ma.cfg.ErrorFunc(errg)
+		}
 		return fmt.Errorf("PassThruConnect: %w", err)
 	}
 
@@ -103,11 +109,17 @@ func (ma *J2534) Init(ctx context.Context) error {
 			},
 		}
 		if err := ma.h.PassThruIoctl(ma.channelID, passthru.SET_CONFIG, opts, nil); err != nil {
+			if errg := ma.h.Close(); errg != nil {
+				ma.cfg.ErrorFunc(errg)
+			}
 			return fmt.Errorf("PassThruIoctl set SWCAN: %w", err)
 		}
 	}
 
 	if err := ma.h.PassThruIoctl(ma.channelID, passthru.CLEAR_RX_BUFFER, nil, nil); err != nil {
+		if errg := ma.h.Close(); errg != nil {
+			ma.cfg.ErrorFunc(errg)
+		}
 		return fmt.Errorf("PassThruIoctl clear rx buffer: %w", err)
 	}
 
@@ -198,7 +210,8 @@ func (ma *J2534) readMsg() (*passthru.PassThruMsg, error) {
 	msg := &passthru.PassThruMsg{
 		ProtocolID: ma.protocol,
 	}
-	if err := ma.h.PassThruReadMsgs(ma.channelID, uintptr(unsafe.Pointer(msg)), 1, 0); err != nil {
+	numMsgs := uint32(1)
+	if err := ma.h.PassThruReadMsgs(ma.channelID, uintptr(unsafe.Pointer(msg)), &numMsgs, 10); err != nil {
 		if errors.Is(err, passthru.ErrBufferEmpty) {
 			return nil, nil
 		}
@@ -218,9 +231,10 @@ func (ma *J2534) sendManager() {
 			return
 		case f := <-ma.send:
 			msg := &passthru.PassThruMsg{
-				ProtocolID: ma.protocol,
-				DataSize:   uint32(f.Length() + 4),
-				TxFlags:    0,
+				ProtocolID:     ma.protocol,
+				DataSize:       uint32(f.Length() + 4),
+				ExtraDataIndex: uint32(f.Length() + 4),
+				TxFlags:        0,
 			}
 			if ma.protocol == passthru.SW_CAN_PS && !ma.tech2passThru {
 				msg.TxFlags = passthru.SW_CAN_HV_TX

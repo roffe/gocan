@@ -456,15 +456,42 @@ func (j *PassThru) PassThruOpen(deviceName string, pDeviceID *uint32) error {
 	return CheckError(ret)
 }
 
-func (j *PassThru) PassThruReadMsgs(channelID uint32, pMsg uintptr, pNumMsgs uint32, timeout uint32) error {
+func (j *PassThru) PassThruReadMsgs(channelID uint32, pMsg uintptr, pNumMsgs *uint32, timeout uint32) error {
 	// long PassThruReadMsgs(unsigned long ChannelID, PassThruMsg *pMsg, unsigned long *pNumMsgs, unsigned long Timeout);
 	ret, _, _ := j.passThruReadMsgs.Call(
 		uintptr(channelID),
 		pMsg,
-		uintptr(unsafe.Pointer(&pNumMsgs)),
+		uintptr(unsafe.Pointer(pNumMsgs)),
 		uintptr(timeout),
 	)
-	return CheckError(ret)
+	if err := CheckError(ret); err != nil {
+		if str, err2 := j.PassThruGetLastError(); err2 == nil {
+			return fmt.Errorf("%s: %w", str, err)
+		} else {
+			return err
+		}
+	}
+	return nil
+}
+
+func (j *PassThru) PassThruReadMsgs2(channelID uint32, numMsgs *uint32, timeout uint32) (int, []PassThruMsg, error) {
+	// long PassThruReadMsgs(unsigned long ChannelID, PassThruMsg *pMsg, unsigned long *pNumMsgs, unsigned long Timeout);
+	rMsgs := make([]PassThruMsg, *numMsgs)
+
+	ret, _, _ := j.passThruReadMsgs.Call(
+		uintptr(channelID),
+		uintptr(unsafe.Pointer(&rMsgs)),
+		uintptr(unsafe.Pointer(numMsgs)),
+		uintptr(timeout),
+	)
+	if err := CheckError(ret); err != nil {
+		if str, err2 := j.PassThruGetLastError(); err2 == nil {
+			return 0, nil, fmt.Errorf("%s: %w", str, err)
+		} else {
+			return 0, nil, err
+		}
+	}
+	return int(*numMsgs), rMsgs, nil
 }
 
 func (j *PassThru) PassThruWriteMsgs(channelID uint32, pMsg uintptr, pNumMsgs uint32, timeout uint32) error {

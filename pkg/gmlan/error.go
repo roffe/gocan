@@ -1,15 +1,22 @@
 package gmlan
 
 import (
-	"errors"
-
 	"github.com/roffe/gocan"
 )
+
+type GMError struct {
+	Service string
+	Code    string
+}
+
+func (e GMError) Error() string {
+	return e.Service + " - " + e.Code
+}
 
 func CheckErr(frame gocan.CANFrame) error {
 	d := frame.Data()
 	if d[1] == 0x7F {
-		return errors.New("Service " + TranslateServiceCode(d[2]) + " returned error code " + TranslateErrorCode(d[3]))
+		return &GMError{TranslateServiceCode(d[2]), TranslateErrorCode(d[3])}
 	}
 	return nil
 }
@@ -132,5 +139,5 @@ func TranslateErrorCode(p byte) string {
 	case 0xE3:
 		return "DeviceControl Limits Exceeded"
 	}
-	return "Unknown"
+	return "Unknown errror"
 }
