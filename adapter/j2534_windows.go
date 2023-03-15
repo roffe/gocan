@@ -137,14 +137,16 @@ func (ma *J2534) Init(ctx context.Context) error {
 func (ma *J2534) allowAll() {
 	filterID := uint32(0)
 	maskMsg := &passthru.PassThruMsg{
-		ProtocolID: ma.protocol,
-		DataSize:   4,
-		Data:       [4128]byte{0x00, 0x00, 0x00, 0x00},
+		ProtocolID:     ma.protocol,
+		DataSize:       4,
+		ExtraDataIndex: 4,
+		Data:           [4128]byte{0x00, 0x00, 0x00, 0x00},
 	}
 	patternMsg := &passthru.PassThruMsg{
-		ProtocolID: ma.protocol,
-		DataSize:   4,
-		Data:       [4128]byte{0x00, 0x00, 0x00, 0x00},
+		ProtocolID:     ma.protocol,
+		DataSize:       4,
+		ExtraDataIndex: 4,
+		Data:           [4128]byte{0x00, 0x00, 0x00, 0x00},
 	}
 	if err := ma.h.PassThruStartMsgFilter(ma.channelID, passthru.PASS_FILTER, maskMsg, patternMsg, nil, &filterID); err != nil {
 		ma.cfg.ErrorFunc(fmt.Errorf("PassThruStartMsgFilter: %w", err))
@@ -156,15 +158,17 @@ func (ma *J2534) setupFilters() error {
 		return errors.New("too many filters")
 	}
 	maskMsg := &passthru.PassThruMsg{
-		ProtocolID: ma.protocol,
-		DataSize:   4,
-		Data:       [4128]byte{0x00, 0x00, 0xff, 0xff},
+		ProtocolID:     ma.protocol,
+		DataSize:       4,
+		ExtraDataIndex: 4,
+		Data:           [4128]byte{0x00, 0x00, 0xff, 0xff},
 	}
 	for i, filter := range ma.cfg.CANFilter {
 		filterID := uint32(i)
 		patternMsg := &passthru.PassThruMsg{
-			ProtocolID: ma.protocol,
-			DataSize:   4,
+			ProtocolID:     ma.protocol,
+			DataSize:       4,
+			ExtraDataIndex: 4,
 		}
 		binary.BigEndian.PutUint32(patternMsg.Data[:], filter)
 		if err := ma.h.PassThruStartMsgFilter(ma.channelID, passthru.PASS_FILTER, maskMsg, patternMsg, nil, &filterID); err != nil {
