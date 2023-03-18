@@ -623,7 +623,7 @@ func (cl *Client) RequestDownload(ctx context.Context, z22se bool) error {
 
 // 8.15 TesterPresent ($3E) Service
 /*
- This service is used to indicate to a node (or nodes) that a tester is stll
+ This service is used to indicate to a node (or nodes) that a tester is still
  connected to the vehicle and that certain diagnostic services that have been previously activated are to remain
  active. Some diagnostic services require that a tester send a request for this service periodically in order to
  keep the functionality of the other service active. Documentation within this specification of each diagnostic
@@ -639,12 +639,8 @@ func (cl *Client) TesterPresentResponseRequired(ctx context.Context) error {
 	return CheckErr(resp)
 }
 
-func (cl *Client) TesterPresentNoResponseAllowed() {
-	payload := []byte{0xFE, 0x01, 0x3E}
-	frame := gocan.NewFrame(0x101, payload, gocan.Outgoing)
-	if err := cl.c.Send(frame); err != nil {
-		panic(err)
-	}
+func (cl *Client) TesterPresentNoResponseAllowed() error {
+	return cl.c.Send(gocan.NewFrame(0x101, []byte{0xFE, 0x01, 0x3E}, gocan.Outgoing))
 }
 
 // 8.14 WriteDataByIdentifier ($3B) Service.

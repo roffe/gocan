@@ -106,7 +106,7 @@ func (cu *Canusb) setCANrate(rate float64) error {
 		cu.canRate = "S0"
 	case 20:
 		cu.canRate = "S1"
-	case 33:
+	case 33.3:
 		cu.canRate = "s0e1c"
 	case 47.619:
 		cu.canRate = "scb9a"
