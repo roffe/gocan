@@ -5,6 +5,7 @@ go 1.20
 require (
 	github.com/albenik/bcd v0.0.0-20170831201648-635201416bc7
 	github.com/avast/retry-go v3.0.0+incompatible
+	github.com/bendikro/dl v0.0.0-20190410215913-e41fdb9069d4
 	github.com/fatih/color v1.14.1
 	go.bug.st/serial v1.5.0
 	golang.org/x/sync v0.1.0

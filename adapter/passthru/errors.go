@@ -35,8 +35,8 @@ var (
 	ErrUnknown             = errors.New("unknown error")
 )
 
-func CheckError(ret uintptr) error {
-	switch int32(ret) {
+func CheckError(ret uint32) error {
+	switch ret {
 	case STATUS_NOERROR:
 		//return errors.New("Function call successful")
 		return nil
@@ -96,64 +96,3 @@ func CheckError(ret uintptr) error {
 		return fmt.Errorf("unknown error: %d", ret)
 	}
 }
-
-/*
-func errorHander(ret int32) {
-	switch ret {
-	case 0:
-		fmt.Println("STATUS_NOERROR")
-	case 0x01:
-		fmt.Println("ERR_NOT_SUPPORTED")
-	case 0x02:
-		fmt.Println("ERR_INVALID_CHANNEL_ID")
-	case 0x03:
-		fmt.Println("ERR_INVALID_PROTOCOL_ID")
-	case 0x04:
-		fmt.Println("ERR_NULL_PARAMETER")
-	case 0x05:
-		fmt.Println("ERR_INVALID_IOCTL_VALUE")
-	case 0x06:
-		fmt.Println("ERR_INVALID_FLAGS")
-	case 0x07:
-		fmt.Println("ERR_FAILED")
-	case 0x08:
-		fmt.Println("ERR_DEVICE_NOT_CONNECTED")
-	case 0x09:
-		fmt.Println("ERR_TIMEOUT")
-	case 0x0A:
-		fmt.Println("ERR_INVALID_MSG")
-	case 0x0B:
-		fmt.Println("ERR_INVALID_TIME_INTERVAL")
-	case 0x0C:
-		fmt.Println("ERR_EXCEEDED_LIMIT")
-	case 0x0D:
-		fmt.Println("ERR_INVALID_MSG_ID")
-	case 0x0E:
-		fmt.Println("ERR_DEVICE_IN_USE")
-	case 0x0F:
-		fmt.Println("ERR_INVALID_IOCTL_ID")
-	case 0x10:
-		fmt.Println("ERR_BUFFER_EMPTY")
-	case 0x11:
-		fmt.Println("ERR_BUFFER_FULL")
-	case 0x12:
-		fmt.Println("ERR_BUFFER_OVERFLOW")
-	case 0x13:
-		fmt.Println("ERR_PIN_INVALID")
-	case 0x14:
-		fmt.Println("ERR_CHANNEL_IN_USE")
-	case 0x15:
-		fmt.Println("ERR_MSG_PROTOCOL_ID")
-	case 0x16:
-		fmt.Println("ERR_INVALID_FILTER_ID")
-	case 0x17:
-		fmt.Println("ERR_NO_FLOW_CONTROL")
-	case 0x18:
-		fmt.Println("ERR_NOT_UNIQUE")
-	case 0x19:
-		fmt.Println("ERR_INVALID_BAUDRATE")
-	case 0x1A:
-		fmt.Println("ERR_INVALID_DEVICE_ID")
-	}
-}
-*/

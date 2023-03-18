@@ -155,7 +155,7 @@ func calcAcceptanceFilters(idList []uint32) (string, string) {
 	if len(idList) == 1 && idList[0] == 0 {
 		return "\r", "\r"
 	}
-	var code uint32 = ^uint32(0)
+	var code = ^uint32(0)
 	var mask uint32 = 0
 	if len(idList) == 0 {
 		code = 0
