@@ -1,11 +1,11 @@
 # goCAN
 
 A Go linux/windows/osx CAN stack running in userland with low level adapter drivers written from the ground up
-J2534 support only on Windows for now.
+J2534 support in Windows / Linux
 
 ## USB Serial
 
-* OBDLinx SX/MX/MX+
+* OBDLinx SX/MX/MX+: https://www.obdlink.com/
 * STN1130
 * STN1170
 * STN2120
@@ -14,10 +14,16 @@ J2534 support only on Windows for now.
 
 ## J2534
 
-* Drewtech Mongoose GM PRO II
-* Scanmatik 2 PRO
+### Windows
+* Drewtech Mongoose GM PRO II: https://www.drewtech.com/
+* Scanmatik 2 PRO: https://scanmatik.pro/
 * Tech2 passthru ( limited support )
 * GM MDI
+
+### Linux
+* Tactrix Openport 2.0: https://github.com/dschultzca/j2534
+* Machina: https://github.com/rnd-ash/Macchina-J2534
+* WQCAN: https://github.com/witoldo7/STM32CAN
 
 ## Showcase
 
