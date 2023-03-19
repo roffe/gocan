@@ -174,8 +174,8 @@ func (j *PassThru) PassThruWriteMsgs(channelID uint32, pMsg *PassThruMsg, pNumMs
 	// long PassThruWriteMsgs(unsigned long ChannelID, PassThruMsg *pMsg, unsigned long *pNumMsgs, unsigned long Timeout);
 	ret, _, _ := j.passThruWriteMsgs.Call(
 		uintptr(channelID),
-		uintptr(unsafe.Pointer(&pMsg)),
-		uintptr(unsafe.Pointer(&pNumMsgs)),
+		uintptr(unsafe.Pointer(pMsg)),
+		uintptr(unsafe.Pointer(pNumMsgs)),
 		uintptr(timeout),
 	)
 	return CheckError(uint32(ret))
