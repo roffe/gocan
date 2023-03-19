@@ -5,18 +5,19 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/roffe/gocan"
+	"github.com/roffe/gocan/adapter/passthru"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
-	"unsafe"
-
-	"github.com/roffe/gocan"
-	"github.com/roffe/gocan/adapter/passthru"
 )
 
 func init() {
-	Register("J2534", NewJ2534)
+	err := Register("J2534", NewJ2534)
+	if err != nil {
+		return
+	}
 }
 
 type J2534 struct {
@@ -87,9 +88,9 @@ func (ma *J2534) Init(ctx context.Context) error {
 		return fmt.Errorf("PassThruOpen: %w", err)
 	}
 
-	//if err := ma.printVersions(); err != nil {
-	//	return err
-	//}
+	if err := ma.PrintVersions(); err != nil {
+		return fmt.Errorf("PassThruOpen: %w", err)
+	}
 
 	if err := ma.h.PassThruConnect(ma.deviceID, ma.protocol, ma.flags, baudRate, &ma.channelID); err != nil {
 		if errg := ma.h.Close(); errg != nil {
@@ -124,13 +125,27 @@ func (ma *J2534) Init(ctx context.Context) error {
 	}
 
 	if len(ma.cfg.CANFilter) > 0 {
-		ma.setupFilters()
+		err := ma.setupFilters()
+		if err != nil {
+			return err
+		}
 	} else {
 		ma.allowAll()
 	}
 	go ma.recvManager()
 	go ma.sendManager()
 
+	return nil
+}
+
+func (ma *J2534) PrintVersions() error {
+	firmwareVersion, dllVersion, apiVersion, err := ma.h.PassThruReadVersion(ma.deviceID)
+	if err != nil {
+		return err
+	}
+	ma.cfg.OnMessage("Firmware version: " + firmwareVersion)
+	ma.cfg.OnMessage("DLL version: " + dllVersion)
+	ma.cfg.OnMessage("API version: " + apiVersion)
 	return nil
 }
 
@@ -215,7 +230,7 @@ func (ma *J2534) readMsg() (*passthru.PassThruMsg, error) {
 		ProtocolID: ma.protocol,
 	}
 	numMsgs := uint32(1)
-	if err := ma.h.PassThruReadMsgs(ma.channelID, uintptr(unsafe.Pointer(msg)), &numMsgs, 10); err != nil {
+	if err := ma.h.PassThruReadMsgs(ma.channelID, msg, &numMsgs, 10); err != nil {
 		if errors.Is(err, passthru.ErrBufferEmpty) {
 			return nil, nil
 		}
@@ -257,7 +272,8 @@ func (ma *J2534) sendMsg(msg *passthru.PassThruMsg) error {
 		ma.Lock()
 		defer ma.Unlock()
 	}
-	if err := ma.h.PassThruWriteMsgs(ma.channelID, uintptr(unsafe.Pointer(msg)), 1, 0); err != nil {
+	numMsg := uint32(1)
+	if err := ma.h.PassThruWriteMsgs(ma.channelID, msg, &numMsg, 0); err != nil {
 		if errStr, err2 := ma.h.PassThruGetLastError(); err2 == nil {
 			return fmt.Errorf("%w: %s", err, errStr)
 		}
@@ -277,19 +293,17 @@ func (ma *J2534) Send() chan<- gocan.CANFrame {
 func (ma *J2534) Close() error {
 	close(ma.close)
 	time.Sleep(200 * time.Millisecond)
-	ma.h.PassThruIoctl(ma.channelID, passthru.CLEAR_MSG_FILTERS, nil, nil)
-	ma.h.PassThruDisconnect(ma.channelID)
-	ma.h.PassThruClose(ma.deviceID)
-	return ma.h.Close()
-}
-
-func (ma *J2534) PrintVersions() error {
-	firmwareVersion, dllVersion, apiVersion, err := ma.h.PassThruReadVersion(ma.deviceID)
+	err := ma.h.PassThruIoctl(ma.channelID, passthru.CLEAR_MSG_FILTERS, nil, nil)
 	if err != nil {
 		return err
 	}
-	ma.cfg.OnMessage("Firmware version: " + firmwareVersion)
-	ma.cfg.OnMessage("DLL version: " + dllVersion)
-	ma.cfg.OnMessage("API version: " + apiVersion)
-	return nil
+	err = ma.h.PassThruDisconnect(ma.channelID)
+	if err != nil {
+		return err
+	}
+	err = ma.h.PassThruClose(ma.deviceID)
+	if err != nil {
+		return err
+	}
+	return ma.h.Close()
 }
