@@ -77,12 +77,12 @@ func (ma *J2534) Init(ctx context.Context) error {
 	if err := ma.h.PassThruOpen("", &ma.deviceID); err != nil {
 		str, err2 := ma.h.PassThruGetLastError()
 		if err2 != nil {
-			ma.cfg.ErrorFunc(fmt.Errorf("PassThruOpenGetLastError: %w", err))
+			ma.cfg.OnError(fmt.Errorf("PassThruOpenGetLastError: %w", err))
 		} else {
-			ma.cfg.OutputFunc("PassThruOpen: " + str)
+			ma.cfg.OnMessage("PassThruOpen: " + str)
 		}
 		if errg := ma.h.Close(); errg != nil {
-			ma.cfg.ErrorFunc(errg)
+			ma.cfg.OnError(errg)
 		}
 		return fmt.Errorf("PassThruOpen: %w", err)
 	}
@@ -93,7 +93,7 @@ func (ma *J2534) Init(ctx context.Context) error {
 
 	if err := ma.h.PassThruConnect(ma.deviceID, ma.protocol, ma.flags, baudRate, &ma.channelID); err != nil {
 		if errg := ma.h.Close(); errg != nil {
-			ma.cfg.ErrorFunc(errg)
+			ma.cfg.OnError(errg)
 		}
 		return fmt.Errorf("PassThruConnect: %w", err)
 	}
@@ -110,7 +110,7 @@ func (ma *J2534) Init(ctx context.Context) error {
 		}
 		if err := ma.h.PassThruIoctl(ma.channelID, passthru.SET_CONFIG, opts, nil); err != nil {
 			if errg := ma.h.Close(); errg != nil {
-				ma.cfg.ErrorFunc(errg)
+				ma.cfg.OnError(errg)
 			}
 			return fmt.Errorf("PassThruIoctl set SWCAN: %w", err)
 		}
@@ -118,7 +118,7 @@ func (ma *J2534) Init(ctx context.Context) error {
 
 	if err := ma.h.PassThruIoctl(ma.channelID, passthru.CLEAR_RX_BUFFER, nil, nil); err != nil {
 		if errg := ma.h.Close(); errg != nil {
-			ma.cfg.ErrorFunc(errg)
+			ma.cfg.OnError(errg)
 		}
 		return fmt.Errorf("PassThruIoctl clear rx buffer: %w", err)
 	}
@@ -149,7 +149,7 @@ func (ma *J2534) allowAll() {
 		Data:           [4128]byte{0x00, 0x00, 0x00, 0x00},
 	}
 	if err := ma.h.PassThruStartMsgFilter(ma.channelID, passthru.PASS_FILTER, maskMsg, patternMsg, nil, &filterID); err != nil {
-		ma.cfg.ErrorFunc(fmt.Errorf("PassThruStartMsgFilter: %w", err))
+		ma.cfg.OnError(fmt.Errorf("PassThruStartMsgFilter: %w", err))
 	}
 }
 
@@ -187,14 +187,14 @@ func (ma *J2534) recvManager() {
 		default:
 			msg, err := ma.readMsg()
 			if err != nil {
-				ma.cfg.ErrorFunc(err)
+				ma.cfg.OnError(err)
 				continue
 			}
 			if msg == nil {
 				continue
 			}
 			if msg.DataSize == 0 {
-				ma.cfg.ErrorFunc(errors.New("empty message"))
+				ma.cfg.OnError(errors.New("empty message"))
 				continue
 			}
 			ma.recv <- gocan.NewFrame(
@@ -246,7 +246,7 @@ func (ma *J2534) sendManager() {
 			binary.BigEndian.PutUint32(msg.Data[:], f.Identifier())
 			copy(msg.Data[4:], f.Data())
 			if err := ma.sendMsg(msg); err != nil {
-				ma.cfg.ErrorFunc(fmt.Errorf("send error: %w", err))
+				ma.cfg.OnError(fmt.Errorf("send error: %w", err))
 			}
 		}
 	}
@@ -288,8 +288,8 @@ func (ma *J2534) PrintVersions() error {
 	if err != nil {
 		return err
 	}
-	ma.cfg.OutputFunc("Firmware version: " + firmwareVersion)
-	ma.cfg.OutputFunc("DLL version: " + dllVersion)
-	ma.cfg.OutputFunc("API version: " + apiVersion)
+	ma.cfg.OnMessage("Firmware version: " + firmwareVersion)
+	ma.cfg.OnMessage("DLL version: " + dllVersion)
+	ma.cfg.OnMessage("API version: " + apiVersion)
 	return nil
 }

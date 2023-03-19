@@ -83,10 +83,10 @@ func (stn *STN) Init(ctx context.Context) error {
 		to := stn.cfg.PortBaudrate
 		for _, from := range stnAdapterSpeeds {
 			if err := stn.setSpeed(p, mode, from, to); err == nil {
-				stn.cfg.OutputFunc(fmt.Sprintf("Switched adapter baudrate from %d to %d bps", from, to))
+				stn.cfg.OnMessage(fmt.Sprintf("Switched adapter baudrate from %d to %d bps", from, to))
 				return nil
 			} else {
-				stn.cfg.ErrorFunc(err)
+				stn.cfg.OnError(err)
 			}
 		}
 		return errors.New("Failed to switch adapter baudrate") //lint:ignore ST1005 ignore this
@@ -94,7 +94,7 @@ func (stn *STN) Init(ctx context.Context) error {
 		retry.Context(ctx),
 		retry.Attempts(2),
 		retry.OnRetry(func(n uint, err error) {
-			stn.cfg.ErrorFunc(fmt.Errorf("retry #%d: %w", n, err))
+			stn.cfg.OnError(fmt.Errorf("retry #%d: %w", n, err))
 		}),
 		retry.LastErrorOnly(true),
 	)
@@ -128,10 +128,10 @@ func (stn *STN) Init(ctx context.Context) error {
 		}
 		out := []byte(c + "\r")
 		if debug {
-			stn.cfg.OutputFunc(c)
+			stn.cfg.OnMessage(c)
 		}
 		if _, err := p.Write(out); err != nil {
-			stn.cfg.ErrorFunc(err)
+			stn.cfg.OnError(err)
 		}
 		time.Sleep(delay)
 	}
@@ -176,7 +176,7 @@ func (stn *STN) setSpeed(p serial.Port, mode *serial.Mode, from, to int) error {
 						continue
 					}
 					if strings.HasPrefix(buff.String(), "ELM327") || strings.HasPrefix(buff.String(), "STN") {
-						stn.cfg.OutputFunc(buff.String())
+						stn.cfg.OnMessage(buff.String())
 						return nil
 					}
 					buff.Reset()
@@ -278,11 +278,11 @@ func (stn *STN) sendManager(ctx context.Context) {
 			}
 			stn.semChan <- token{}
 			if debug {
-				stn.cfg.OutputFunc("<o> " + f.String())
+				stn.cfg.OnMessage("<o> " + f.String())
 			}
 			_, err := stn.port.Write(f.Bytes())
 			if err != nil {
-				stn.cfg.ErrorFunc(fmt.Errorf("failed to write to com port: %q, %w", f.String(), err))
+				stn.cfg.OnError(fmt.Errorf("failed to write to com port: %q, %w", f.String(), err))
 			}
 			f.Reset()
 		case <-ctx.Done():
@@ -305,7 +305,7 @@ func (stn *STN) recvManager(ctx context.Context) {
 		n, err := stn.port.Read(readBuffer)
 		if err != nil {
 			if !stn.closed {
-				stn.cfg.ErrorFunc(fmt.Errorf("failed to read com port: %w", err))
+				stn.cfg.OnError(fmt.Errorf("failed to read com port: %w", err))
 			}
 			return
 		}
@@ -332,16 +332,16 @@ func (stn *STN) recvManager(ctx context.Context) {
 					continue
 				}
 				if debug {
-					stn.cfg.OutputFunc("<i> " + buff.String())
+					stn.cfg.OnMessage("<i> " + buff.String())
 				}
 				switch buff.String() {
 				case "CAN ERROR":
-					stn.cfg.ErrorFunc(errors.New("CAN ERROR"))
+					stn.cfg.OnError(errors.New("CAN ERROR"))
 					buff.Reset()
 				case "STOPPED":
 					buff.Reset()
 				case "?":
-					stn.cfg.ErrorFunc(errors.New("UNKNOWN COMMAND"))
+					stn.cfg.OnError(errors.New("UNKNOWN COMMAND"))
 					buff.Reset()
 				case "NO DATA":
 					buff.Reset()
@@ -350,13 +350,13 @@ func (stn *STN) recvManager(ctx context.Context) {
 				default:
 					f, err := stn.decodeFrame(buff.Bytes())
 					if err != nil {
-						stn.cfg.ErrorFunc(fmt.Errorf("failed to decode frame: %s %w", buff.String(), err))
+						stn.cfg.OnError(fmt.Errorf("failed to decode frame: %s %w", buff.String(), err))
 						continue
 					}
 					select {
 					case stn.recv <- f:
 					default:
-						stn.cfg.ErrorFunc(fmt.Errorf("dropped frame: %s", f.String()))
+						stn.cfg.OnError(fmt.Errorf("dropped frame: %s", f.String()))
 					}
 					buff.Reset()
 				}

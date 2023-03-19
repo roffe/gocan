@@ -24,13 +24,13 @@ type AdapterFunc func(*gocan.AdapterConfig) (gocan.Adapter, error)
 type token struct{}
 
 func New(adapterName string, cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
-	if cfg.OutputFunc == nil {
-		cfg.OutputFunc = func(s string) {
+	if cfg.OnMessage == nil {
+		cfg.OnMessage = func(s string) {
 			log.Println(s)
 		}
 	}
-	if cfg.ErrorFunc == nil {
-		cfg.ErrorFunc = func(err error) {
+	if cfg.OnError == nil {
+		cfg.OnError = func(err error) {
 			log.Println(err)
 		}
 	}

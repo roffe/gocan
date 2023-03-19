@@ -105,6 +105,51 @@ func (f *Frame) String() string {
 
 	}
 
+	out.WriteString(fmt.Sprintf("0x%03X", f.identifier) + " || ")
+
+	out.WriteString(strconv.Itoa(len(f.data)) + " || ")
+
+	var hexView strings.Builder
+
+	for i, b := range f.data {
+		hexView.WriteString(fmt.Sprintf("%02X", b))
+		if i != len(f.data)-1 {
+			hexView.WriteString(" ")
+		}
+	}
+
+	out.WriteString(fmt.Sprintf("%-23s", hexView.String()))
+
+	out.WriteString(" || ")
+
+	var binView strings.Builder
+	for i, b := range f.data {
+		binView.WriteString(fmt.Sprintf("%08b", b))
+		if i != len(f.data)-1 {
+			binView.WriteString(" ")
+		}
+	}
+
+	out.WriteString(fmt.Sprintf("%-72s", binView.String()))
+
+	out.WriteString(" || ")
+	out.WriteString(onlyPrintable(f.data))
+	return out.String()
+}
+
+func (f *Frame) String2() string {
+	var out strings.Builder
+
+	switch f.frameType.Type {
+	case 0:
+		out.WriteString("<i> || ")
+	case 1:
+		out.WriteString("<o> || ")
+	case 2:
+		out.WriteString("<r> || ")
+
+	}
+
 	out.WriteString(green("0x%03X", f.identifier) + " || ")
 
 	out.WriteString(strconv.Itoa(len(f.data)) + " || ")

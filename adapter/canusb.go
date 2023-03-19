@@ -192,7 +192,7 @@ func (cu *Canusb) sendManager(ctx context.Context) {
 			cu.sendMutex <- token{}
 			_, err := cu.port.Write(f.Bytes())
 			if err != nil {
-				cu.cfg.ErrorFunc(fmt.Errorf("failed to write to com port: %s, %w", f.String(), err))
+				cu.cfg.OnError(fmt.Errorf("failed to write to com port: %s, %w", f.String(), err))
 			}
 			if debug {
 				fmt.Fprint(os.Stderr, ">> "+f.String()+"\n")
@@ -218,7 +218,7 @@ func (cu *Canusb) recvManager(ctx context.Context) {
 		n, err := cu.port.Read(readBuffer)
 		if err != nil {
 			if !cu.closed {
-				cu.cfg.ErrorFunc(fmt.Errorf("failed to read com port: %w", err))
+				cu.cfg.OnError(fmt.Errorf("failed to read com port: %w", err))
 			}
 			return
 		}
@@ -248,7 +248,7 @@ func (cu *Canusb) parse(ctx context.Context, readBuffer []byte, buff *bytes.Buff
 			switch by[0] {
 			case 'F':
 				if err := decodeStatus(by); err != nil {
-					cu.cfg.ErrorFunc(fmt.Errorf("CAN status error: %w", err))
+					cu.cfg.OnError(fmt.Errorf("CAN status error: %w", err))
 				}
 			case 't':
 				if debug {
@@ -256,13 +256,13 @@ func (cu *Canusb) parse(ctx context.Context, readBuffer []byte, buff *bytes.Buff
 				}
 				f, err := cu.decodeFrame(by)
 				if err != nil {
-					cu.cfg.ErrorFunc(fmt.Errorf("failed to decode frame: %X", buff.Bytes()))
+					cu.cfg.OnError(fmt.Errorf("failed to decode frame: %X", buff.Bytes()))
 					continue
 				}
 				select {
 				case cu.recv <- f:
 				default:
-					cu.cfg.ErrorFunc(errors.New("dropped frame"))
+					cu.cfg.OnError(errors.New("dropped frame"))
 				}
 				buff.Reset()
 			case 'z': // last command ok
@@ -272,11 +272,11 @@ func (cu *Canusb) parse(ctx context.Context, readBuffer []byte, buff *bytes.Buff
 				}
 			case 0x07: // bell, last command was error
 			case 'V':
-				cu.cfg.OutputFunc("H/W version " + buff.String())
+				cu.cfg.OnMessage("H/W version " + buff.String())
 			case 'N':
-				cu.cfg.OutputFunc("H/W serial " + buff.String())
+				cu.cfg.OnMessage("H/W serial " + buff.String())
 			default:
-				cu.cfg.OutputFunc("Unknown>> " + buff.String())
+				cu.cfg.OnMessage("Unknown>> " + buff.String())
 			}
 			buff.Reset()
 			continue

@@ -23,8 +23,8 @@ type AdapterConfig struct {
 	PortBaudrate int
 	CANRate      float64
 	CANFilter    []uint32
-	OutputFunc   func(string)
-	ErrorFunc    func(error)
+	OnMessage    func(string)
+	OnError      func(error)
 }
 
 type Client struct {
