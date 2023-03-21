@@ -19,10 +19,12 @@ type Adapter interface {
 }
 
 type AdapterConfig struct {
+	Debug        bool
 	Port         string
 	PortBaudrate int
 	CANRate      float64
 	CANFilter    []uint32
+	PrintVersion bool
 	OnMessage    func(string)
 	OnError      func(error)
 }

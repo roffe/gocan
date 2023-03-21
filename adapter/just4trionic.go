@@ -14,7 +14,9 @@ import (
 )
 
 func init() {
-	Register("Just4Trionic", NewJust4Trionic)
+	if err := Register("Just4Trionic", NewJust4Trionic); err != nil {
+		panic(err)
+	}
 }
 
 type Just4Trionic struct {
@@ -91,7 +93,7 @@ func (a *Just4Trionic) Init(ctx context.Context) error {
 		if n == 3 {
 			p.ResetInputBuffer()
 		}
-		if debug {
+		if a.cfg.Debug {
 			a.cfg.OnMessage("sending: " + c)
 		}
 		_, err := p.Write([]byte(c + "\r"))
@@ -247,7 +249,7 @@ func (a *Just4Trionic) sendManager(ctx context.Context) {
 			if err != nil {
 				a.cfg.OnError(fmt.Errorf("failed to write to com port: %q, %w", f, err))
 			}
-			if debug {
+			if a.cfg.Debug {
 				a.cfg.OnMessage(">> " + f)
 			}
 			f = ""

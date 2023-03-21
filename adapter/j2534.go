@@ -5,18 +5,23 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/roffe/gocan"
-	"github.com/roffe/gocan/adapter/passthru"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/roffe/gocan"
+	"github.com/roffe/gocan/adapter/passthru"
 )
 
 func init() {
-	err := Register("J2534", NewJ2534)
-	if err != nil {
-		return
+	if err := Register("J2534", NewJ2534); err != nil {
+		panic(err)
+	}
+	for _, dll := range passthru.FindDLLs() {
+		if err := Register(dll.Name, NewJ2534FromDLLName(dll.FunctionLibrary)); err != nil {
+			panic(err)
+		}
 	}
 }
 
@@ -29,6 +34,13 @@ type J2534 struct {
 
 	tech2passThru bool
 	sync.Mutex
+}
+
+func NewJ2534FromDLLName(dllPath string) func(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
+	return func(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
+		cfg.Port = dllPath
+		return NewJ2534(cfg)
+	}
 }
 
 func NewJ2534(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
@@ -65,6 +77,9 @@ func (ma *J2534) Init(ctx context.Context) error {
 		baudRate = 33333
 		ma.protocol = passthru.SW_CAN_PS
 		swcan = true
+	case 47.619:
+		baudRate = 47619
+		ma.protocol = passthru.CAN
 	case 500:
 		baudRate = 500000
 		ma.protocol = passthru.CAN
@@ -88,8 +103,10 @@ func (ma *J2534) Init(ctx context.Context) error {
 		return fmt.Errorf("PassThruOpen: %w", err)
 	}
 
-	if err := ma.PrintVersions(); err != nil {
-		return fmt.Errorf("PassThruOpen: %w", err)
+	if ma.cfg.PrintVersion {
+		if err := ma.PrintVersions(); err != nil {
+			return fmt.Errorf("PassThruPrintVersion: %w", err)
+		}
 	}
 
 	if err := ma.h.PassThruConnect(ma.deviceID, ma.protocol, ma.flags, baudRate, &ma.channelID); err != nil {

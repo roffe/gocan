@@ -21,8 +21,12 @@ import (
 var stnAdapterSpeeds = []int{115200, 38400, 230400, 921600, 2000000, 1000000, 57600}
 
 func init() {
-	Register("STN1170", NewSTN)
-	Register("STN2120", NewSTN)
+	if err := Register("STN1170", NewSTN); err != nil {
+		panic(err)
+	}
+	if err := Register("STN2120", NewSTN); err != nil {
+		panic(err)
+	}
 }
 
 type STN struct {
@@ -83,7 +87,9 @@ func (stn *STN) Init(ctx context.Context) error {
 		to := stn.cfg.PortBaudrate
 		for _, from := range stnAdapterSpeeds {
 			if err := stn.setSpeed(p, mode, from, to); err == nil {
-				stn.cfg.OnMessage(fmt.Sprintf("Switched adapter baudrate from %d to %d bps", from, to))
+				if stn.cfg.Debug {
+					stn.cfg.OnMessage(fmt.Sprintf("Switched adapter baudrate from %d to %d bps", from, to))
+				}
 				return nil
 			} else {
 				stn.cfg.OnError(err)
@@ -127,7 +133,7 @@ func (stn *STN) Init(ctx context.Context) error {
 			continue
 		}
 		out := []byte(c + "\r")
-		if debug {
+		if stn.cfg.Debug {
 			stn.cfg.OnMessage(c)
 		}
 		if _, err := p.Write(out); err != nil {
@@ -176,7 +182,9 @@ func (stn *STN) setSpeed(p serial.Port, mode *serial.Mode, from, to int) error {
 						continue
 					}
 					if strings.HasPrefix(buff.String(), "ELM327") || strings.HasPrefix(buff.String(), "STN") {
-						stn.cfg.OnMessage(buff.String())
+						if stn.cfg.PrintVersion {
+							stn.cfg.OnMessage(buff.String())
+						}
 						return nil
 					}
 					buff.Reset()
@@ -277,7 +285,7 @@ func (stn *STN) sendManager(ctx context.Context) {
 				f.WriteString("r:" + strconv.Itoa(t.GetResponseCount()) + "\r")
 			}
 			stn.semChan <- token{}
-			if debug {
+			if stn.cfg.Debug {
 				stn.cfg.OnMessage("<o> " + f.String())
 			}
 			_, err := stn.port.Write(f.Bytes())
@@ -331,7 +339,7 @@ func (stn *STN) recvManager(ctx context.Context) {
 				if buff.Len() == 0 {
 					continue
 				}
-				if debug {
+				if stn.cfg.Debug {
 					stn.cfg.OnMessage("<i> " + buff.String())
 				}
 				switch buff.String() {

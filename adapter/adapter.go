@@ -3,24 +3,15 @@ package adapter
 import (
 	"fmt"
 	"log"
-	"os"
-	"strings"
+	"sort"
 
 	"github.com/roffe/gocan"
 )
 
-var (
-	debug      bool
-	adapterMap = make(map[string]AdapterFunc)
-)
-
-func init() {
-	if strings.ToLower(os.Getenv("DEBUG")) == "true" {
-		debug = true
-	}
-}
+var adapterMap = make(map[string]AdapterFunc)
 
 type AdapterFunc func(*gocan.AdapterConfig) (gocan.Adapter, error)
+
 type token struct{}
 
 func New(adapterName string, cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
@@ -53,5 +44,6 @@ func List() []string {
 	for name := range adapterMap {
 		out = append(out, name)
 	}
+	sort.Strings(out)
 	return out
 }

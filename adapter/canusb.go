@@ -17,7 +17,9 @@ import (
 )
 
 func init() {
-	Register("CANUSB", NewCanusb)
+	if err := Register("CANUSB", NewCanusb); err != nil {
+		panic(err)
+	}
 }
 
 type Canusb struct {
@@ -194,7 +196,7 @@ func (cu *Canusb) sendManager(ctx context.Context) {
 			if err != nil {
 				cu.cfg.OnError(fmt.Errorf("failed to write to com port: %s, %w", f.String(), err))
 			}
-			if debug {
+			if cu.cfg.Debug {
 				fmt.Fprint(os.Stderr, ">> "+f.String()+"\n")
 			}
 			f.Reset()
@@ -251,7 +253,7 @@ func (cu *Canusb) parse(ctx context.Context, readBuffer []byte, buff *bytes.Buff
 					cu.cfg.OnError(fmt.Errorf("CAN status error: %w", err))
 				}
 			case 't':
-				if debug {
+				if cu.cfg.Debug {
 					fmt.Fprint(os.Stderr, "<< "+buff.String()+"\n")
 				}
 				f, err := cu.decodeFrame(by)
@@ -272,9 +274,13 @@ func (cu *Canusb) parse(ctx context.Context, readBuffer []byte, buff *bytes.Buff
 				}
 			case 0x07: // bell, last command was error
 			case 'V':
-				cu.cfg.OnMessage("H/W version " + buff.String())
+				if cu.cfg.PrintVersion {
+					cu.cfg.OnMessage("H/W version " + buff.String())
+				}
 			case 'N':
-				cu.cfg.OnMessage("H/W serial " + buff.String())
+				if cu.cfg.PrintVersion {
+					cu.cfg.OnMessage("H/W serial " + buff.String())
+				}
 			default:
 				cu.cfg.OnMessage("Unknown>> " + buff.String())
 			}
