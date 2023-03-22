@@ -8,6 +8,7 @@ require (
 	github.com/bendikro/dl v0.0.0-20190410215913-e41fdb9069d4
 	github.com/fatih/color v1.14.1
 	go.bug.st/serial v1.5.0
+	go.einride.tech/can v0.5.4
 	golang.org/x/sync v0.1.0
 )
 
@@ -16,7 +17,12 @@ require (
 	github.com/stretchr/testify v1.8.0 // indirect
 )
 
-require github.com/mattn/go-isatty v0.0.17 // indirect
+require (
+	github.com/golang/mock v1.6.0 // indirect
+	github.com/mattn/go-isatty v0.0.17 // indirect
+	golang.org/x/mod v0.8.0 // indirect
+	golang.org/x/tools v0.6.0 // indirect
+)
 
 require (
 	github.com/creack/goselect v0.1.2 // indirect
