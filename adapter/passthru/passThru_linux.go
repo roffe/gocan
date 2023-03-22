@@ -29,7 +29,6 @@ type PassThru struct {
 }
 
 func New(libName string) (*PassThru, error) {
-	fmt.Println(libName)
 	lib, err := dl.Open(libName, 0)
 	if err != nil {
 		return nil, err
@@ -257,13 +256,15 @@ func FindConfigFiles(root string) ([]string, error) {
 func FindDLLs() (libs []J2534DLL) {
 	home, _ := os.UserHomeDir()
 	configDir := home + "/.passthru/"
+	if _, err := os.Stat(configDir); os.IsNotExist(err) {
+		return
+	}
 	configFiles, err := FindConfigFiles(configDir)
 
 	for _, file := range configFiles {
 		if _, err := os.Stat(file); errors.Is(err, os.ErrNotExist) {
 			return
 		}
-
 		jsonFile, _ := os.Open(file)
 
 		defer func(jsonFile *os.File) {
@@ -285,7 +286,7 @@ func FindDLLs() (libs []J2534DLL) {
 		}
 
 		name := config.VENDOR + " " + config.NAME
-		if _, err := os.Stat(file); err == nil {
+		if _, err := os.Stat(config.FUNCTIONLIB); err == nil && filepath.Ext(config.FUNCTIONLIB) == ".so" {
 			libs = append(libs, J2534DLL{Name: name, FunctionLibrary: config.FUNCTIONLIB})
 		}
 	}
