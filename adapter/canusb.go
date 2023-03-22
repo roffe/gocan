@@ -17,7 +17,17 @@ import (
 )
 
 func init() {
-	if err := Register("CANUSB", NewCanusb); err != nil {
+	if err := Register("CANUSB", &AdapterInfo{
+		Name:               "CANUSB",
+		Description:        "Lawicell CANUSB",
+		RequiresSerialPort: true,
+		Capabilities: AdapterCapabilities{
+			HSCAN: true,
+			KLine: false,
+			SWCAN: true,
+		},
+		New: NewCanusb,
+	}); err != nil {
 		panic(err)
 	}
 }

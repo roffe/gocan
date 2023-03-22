@@ -21,10 +21,44 @@ import (
 var stnAdapterSpeeds = []int{115200, 38400, 230400, 921600, 2000000, 1000000, 57600}
 
 func init() {
-	if err := Register("STN1170", NewSTN); err != nil {
+	if err := Register("OBDLink SX", &AdapterInfo{
+		Name:               "OBDLink SX",
+		Description:        "OBDLink SX",
+		RequiresSerialPort: true,
+		Capabilities: AdapterCapabilities{
+			HSCAN: true,
+			KLine: false,
+			SWCAN: false,
+		},
+		New: NewSTN,
+	}); err != nil {
 		panic(err)
 	}
-	if err := Register("STN2120", NewSTN); err != nil {
+
+	if err := Register("STN1170", &AdapterInfo{
+		Name:               "STN1170",
+		Description:        "ScanTool.net STN1170 based adapter",
+		RequiresSerialPort: true,
+		Capabilities: AdapterCapabilities{
+			HSCAN: true,
+			KLine: true,
+			SWCAN: true,
+		},
+		New: NewSTN,
+	}); err != nil {
+		panic(err)
+	}
+	if err := Register("STN2120", &AdapterInfo{
+		Name:               "STN2120",
+		Description:        "ScanTool.net STN2120 based adapter",
+		RequiresSerialPort: true,
+		Capabilities: AdapterCapabilities{
+			HSCAN: true,
+			KLine: true,
+			SWCAN: true,
+		},
+		New: NewSTN,
+	}); err != nil {
 		panic(err)
 	}
 }
@@ -235,6 +269,10 @@ func (stn *STN) setCANfilter(ids []uint32) {
 		mask |= id
 	}
 	mask = (^mask & 0x7FF) | filt
+	if len(ids) == 0 {
+		filt = 0
+		mask = 0x7FF
+	}
 	stn.filter = fmt.Sprintf("ATCF%03X", filt)
 	stn.mask = fmt.Sprintf("ATCM%03X", mask)
 }

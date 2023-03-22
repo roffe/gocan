@@ -14,7 +14,17 @@ import (
 )
 
 func init() {
-	if err := Register("Just4Trionic", NewJust4Trionic); err != nil {
+	if err := Register("Just4Trionic", &AdapterInfo{
+		Name:               "Just4Trionic",
+		Description:        "STM32F103C8T6 based CAN adapter",
+		RequiresSerialPort: true,
+		Capabilities: AdapterCapabilities{
+			HSCAN: true,
+			KLine: false,
+			SWCAN: false,
+		},
+		New: NewJust4Trionic,
+	}); err != nil {
 		panic(err)
 	}
 }

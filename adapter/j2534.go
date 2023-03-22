@@ -15,11 +15,31 @@ import (
 )
 
 func init() {
-	if err := Register("J2534", NewJ2534); err != nil {
+	if err := Register("J2534", &AdapterInfo{
+		Name:               "J2534",
+		Description:        "Generic J2534",
+		RequiresSerialPort: true,
+		Capabilities: AdapterCapabilities{
+			HSCAN: true,
+			KLine: true,
+			SWCAN: true,
+		},
+		New: NewJ2534,
+	}); err != nil {
 		panic(err)
 	}
 	for _, dll := range passthru.FindDLLs() {
-		if err := Register(dll.Name, NewJ2534FromDLLName(dll.FunctionLibrary)); err != nil {
+		if err := Register(dll.Name, &AdapterInfo{
+			Name:               dll.Name,
+			Description:        "J2534 Interface",
+			RequiresSerialPort: false,
+			Capabilities: AdapterCapabilities{
+				HSCAN: true,
+				KLine: true,
+				SWCAN: true,
+			},
+			New: NewJ2534FromDLLName(dll.FunctionLibrary),
+		}); err != nil {
 			panic(err)
 		}
 	}
