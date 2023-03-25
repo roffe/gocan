@@ -317,9 +317,20 @@ type PassThruMsg struct {
 	// bytes. If ExtraDataIndex=0, then all bytes in the data array are extra bytes.
 	Data [4128]byte
 }
+
+type Capabilities struct {
+	CAN      bool
+	CANPS    bool
+	ISO15765 bool
+	ISO9141  bool
+	ISO14230 bool
+	SWCANPS  bool
+}
+
 type J2534DLL struct {
 	Name            string
 	FunctionLibrary string
+	Capabilities    Capabilities
 }
 
 func (m *PassThruMsg) DataBytes() []byte {
