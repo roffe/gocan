@@ -17,7 +17,7 @@ import (
 )
 
 func init() {
-	if err := Register("CANUSB", &AdapterInfo{
+	if err := Register(&AdapterInfo{
 		Name:               "CANUSB",
 		Description:        "Lawicell CANUSB",
 		RequiresSerialPort: true,
@@ -61,6 +61,15 @@ func NewCanusb(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 
 func (cu *Canusb) Name() string {
 	return "CANUSB"
+}
+
+func (cu *Canusb) SetFilter(filters []uint32) error {
+	filter, mask := calcAcceptanceFilters(filters)
+	cu.send <- gocan.NewRawCommand("C")
+	cu.send <- gocan.NewRawCommand(filter)
+	cu.send <- gocan.NewRawCommand(mask)
+	cu.send <- gocan.NewRawCommand("O")
+	return nil
 }
 
 func (cu *Canusb) Init(ctx context.Context) error {
@@ -169,10 +178,12 @@ func calcAcceptanceFilters(idList []uint32) (string, string) {
 	}
 	var code = ^uint32(0)
 	var mask uint32 = 0
+
 	if len(idList) == 0 {
 		code = 0
 		mask = ^uint32(0)
 	} else {
+		code = 0
 		for _, canID := range idList {
 			code &= (canID & 0x7FF) << 5
 			mask |= (canID & 0x7FF) << 5
@@ -196,20 +207,31 @@ func (cu *Canusb) sendManager(ctx context.Context) {
 			}
 
 		case v := <-cu.send:
-			idb := make([]byte, 4)
-			binary.BigEndian.PutUint32(idb, v.Identifier())
-			f.WriteString("t" + hex.EncodeToString(idb)[5:] +
-				strconv.Itoa(v.Length()) +
-				hex.EncodeToString(v.Data()) + "\r")
-			cu.sendMutex <- token{}
-			_, err := cu.port.Write(f.Bytes())
-			if err != nil {
-				cu.cfg.OnError(fmt.Errorf("failed to write to com port: %s, %w", f.String(), err))
+			switch v.(type) {
+			case *gocan.RawCommand:
+				cu.sendMutex <- token{}
+				if _, err := cu.port.Write(append(v.Data(), '\r')); err != nil {
+					cu.cfg.OnError(fmt.Errorf("failed to write to com port: %s, %w", f.String(), err))
+				}
+				if cu.cfg.Debug {
+					fmt.Fprint(os.Stderr, ">> "+v.String()+"\n")
+				}
+			default:
+				idb := make([]byte, 4)
+				binary.BigEndian.PutUint32(idb, v.Identifier())
+				f.WriteString("t" + hex.EncodeToString(idb)[5:] +
+					strconv.Itoa(v.Length()) +
+					hex.EncodeToString(v.Data()) + "\r")
+				cu.sendMutex <- token{}
+				if _, err := cu.port.Write(f.Bytes()); err != nil {
+					cu.cfg.OnError(fmt.Errorf("failed to write to com port: %s, %w", f.String(), err))
+				}
+				if cu.cfg.Debug {
+					fmt.Fprint(os.Stderr, ">> "+f.String()+"\n")
+				}
+				f.Reset()
 			}
-			if cu.cfg.Debug {
-				fmt.Fprint(os.Stderr, ">> "+f.String()+"\n")
-			}
-			f.Reset()
+
 		case <-ctx.Done():
 			return
 		case <-cu.close:
@@ -263,9 +285,9 @@ func (cu *Canusb) parse(ctx context.Context, readBuffer []byte, buff *bytes.Buff
 					cu.cfg.OnError(fmt.Errorf("CAN status error: %w", err))
 				}
 			case 't':
-				if cu.cfg.Debug {
-					fmt.Fprint(os.Stderr, "<< "+buff.String()+"\n")
-				}
+				//if cu.cfg.Debug {
+				//	fmt.Fprint(os.Stderr, "<< "+buff.String()+"\n")
+				//}
 				f, err := cu.decodeFrame(by)
 				if err != nil {
 					cu.cfg.OnError(fmt.Errorf("failed to decode frame: %X", buff.Bytes()))

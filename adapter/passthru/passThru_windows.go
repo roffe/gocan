@@ -91,7 +91,7 @@ func (j *PassThru) Close() error {
 	return j.dll.Release()
 }
 
-func (j *PassThru) PassThruConnect(deviceID uint32, protocolID uint32, flags uint32, baudRate uint32, pChannelID *uint32) error {
+func (j *PassThru) PassThruConnect(deviceID, protocolID, flags, baudRate uint32, pChannelID *uint32) error {
 	// long PassThruConnect(unsigned long DeviceID, unsigned long ProtocolID, unsigned long Flags, unsigned long BaudRate, unsigned long *pChannelID);
 	ret, _, _ := j.passThruConnect.Call(
 		uintptr(deviceID),
@@ -181,7 +181,7 @@ func (j *PassThru) PassThruWriteMsgs(channelID uint32, pMsg *PassThruMsg, pNumMs
 	return CheckError(uint32(ret))
 }
 
-func (j *PassThru) PassThruStartMsgFilter(channelID uint32, filterType uint32, pMaskMsg, pPatternMsg, pFlowControlMsg *PassThruMsg, pMsgID *uint32) error {
+func (j *PassThru) PassThruStartMsgFilter(channelID, filterType uint32, pMaskMsg, pPatternMsg, pFlowControlMsg *PassThruMsg, pMsgID *uint32) error {
 	// long PassThruStartMsgFilter(unsigned long ChannelID, unsigned long FilterType, PassThruMsg *pMaskMsg, PassThruMsg *pPatternMsg, PassThruMsg *pFlowControlMsg, unsigned long *pMsgID);
 	ret, _, _ := j.passThruStartMsgFilter.Call(
 		uintptr(channelID),
@@ -215,7 +215,7 @@ func (j *PassThru) PassThruReadVersion(deviceID uint32) (string, string, string,
 }
 
 // long PassThruIoctl(unsigned long HandleID, unsigned long IoctlID, void *pInput, void *pOutput);
-func (j *PassThru) PassThruIoctl(handleID uint32, ioctlID uint32, opts ...interface{}) error {
+func (j *PassThru) PassThruIoctl(handleID, ioctlID uint32, opts ...interface{}) error {
 	switch ioctlID {
 	case SET_CONFIG, GET_CONFIG:
 		ret, _, _ := j.passThruIoctl.Call(
@@ -234,6 +234,9 @@ func (j *PassThru) PassThruIoctl(handleID uint32, ioctlID uint32, opts ...interf
 		)
 		return CheckError(uint32(ret))
 	case FAST_INIT:
+		if len(opts) != 2 {
+			return ErrInvalidParameter
+		}
 		ret, _, _ := j.passThruIoctl.Call(
 			uintptr(handleID),
 			uintptr(ioctlID),
@@ -252,6 +255,10 @@ func (j *PassThru) PassThruGetLastError() (string, error) {
 		uintptr(unsafe.Pointer(&pErrorDescription)),
 	)
 	return string(bytes.Trim(pErrorDescription[:], "\x00")), CheckError(uint32(ret))
+}
+
+func (j *PassThru) PassThruClearMsgFilters(channelID uint32) error {
+	return j.PassThruIoctl(channelID, CLEAR_MSG_FILTERS, nil, nil)
 }
 
 func FindDLLs() (dlls []J2534DLL) {

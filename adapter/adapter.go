@@ -46,12 +46,12 @@ func New(adapterName string, cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	return nil, fmt.Errorf("unknown adapter %q", adapterName)
 }
 
-func Register(name string, adapter *AdapterInfo) error {
-	if _, found := adapterMap[name]; !found {
-		adapterMap[name] = adapter
+func Register(adapter *AdapterInfo) error {
+	if _, found := adapterMap[adapter.Name]; !found {
+		adapterMap[adapter.Name] = adapter
 		return nil
 	}
-	return fmt.Errorf("adapter %s already registered", name)
+	return fmt.Errorf("adapter %s already registered", adapter.Name)
 }
 
 func List() []string {

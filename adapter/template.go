@@ -21,6 +21,10 @@ func NewTemplate(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	}, nil
 }
 
+func (a *Template) SetFilter(filters []uint32) error {
+	return nil
+}
+
 func (a *Template) Name() string {
 	return "Template"
 }

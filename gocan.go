@@ -16,6 +16,7 @@ type Adapter interface {
 	Recv() <-chan CANFrame
 	Send() chan<- CANFrame
 	Close() error
+	SetFilter([]uint32) error
 }
 
 type AdapterConfig struct {
@@ -48,6 +49,10 @@ func New(ctx context.Context, adapter Adapter) (*Client, error) {
 
 func (c *Client) Adapter() Adapter {
 	return c.adapter
+}
+
+func (c *Client) SetFilter(filters []uint32) error {
+	return c.adapter.SetFilter(filters)
 }
 
 func (c *Client) Close() error {
