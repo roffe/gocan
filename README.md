@@ -11,7 +11,6 @@ J2534 support in Windows / Linux
 * STN2120
 * [CANUSB](https://lawicel-shop.se/elektronik/kommunikation/can/lawicel-canusb-adapter-1m-usb-cable/) adapter running in VCP mode using [Lawicel ascii api](http://www.can232.com/docs/canusb_manual.pdf)
 
-
 ## J2534
 
 ### Windows
@@ -24,6 +23,10 @@ J2534 support in Windows / Linux
 * Tactrix Openport 2.0: https://github.com/dschultzca/j2534
 * Machina: https://github.com/rnd-ash/Macchina-J2534
 * WQCAN: https://github.com/witoldo7/STM32CAN
+
+## Other
+
+* SocketCAN
 
 ## Showcase
 
