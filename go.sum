@@ -1,7 +1,5 @@
 github.com/albenik/bcd v0.0.0-20170831201648-635201416bc7 h1:m3Ayfs5OcAlIMEdLIQKubBsVLGee4YMUr14+d1256WE=
 github.com/albenik/bcd v0.0.0-20170831201648-635201416bc7/go.mod h1:QIAMbrwsnQZ2ES3G26RubSrDB5SPyzsp9Hts5NJdTrI=
-github.com/avast/retry-go v3.0.0+incompatible h1:4SOWQ7Qs+oroOTQOYnAHqelpCO0biHSxpiH9JdtuBj0=
-github.com/avast/retry-go v3.0.0+incompatible/go.mod h1:XtSnn+n/sHqQIpZ10K1qAevBhOOCWBLXXy3hyiqqBrY=
 github.com/bendikro/dl v0.0.0-20190410215913-e41fdb9069d4 h1:gOnfOzfeOnOGeASXklSStsYL3/RIbkK7QLz4QwVYsvY=
 github.com/bendikro/dl v0.0.0-20190410215913-e41fdb9069d4/go.mod h1:4FL86ZCTh6McXg9ZTi4MfSSaqfLFJP8PKZe6KtLFnn8=
 github.com/creack/goselect v0.1.2 h1:2DNy14+JPjRBgPzAd1thbQp4BSIihxcBf0IXhQXDRa0=

@@ -16,7 +16,7 @@ import (
 
 func init() {
 	for _, dll := range passthru.FindDLLs() {
-		if err := Register(dll.Name, &AdapterInfo{
+		if err := Register(&AdapterInfo{
 			Name:               dll.Name,
 			Description:        "J2534 Interface",
 			RequiresSerialPort: false,
@@ -60,6 +60,21 @@ func NewJ2534(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 		deviceID:  1,
 	}
 	return ma, nil
+}
+
+func (ma *J2534) SetFilter(filters []uint32) error {
+	if err := ma.h.PassThruClearMsgFilters(ma.channelID); err != nil {
+		return err
+	}
+	ma.cfg.CANFilter = filters
+	if len(ma.cfg.CANFilter) > 0 {
+		if err := ma.setupFilters(); err != nil {
+			return err
+		}
+	} else {
+		ma.allowAll()
+	}
+	return nil
 }
 
 func (ma *J2534) Name() string {

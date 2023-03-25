@@ -32,6 +32,7 @@ var (
 	ErrNotUnique           = errors.New("a CAN ID in pPatternMsg or pFlowControlMsg matches either ID in an existing FLOW_CONTROL_FILTER")
 	ErrInvalidBaudrate     = errors.New("the desired baud rate cannot be achieved within the tolerance specified in SAE J2534-1 Section 6.5")
 	ErrInvalidDeviceID     = errors.New("device ID invalid")
+	ErrInvalidParameter    = errors.New("invalid parameter(s)")
 	ErrUnknown             = errors.New("unknown error")
 )
 

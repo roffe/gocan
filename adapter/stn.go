@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/avast/retry-go"
 	"github.com/roffe/gocan"
 	"go.bug.st/serial"
 	"golang.org/x/sync/errgroup"
@@ -21,7 +20,7 @@ import (
 var stnAdapterSpeeds = []int{115200, 38400, 230400, 921600, 2000000, 1000000, 57600}
 
 func init() {
-	if err := Register("OBDLink SX", &AdapterInfo{
+	if err := Register(&AdapterInfo{
 		Name:               "OBDLink SX",
 		Description:        "OBDLink SX",
 		RequiresSerialPort: true,
@@ -35,7 +34,7 @@ func init() {
 		panic(err)
 	}
 
-	if err := Register("STN1170", &AdapterInfo{
+	if err := Register(&AdapterInfo{
 		Name:               "STN1170",
 		Description:        "ScanTool.net STN1170 based adapter",
 		RequiresSerialPort: true,
@@ -48,7 +47,7 @@ func init() {
 	}); err != nil {
 		panic(err)
 	}
-	if err := Register("STN2120", &AdapterInfo{
+	if err := Register(&AdapterInfo{
 		Name:               "STN2120",
 		Description:        "ScanTool.net STN2120 based adapter",
 		RequiresSerialPort: true,
@@ -93,6 +92,13 @@ func NewSTN(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	return sx, nil
 }
 
+func (stn *STN) SetFilter(filters []uint32) error {
+	stn.setCANfilter(filters)
+	stn.send <- gocan.NewRawCommand(stn.mask)
+	stn.send <- gocan.NewRawCommand(stn.filter)
+	return nil
+}
+
 func (stn *STN) Name() string {
 	return "STN"
 }
@@ -105,22 +111,23 @@ func (stn *STN) Init(ctx context.Context) error {
 		StopBits: serial.OneStopBit,
 	}
 
-	p, err := serial.Open(stn.cfg.Port, mode)
-	if err != nil {
+	if p, err := serial.Open(stn.cfg.Port, mode); err != nil {
 		return fmt.Errorf("failed to open com port %q : %v", stn.cfg.Port, err)
+	} else {
+		stn.port = p
 	}
 
-	p.SetReadTimeout(1 * time.Millisecond)
+	if err := stn.port.SetReadTimeout(1 * time.Millisecond); err != nil {
+		return err
+	}
 
-	stn.port = p
+	stn.port.ResetOutputBuffer()
+	stn.port.ResetInputBuffer()
 
-	p.ResetOutputBuffer()
-	p.ResetInputBuffer()
-
-	err = retry.Do(func() error {
+	setSpeed := func() error {
 		to := stn.cfg.PortBaudrate
 		for _, from := range stnAdapterSpeeds {
-			if err := stn.setSpeed(p, mode, from, to); err == nil {
+			if err := stn.setSpeed(stn.port, mode, from, to); err == nil {
 				if stn.cfg.Debug {
 					stn.cfg.OnMessage(fmt.Sprintf("Switched adapter baudrate from %d to %d bps", from, to))
 				}
@@ -130,16 +137,9 @@ func (stn *STN) Init(ctx context.Context) error {
 			}
 		}
 		return errors.New("Failed to switch adapter baudrate") //lint:ignore ST1005 ignore this
-	},
-		retry.Context(ctx),
-		retry.Attempts(2),
-		retry.OnRetry(func(n uint, err error) {
-			stn.cfg.OnError(fmt.Errorf("retry #%d: %w", n, err))
-		}),
-		retry.LastErrorOnly(true),
-	)
-	if err != nil {
-		p.Close()
+	}
+	if err := setSpeed(); err != nil {
+		stn.port.Close()
 		return err
 	}
 
@@ -148,7 +148,7 @@ func (stn *STN) Init(ctx context.Context) error {
 		"ATS0",       // turn of spaces
 		stn.protocol, // Set canbus protocol
 		"ATH1",       // Headers on
-		"ATAT2",      // Set adaptive timing mode, Adaptive timing on, aggressive mode. This option may increase throughput on slower connections, at the expense of slightly increasing the risk of missing frames.
+		"ATAT0",      // Set adaptive timing mode, Adaptive timing on, aggressive mode. This option may increase throughput on slower connections, at the expense of slightly increasing the risk of missing frames.
 		"ATCAF0",     // Automatic formatting off
 		stn.canrate,  // Set CANrate
 		"ATAL",       // Allow long messages
@@ -170,12 +170,12 @@ func (stn *STN) Init(ctx context.Context) error {
 		if stn.cfg.Debug {
 			stn.cfg.OnMessage(c)
 		}
-		if _, err := p.Write(out); err != nil {
+		if _, err := stn.port.Write(out); err != nil {
 			stn.cfg.OnError(err)
 		}
 		time.Sleep(delay)
 	}
-	p.ResetInputBuffer()
+	stn.port.ResetInputBuffer()
 
 	go stn.recvManager(ctx)
 	go stn.sendManager(ctx)
@@ -288,11 +288,10 @@ func (stn *STN) Send() chan<- gocan.CANFrame {
 func (stn *STN) Close() error {
 	stn.closed = true
 	close(stn.close)
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 	stn.port.Write([]byte("ATZ\r"))
 	time.Sleep(100 * time.Millisecond)
 	stn.port.ResetInputBuffer()
-
 	return stn.port.Close()
 }
 
@@ -302,6 +301,8 @@ func (stn *STN) sendManager(ctx context.Context) {
 		select {
 		case v := <-stn.send:
 			switch v.(type) {
+			case *gocan.RawCommand:
+				f.WriteString(v.String() + "\r")
 			default:
 				idb := make([]byte, 4)
 				binary.BigEndian.PutUint32(idb, v.Identifier())
@@ -326,8 +327,7 @@ func (stn *STN) sendManager(ctx context.Context) {
 			if stn.cfg.Debug {
 				stn.cfg.OnMessage("<o> " + f.String())
 			}
-			_, err := stn.port.Write(f.Bytes())
-			if err != nil {
+			if _, err := stn.port.Write(f.Bytes()); err != nil {
 				stn.cfg.OnError(fmt.Errorf("failed to write to com port: %q, %w", f.String(), err))
 			}
 			f.Reset()
@@ -389,14 +389,13 @@ func (stn *STN) recvManager(ctx context.Context) {
 				case "?":
 					stn.cfg.OnError(errors.New("UNKNOWN COMMAND"))
 					buff.Reset()
-				case "NO DATA":
-					buff.Reset()
-				case "OK":
+				case "NO DATA", "OK":
 					buff.Reset()
 				default:
 					f, err := stn.decodeFrame(buff.Bytes())
 					if err != nil {
 						stn.cfg.OnError(fmt.Errorf("failed to decode frame: %s %w", buff.String(), err))
+						buff.Reset()
 						continue
 					}
 					select {

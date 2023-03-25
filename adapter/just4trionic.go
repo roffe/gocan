@@ -2,6 +2,7 @@ package adapter
 
 import (
 	"context"
+	"os"
 
 	"bytes"
 	"encoding/hex"
@@ -14,7 +15,7 @@ import (
 )
 
 func init() {
-	if err := Register("Just4Trionic", &AdapterInfo{
+	if err := Register(&AdapterInfo{
 		Name:               "Just4Trionic",
 		Description:        "STM32F103C8T6 based CAN adapter",
 		RequiresSerialPort: true,
@@ -35,8 +36,8 @@ type Just4Trionic struct {
 	send, recv chan gocan.CANFrame
 	close      chan struct{}
 
-	canRate, filter string
-	closed          bool
+	canRate string
+	closed  bool
 }
 
 func NewJust4Trionic(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
@@ -47,26 +48,46 @@ func NewJust4Trionic(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 		close: make(chan struct{}, 1),
 	}
 
-	for _, f := range cfg.CANFilter {
-		if f == 0x05 {
-			adapter.filter = "t5"
-			break
-		}
-		if f == 0x220 {
-			adapter.filter = "f7"
-			break
-		}
-		if f == 0x7E0 {
-			adapter.filter = "f8"
-			break
-		}
-	}
+	/*
+		for _, f := range cfg.CANFilter {
+			switch f {
+			case 0x05:
+				adapter.filter = "t5"
+			case 0x220:
+				adapter.filter = "f7"
+			case 0x7E0:
+				adapter.filter = "f8"
+			default:
+				adapter.filter = "f0"
+			}
+				if f == 0x05 {
+					adapter.filter = "t5"
+					break
+				}
+				if f == 0x220 {
+					adapter.filter = "f7"
+					break
+				}
+				if f == 0x7E0 {
+					adapter.filter = "f8"
+					break
+				}
+			}
+	*/
 
 	if err := adapter.setCANrate(cfg.CANRate); err != nil {
 		return nil, err
 	}
 
 	return adapter, nil
+}
+func (a *Just4Trionic) SetFilter(filters []uint32) error {
+	filter, mask := calcAcceptanceFilters(filters)
+	a.send <- gocan.NewRawCommand("C")
+	a.send <- gocan.NewRawCommand(filter)
+	a.send <- gocan.NewRawCommand(mask)
+	a.send <- gocan.NewRawCommand("O")
+	return nil
 }
 
 func (a *Just4Trionic) Name() string {
@@ -89,10 +110,14 @@ func (a *Just4Trionic) Init(ctx context.Context) error {
 
 	p.ResetOutputBuffer()
 
+	code, mask := calcAcceptanceFilters(a.cfg.CANFilter)
+
 	var cmds = []string{
 		"\x1B", // Empty buffer
 		"O",    // enter canbus mode
-		a.filter,
+		//a.filter,
+		code,
+		mask,
 		a.canRate, // Setup CAN bit-rates
 		//a.mask,
 	}
@@ -216,7 +241,6 @@ func (a *Just4Trionic) parse(ctx context.Context, readBuffer []byte, buff *bytes
 				}
 				buff.Reset()
 			default:
-				//log.Printf("COM>> %q\n", buff.String())
 				a.cfg.OnMessage("<< " + buff.String())
 			}
 			buff.Reset()
@@ -247,22 +271,32 @@ func (a *Just4Trionic) sendManager(ctx context.Context) {
 	for {
 		select {
 		case v := <-a.send:
-			f = "t" + strconv.FormatUint(uint64(v.Identifier()), 16) +
-				strconv.Itoa(v.Length()) +
-				hex.EncodeToString(v.Data())
+			switch v.(type) {
+			case *gocan.RawCommand:
+				if _, err := a.port.Write(append(v.Data(), '\r')); err != nil {
+					a.cfg.OnError(fmt.Errorf("failed to write to com port: %q, %w", f, err))
+				}
+				if a.cfg.Debug {
+					fmt.Fprint(os.Stderr, ">> "+v.String()+"\n")
+				}
+			default:
+				f = "t" + strconv.FormatUint(uint64(v.Identifier()), 16) +
+					strconv.Itoa(v.Length()) +
+					hex.EncodeToString(v.Data())
 
-			for i := v.Length(); i < 8; i++ {
-				f += "00"
+				for i := v.Length(); i < 8; i++ {
+					f += "00"
+				}
+				f += "\r"
+				if _, err := a.port.Write([]byte(f)); err != nil {
+					a.cfg.OnError(fmt.Errorf("failed to write to com port: %q, %w", f, err))
+				}
+				if a.cfg.Debug {
+					a.cfg.OnMessage(">> " + f)
+				}
+				f = ""
 			}
-			f += "\r"
-			_, err := a.port.Write([]byte(f))
-			if err != nil {
-				a.cfg.OnError(fmt.Errorf("failed to write to com port: %q, %w", f, err))
-			}
-			if a.cfg.Debug {
-				a.cfg.OnMessage(">> " + f)
-			}
-			f = ""
+
 		case <-ctx.Done():
 			return
 		case <-a.close:
