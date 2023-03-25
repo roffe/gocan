@@ -227,6 +227,7 @@ func (j *PassThru) PassThruGetLastError() (string, error) {
 
 type J2534Config struct {
 	CAN         bool   `json:"CAN"`
+	CANPS       bool   `json:"CAN_PS"`
 	ISO15765    bool   `json:"ISO15765"`
 	ISO9141     bool   `json:"ISO9141"`
 	ISO14230    bool   `json:"ISO14230"`
@@ -236,6 +237,7 @@ type J2534Config struct {
 	SCIBENGINE  bool   `json:"SCI_B_ENGINE"`
 	J1850VPW    bool   `json:"J1850VPW"`
 	J1850PWM    bool   `json:"J1850PWM"`
+	SWCANPS     bool   `json:"SW_CAN_PS"`
 	FUNCTIONLIB string `json:"FUNCTION_LIB"`
 	NAME        string `json:"NAME"`
 	VENDOR      string `json:"VENDOR"`
@@ -287,7 +289,15 @@ func FindDLLs() (libs []J2534DLL) {
 
 		name := config.VENDOR + " " + config.NAME
 		if _, err := os.Stat(config.FUNCTIONLIB); err == nil && filepath.Ext(config.FUNCTIONLIB) == ".so" {
-			libs = append(libs, J2534DLL{Name: name, FunctionLibrary: config.FUNCTIONLIB})
+			var capabilities = Capabilities{
+				SWCANPS:  config.SWCANPS,
+				CAN:      config.CAN,
+				CANPS:    config.CANPS,
+				ISO15765: config.ISO15765,
+				ISO9141:  config.ISO9141,
+				ISO14230: config.ISO14230,
+			}
+			libs = append(libs, J2534DLL{Name: name, FunctionLibrary: config.FUNCTIONLIB, Capabilities: capabilities})
 		}
 	}
 	return

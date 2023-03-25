@@ -283,6 +283,7 @@ func FindDLLs() (dlls []J2534DLL) {
 		return
 	}
 
+	var capabilities Capabilities
 	for _, adapter := range adapters {
 		k3, err := registry.OpenKey(registry.LOCAL_MACHINE, `SOFTWARE\PassThruSupport.04.04\`+adapter, registry.QUERY_VALUE|registry.WOW64_32KEY)
 		if err != nil {
@@ -296,7 +297,19 @@ func FindDLLs() (dlls []J2534DLL) {
 		if err != nil {
 			continue
 		}
-		dlls = append(dlls, J2534DLL{Name: name, FunctionLibrary: functionLibrary})
+		val, _, _ := k3.GetIntegerValue("CAN")
+		capabilities.CAN = val == 1
+		val, _, _ = k3.GetIntegerValue("CAN_PS")
+		capabilities.CANPS = val == 1
+		val, _, _ = k3.GetIntegerValue("ISO9141")
+		capabilities.ISO9141 = val == 1
+		val, _, _ = k3.GetIntegerValue("ISO15765")
+		capabilities.ISO15765 = val == 1
+		val, _, _ = k3.GetIntegerValue("ISO14230")
+		capabilities.ISO14230 = val == 1
+		val, _, _ = k3.GetIntegerValue("SW_CAN_PS")
+		capabilities.SWCANPS = val == 1
+		dlls = append(dlls, J2534DLL{Name: name, FunctionLibrary: functionLibrary, Capabilities: capabilities})
 	}
 	return
 }
