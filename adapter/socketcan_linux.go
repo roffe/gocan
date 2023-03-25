@@ -16,7 +16,7 @@ import (
 func init() {
 	for _, dev := range FindDevices() {
 		name := "SocketCAN " + dev
-		if err := Register(name, &AdapterInfo{
+		if err := Register(&AdapterInfo{
 			Name:               name,
 			Description:        "Linux Driver",
 			RequiresSerialPort: false,
