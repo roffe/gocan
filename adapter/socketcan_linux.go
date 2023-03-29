@@ -41,6 +41,11 @@ type SocketCAN struct {
 	rx         *socketcan.Receiver
 }
 
+func (a *SocketCAN) SetFilter(uint32s []uint32) error {
+	//Support lib do not support this, for now SW filtering
+	return nil
+}
+
 func NewSocketCANFromDevName(dev string) func(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	return func(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 		cfg.Port = dev
@@ -150,6 +155,7 @@ func (a *SocketCAN) sendManager(ctx context.Context) {
 		}
 	}
 }
+
 func FindDevices() (dev []string) {
 	iFaces, _ := net.Interfaces()
 	for _, i := range iFaces {
