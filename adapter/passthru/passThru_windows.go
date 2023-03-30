@@ -257,10 +257,6 @@ func (j *PassThru) PassThruGetLastError() (string, error) {
 	return string(bytes.Trim(pErrorDescription[:], "\x00")), CheckError(uint32(ret))
 }
 
-func (j *PassThru) PassThruClearMsgFilters(channelID uint32) error {
-	return j.PassThruIoctl(channelID, CLEAR_MSG_FILTERS, nil, nil)
-}
-
 func FindDLLs() (dlls []J2534DLL) {
 	k, err := registry.OpenKey(registry.LOCAL_MACHINE, `SOFTWARE\PassThruSupport.04.04`, registry.QUERY_VALUE|registry.WOW64_32KEY)
 	if err != nil {

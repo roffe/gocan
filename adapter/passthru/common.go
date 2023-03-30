@@ -333,6 +333,10 @@ type J2534DLL struct {
 	Capabilities    Capabilities
 }
 
+func (j *PassThru) PassThruClearMsgFilters(channelID uint32) error {
+	return j.PassThruIoctl(channelID, CLEAR_MSG_FILTERS, nil, nil)
+}
+
 func (m *PassThruMsg) DataBytes() []byte {
 	return m.Data[:m.DataSize]
 }
