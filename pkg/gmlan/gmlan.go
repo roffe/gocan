@@ -230,18 +230,18 @@ subFunc
   be sent if preceded by one of the valid requestProgrammingMode messages (above).
 */
 func (cl *Client) ProgrammingModeRequest(ctx context.Context) error {
-	return cl.programmingMode(ctx, 0x01)
+	return cl.ProgrammingMode(ctx, 0x01)
 }
 
 func (cl *Client) ProgrammingModeRequestHighSpeed(ctx context.Context) error {
-	return cl.programmingMode(ctx, 0x02)
+	return cl.ProgrammingMode(ctx, 0x02)
 }
 
 func (cl *Client) ProgrammingModeEnable(ctx context.Context) error {
-	return cl.programmingMode(ctx, 0x03)
+	return cl.ProgrammingMode(ctx, 0x03)
 }
 
-func (cl *Client) programmingMode(ctx context.Context, subFunc byte) error {
+func (cl *Client) ProgrammingMode(ctx context.Context, subFunc byte) error {
 	payload := []byte{0x02, 0xA5, subFunc}
 	switch subFunc {
 	case 0x01, 0x02:
@@ -286,20 +286,47 @@ func (cl *Client) ReturnToNormalMode(ctx context.Context) error {
 // The reportProgrammedState is used by the tester to determine:
 // * Which nodes on the link are programmable.
 // * The current programmed state of each programmable node.
-func (cl *Client) ReportProgrammedState(ctx context.Context) error {
+func (cl *Client) ReportProgrammedState(ctx context.Context) (byte, error) {
 	frame := gocan.NewFrame(cl.canID, []byte{0x01, 0xA2}, gocan.ResponseRequired)
 	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
-		return fmt.Errorf("ReportProgrammedState: %w", err)
+		return 0, fmt.Errorf("ReportProgrammedState: %w", err)
 	}
 	if err := CheckErr(resp); err != nil {
-		return err
+		return 0, err
 	}
 	d := resp.Data()
 	if d[0] != 0x02 || d[1] != 0xE2 {
-		return errors.New("invalid response to ReportProgrammedState request")
+		return 0, errors.New("invalid response to ReportProgrammedState request")
 	}
-	return nil
+	return d[2], nil
+}
+
+func TranslateProgrammedState(state byte) string {
+	switch state {
+	case 0x00:
+		return "fully programmed"
+	case 0x01:
+		return "no op s/w or cal data"
+	case 0x02:
+		return "op s/w present, cal data missing"
+	case 0x03:
+		return "s/w present, default or no start cal present"
+	case 0x50:
+		return "General Memory Fault"
+	case 0x51:
+		return "RAM Memory Fault"
+	case 0x52:
+		return "NVRAM Memory Fault"
+	case 0x53:
+		return "Boot Memory Failure"
+	case 0x54:
+		return "Flash Memory Failure"
+	case 0x55:
+		return "EEPROM Memory Failure "
+	default:
+		return "unknown"
+	}
 }
 
 // 8.4 ReadDataByIdentifier ($1A) Service.
