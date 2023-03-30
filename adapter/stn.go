@@ -94,8 +94,14 @@ func NewSTN(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 
 func (stn *STN) SetFilter(filters []uint32) error {
 	stn.setCANfilter(filters)
+
+	stn.send <- gocan.NewRawCommand("STPC")
 	stn.send <- gocan.NewRawCommand(stn.mask)
 	stn.send <- gocan.NewRawCommand(stn.filter)
+	stn.send <- gocan.NewRawCommand("STPO")
+	//stn.send <- gocan.NewRawCommand("ATCM7FF")
+	//stn.send <- gocan.NewRawCommand("ATCF258")
+
 	return nil
 }
 
@@ -148,7 +154,7 @@ func (stn *STN) Init(ctx context.Context) error {
 		"ATS0",       // turn of spaces
 		stn.protocol, // Set canbus protocol
 		"ATH1",       // Headers on
-		"ATAT0",      // Set adaptive timing mode, Adaptive timing on, aggressive mode. This option may increase throughput on slower connections, at the expense of slightly increasing the risk of missing frames.
+		"ATAT2",      // Set adaptive timing mode, Adaptive timing on, aggressive mode. This option may increase throughput on slower connections, at the expense of slightly increasing the risk of missing frames.
 		"ATCAF0",     // Automatic formatting off
 		stn.canrate,  // Set CANrate
 		"ATAL",       // Allow long messages
@@ -247,7 +253,7 @@ func (stn *STN) setSpeed(p serial.Port, mode *serial.Mode, from, to int) error {
 
 func (stn *STN) setCANrate(rate float64) error {
 	switch rate {
-	case 33.3: //MX ony feature
+	case 33.3: // STN1170 & STN2120 feature only
 		stn.protocol = "STP61"
 		stn.canrate = "STCSWM2"
 	case 500:
@@ -314,14 +320,15 @@ func (stn *STN) sendManager(ctx context.Context) {
 				// write cmd and header
 				//f.Write([]byte{'S','T','P','X','h', ':',byte(a>>8) + 0x30, (byte(a) >> 4) + 0x30, ((byte(a) << 4) >> 4) + 0x30, ','})
 				f.WriteString("STPXh:" + hex.EncodeToString(idb)[5:] + "," +
-					"d:" + hex.EncodeToString(v.Data()) + ",",
+					"d:" + hex.EncodeToString(v.Data()),
 				)
 				// write timeout
-				if timeout > 0 {
-					f.WriteString("t:" + strconv.Itoa(int(timeout)) + ",")
+				if timeout > 300 {
+					f.WriteString(",t:" + strconv.Itoa(int(timeout)))
 				}
 				// write reply
-				f.WriteString("r:" + strconv.Itoa(t.GetResponseCount()) + "\r")
+				f.WriteString(",r:" + strconv.Itoa(t.GetResponseCount()) + "\r")
+
 			}
 			stn.semChan <- token{}
 			if stn.cfg.Debug {
