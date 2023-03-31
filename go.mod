@@ -24,6 +24,7 @@ require (
 	github.com/mattn/go-isatty v0.0.17 // indirect
 	github.com/mdlayher/netlink v1.7.1 // indirect
 	github.com/mdlayher/socket v0.4.0 // indirect
+	github.com/smallnest/ringbuffer v0.0.0-20210227121335-0a58434b36f2
 	golang.org/x/mod v0.8.0 // indirect
 	golang.org/x/net v0.7.0 // indirect
 	golang.org/x/tools v0.6.0 // indirect
