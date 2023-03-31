@@ -3,6 +3,7 @@ package passthru
 import (
 	"bytes"
 	"fmt"
+	"strings"
 	"syscall"
 	"unsafe"
 
@@ -300,18 +301,24 @@ func FindDLLs() (dlls []J2534DLL) {
 		if err != nil {
 			continue
 		}
-		val, _, _ := k3.GetIntegerValue("CAN")
-		capabilities.CAN = val == 1
-		val, _, _ = k3.GetIntegerValue("CAN_PS")
-		capabilities.CANPS = val == 1
-		val, _, _ = k3.GetIntegerValue("ISO9141")
-		capabilities.ISO9141 = val == 1
-		val, _, _ = k3.GetIntegerValue("ISO15765")
-		capabilities.ISO15765 = val == 1
-		val, _, _ = k3.GetIntegerValue("ISO14230")
-		capabilities.ISO14230 = val == 1
-		val, _, _ = k3.GetIntegerValue("SW_CAN_PS")
-		capabilities.SWCANPS = val == 1
+		if val, _, err := k3.GetIntegerValue("CAN"); err == nil {
+			capabilities.CAN = val == 1
+		}
+		if val, _, err := k3.GetIntegerValue("CAN_PS"); err == nil {
+			capabilities.CANPS = val == 1
+		}
+		if val, _, err := k3.GetIntegerValue("ISO9141"); err == nil {
+			capabilities.ISO9141 = val == 1
+		}
+		if val, _, err := k3.GetIntegerValue("ISO15765"); err == nil {
+			capabilities.ISO15765 = val == 1
+		}
+		if val, _, err := k3.GetIntegerValue("ISO14230"); err == nil {
+			capabilities.ISO14230 = val == 1
+		}
+		if val, _, err := k3.GetIntegerValue("SW_CAN_PS"); err == nil {
+			capabilities.SWCANPS = val == 1 || strings.ToLower(name) == "tech2"
+		}
 		dlls = append(dlls, J2534DLL{Name: name, FunctionLibrary: functionLibrary, Capabilities: capabilities})
 	}
 	return
