@@ -15,8 +15,8 @@ type Template struct {
 func NewTemplate(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	return &Template{
 		cfg:   cfg,
-		send:  make(chan gocan.CANFrame, 100),
-		recv:  make(chan gocan.CANFrame, 100),
+		send:  make(chan gocan.CANFrame, 10),
+		recv:  make(chan gocan.CANFrame, 20),
 		close: make(chan struct{}, 1),
 	}, nil
 }
