@@ -65,7 +65,7 @@ func (c *Client) Send(msg CANFrame) error {
 	select {
 	case c.adapter.Send() <- msg:
 		return nil
-	case <-time.After(3 * time.Second):
+	case <-time.After(5 * time.Second):
 		return errors.New("gocan failed to send frame")
 	}
 }

@@ -37,6 +37,7 @@ type CombiAdapter struct {
 }
 
 func init() {
+	log.Println("find combi adapter (windows)")
 	ctx := gousb.NewContext()
 	defer ctx.Close()
 	dev, err := ctx.OpenDeviceWithVIDPID(combiVid, combiPid)
@@ -83,17 +84,10 @@ func (ca *CombiAdapter) Init(ctx context.Context) error {
 	ca.usbCtx = gousb.NewContext()
 	ca.dev, err = ca.usbCtx.OpenDeviceWithVIDPID(combiVid, combiPid)
 	if err != nil && ca.dev == nil {
-		if err := ca.usbCtx.Close(); err != nil {
-			ca.cfg.OnError(fmt.Errorf("failed to close usb context: %w", err))
-		}
+		ca.closeAdapter(false, false, false, false, true)
 		return err
 	} else if err != nil && ca.dev != nil {
-		if err := ca.dev.Close(); err != nil {
-			ca.cfg.OnError(fmt.Errorf("failed to close usb device: %w", err))
-		}
-		if err := ca.usbCtx.Close(); err != nil {
-			ca.cfg.OnError(fmt.Errorf("failed to close usb context: %w", err))
-		}
+		ca.closeAdapter(false, false, false, true, true)
 		return err
 	}
 
@@ -103,33 +97,20 @@ func (ca *CombiAdapter) Init(ctx context.Context) error {
 
 	ca.devCfg, err = ca.dev.Config(1)
 	if err != nil {
-		if err := ca.dev.Close(); err != nil {
-			ca.cfg.OnError(fmt.Errorf("failed to close usb device: %w", err))
-		}
-		if err := ca.usbCtx.Close(); err != nil {
-			ca.cfg.OnError(fmt.Errorf("failed to close usb context: %w", err))
-		}
+		ca.closeAdapter(false, false, false, true, true)
 		return err
 	}
 
 	ca.iface, err = ca.devCfg.Interface(1, 0)
 	if err != nil {
-		if err := ca.devCfg.Close(); err != nil {
-			ca.cfg.OnError(fmt.Errorf("failed to close usb device config: %w", err))
-		}
-		if err := ca.dev.Close(); err != nil {
-			ca.cfg.OnError(fmt.Errorf("failed to close usb device: %w", err))
-		}
-		if err := ca.usbCtx.Close(); err != nil {
-			ca.cfg.OnError(fmt.Errorf("failed to close usb context: %w", err))
-		}
+		ca.closeAdapter(false, false, true, true, true)
 		return err
 	}
 
 	ca.in, err = ca.iface.InEndpoint(2)
 	if err != nil {
 		ca.cfg.OnError(fmt.Errorf("InEndpoint(2): %w", err))
-		ca.closeAdapter(false)
+		ca.closeAdapter(false, true, true, true, true)
 	}
 
 	ca.out, err = ca.iface.OutEndpoint(5)
@@ -138,14 +119,14 @@ func (ca *CombiAdapter) Init(ctx context.Context) error {
 		ca.cfg.OnMessage("trying EP 2 (stm32 clone)")
 		ca.out, err = ca.iface.OutEndpoint(2)
 		if err != nil {
-			ca.closeAdapter(false)
+			ca.closeAdapter(false, true, true, true, true)
 			return err
 		}
 	}
 
 	// Close can-bus
 	if err := ca.canCtrl(0); err != nil {
-		ca.closeAdapter(false)
+		ca.closeAdapter(false, true, true, true, true)
 		return fmt.Errorf("failed to close can-bus: %w", err)
 	}
 
@@ -157,12 +138,12 @@ func (ca *CombiAdapter) Init(ctx context.Context) error {
 
 	// Set can bitrate
 	if err := ca.setBitrate(ctx); err != nil {
-		ca.closeAdapter(false)
+		ca.closeAdapter(false, true, true, true, true)
 		return err
 	}
 	// Open can-bus
 	if err := ca.canCtrl(1); err != nil {
-		ca.closeAdapter(false)
+		ca.closeAdapter(false, true, true, true, true)
 		return fmt.Errorf("failed to open can-bus: %w", err)
 	}
 
@@ -180,29 +161,38 @@ func (ca *CombiAdapter) canCtrl(mode byte) error {
 }
 
 func (ca *CombiAdapter) Close() error {
-	return ca.closeAdapter(true)
+	return ca.closeAdapter(true, true, true, true, true)
 }
 
-func (ca *CombiAdapter) closeAdapter(sendClose bool) error {
-	if sendClose {
+func (ca *CombiAdapter) closeAdapter(sendCloseCMD, closeIface, closeDevCfg, closeDev, closeCTX bool) error {
+	if sendCloseCMD {
 		if err := ca.canCtrl(0); err != nil {
 			ca.cfg.OnError(fmt.Errorf("failed to close can-bus: %w", err))
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	close(ca.close)
 
+	close(ca.close)
 	time.Sleep(10 * time.Millisecond)
 
-	ca.iface.Close()
-	if err := ca.devCfg.Close(); err != nil {
-		ca.cfg.OnError(fmt.Errorf("failed to close device config: %w", err))
+	if closeIface && ca.iface != nil {
+		ca.iface.Close()
 	}
-	if err := ca.dev.Close(); err != nil {
-		ca.cfg.OnError(fmt.Errorf("failed to close device: %w", err))
+
+	if closeDevCfg && ca.devCfg != nil {
+		if err := ca.devCfg.Close(); err != nil {
+			ca.cfg.OnError(fmt.Errorf("failed to close device config: %w", err))
+		}
 	}
-	if err := ca.usbCtx.Close(); err != nil {
-		ca.cfg.OnError(fmt.Errorf("failed to close usb context: %w", err))
+	if closeDev && ca.dev != nil {
+		if err := ca.dev.Close(); err != nil {
+			ca.cfg.OnError(fmt.Errorf("failed to close device: %w", err))
+		}
+	}
+	if closeCTX && ca.usbCtx != nil {
+		if err := ca.usbCtx.Close(); err != nil {
+			ca.cfg.OnError(fmt.Errorf("failed to close usb context: %w", err))
+		}
 	}
 	return nil
 }
@@ -282,7 +272,7 @@ func (ca *CombiAdapter) recvManager() {
 			case combiCmdrxFrame:
 				for ca.rb.Length() < 2 {
 					//log.Println("waiting for rx data length")
-					time.Sleep(100 * time.Microsecond)
+					time.Sleep(10 * time.Microsecond)
 				}
 			case combiCmdtxFrame:
 				select {
@@ -291,12 +281,12 @@ func (ca *CombiAdapter) recvManager() {
 				}
 				for ca.rb.Length() < 3 {
 					//log.Println("waiting for tx Data")
-					time.Sleep(100 * time.Microsecond)
+					time.Sleep(10 * time.Microsecond)
 				}
 			default:
 				for ca.rb.Length() < 3 {
 					//log.Println("waiting for command data")
-					time.Sleep(100 * time.Microsecond)
+					time.Sleep(10 * time.Microsecond)
 				}
 			}
 
@@ -309,7 +299,7 @@ func (ca *CombiAdapter) recvManager() {
 			if cmd == combiCmdrxFrame {
 				for ca.rb.Length() < dataLen {
 					//log.Println("waiting for rx Data")
-					time.Sleep(100 * time.Microsecond)
+					time.Sleep(10 * time.Microsecond)
 				}
 			}
 
