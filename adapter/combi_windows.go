@@ -37,7 +37,6 @@ type CombiAdapter struct {
 }
 
 func init() {
-	log.Println("find combi adapter (windows)")
 	ctx := gousb.NewContext()
 	defer ctx.Close()
 	dev, err := ctx.OpenDeviceWithVIDPID(combiVid, combiPid)
@@ -197,32 +196,6 @@ func (ca *CombiAdapter) closeAdapter(sendCloseCMD, closeIface, closeDevCfg, clos
 	return nil
 }
 
-func (ca *CombiAdapter) ringManager() {
-	buff := make([]byte, ca.in.Desc.MaxPacketSize)
-	rs, err := ca.in.NewStream(ca.in.Desc.MaxPacketSize, 4)
-	if err != nil {
-		ca.cfg.OnError(fmt.Errorf("failed to create stream reader: %w", err))
-		return
-	}
-	defer rs.Close()
-	for {
-		select {
-		case <-ca.close:
-			return
-		default:
-			n, err := rs.Read(buff)
-			if err != nil {
-				ca.cfg.OnError(fmt.Errorf("failed to read from usb: %w", err))
-				continue
-			}
-			if _, err := ca.rb.Write(buff[:n]); err != nil {
-				ca.cfg.OnError(fmt.Errorf("failed to write to ringbuffer: %w", err))
-				continue
-			}
-		}
-	}
-}
-
 func (ca *CombiAdapter) sendManager() {
 	sw, err := ca.out.NewStream(ca.out.Desc.MaxPacketSize, 1)
 	if err != nil {
@@ -237,14 +210,15 @@ func (ca *CombiAdapter) sendManager() {
 			ca.sendSem <- struct{}{}
 			buff := make([]byte, 19)
 			buff[0] = combiCmdtxFrame
-			buff[1] = 15 >> 8
-			buff[2] = 15 & 0xff
+			//buff[1] = 15 >> 8
+			//buff[2] = 15 & 0xff
+			buff[2] = 0x0F
 			binary.LittleEndian.PutUint32(buff[3:], frame.Identifier())
 			copy(buff[7:], frame.Data())
 			buff[15] = uint8(frame.Length())
-			buff[16] = 0x00 // is extended
-			buff[17] = 0x00 // is remote
-			buff[18] = 0x00 // terminator
+			//buff[16] = 0x00 // is extended
+			//buff[17] = 0x00 // is remote
+			//buff[18] = 0x00 // terminator
 			if _, err := sw.Write(buff); err != nil {
 				ca.cfg.OnError(fmt.Errorf("failed to send frame: %w", err))
 			}
@@ -280,7 +254,7 @@ func (ca *CombiAdapter) recvManager() {
 				default:
 				}
 				for ca.rb.Length() < 3 {
-					//log.Println("waiting for tx Data")
+					//log.Println("waiting for tx data")
 					time.Sleep(10 * time.Microsecond)
 				}
 			default:
@@ -290,15 +264,15 @@ func (ca *CombiAdapter) recvManager() {
 				}
 			}
 
-			lenBytes := make([]byte, 2)
-			if _, err := ca.rb.Read(lenBytes); err != nil {
+			dataLenBytes := make([]byte, 2)
+			if _, err := ca.rb.Read(dataLenBytes); err != nil {
 				ca.cfg.OnError(fmt.Errorf("failed to read len from ringbuffer: %w", err))
 			}
-			dataLen := int(lenBytes[0])<<8 | int(lenBytes[1]) + 1 // +1 for terminator
+			dataLen := int(binary.BigEndian.Uint16(dataLenBytes) + 0x01) // +1 for terminator
 
 			if cmd == combiCmdrxFrame {
 				for ca.rb.Length() < dataLen {
-					//log.Println("waiting for rx Data")
+					//log.Println("waiting for rx data")
 					time.Sleep(10 * time.Microsecond)
 				}
 			}
@@ -324,6 +298,32 @@ func (ca *CombiAdapter) recvManager() {
 				if ca.cfg.Debug {
 					log.Printf("cmd: %02X, len: %d, data: %X, term: %02X", cmd, dataLen, data[:dataLen-2], data[dataLen-1])
 				}
+			}
+		}
+	}
+}
+
+func (ca *CombiAdapter) ringManager() {
+	buff := make([]byte, ca.in.Desc.MaxPacketSize)
+	rs, err := ca.in.NewStream(ca.in.Desc.MaxPacketSize, 1)
+	if err != nil {
+		ca.cfg.OnError(fmt.Errorf("failed to create stream reader: %w", err))
+		return
+	}
+	defer rs.Close()
+	for {
+		select {
+		case <-ca.close:
+			return
+		default:
+			n, err := rs.Read(buff)
+			if err != nil {
+				ca.cfg.OnError(fmt.Errorf("failed to read from usb: %w", err))
+				continue
+			}
+			if _, err := ca.rb.Write(buff[:n]); err != nil {
+				ca.cfg.OnError(fmt.Errorf("failed to write to ringbuffer: %w", err))
+				continue
 			}
 		}
 	}
