@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strconv"
 	"sync"
+	"time"
 )
 
 var wg sync.WaitGroup
@@ -66,8 +67,8 @@ const (
 func NewCombi(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	return &Combi{
 		cfg:   cfg,
-		send:  make(chan gocan.CANFrame, 1),
-		recv:  make(chan gocan.CANFrame, 1),
+		send:  make(chan gocan.CANFrame, 10),
+		recv:  make(chan gocan.CANFrame, 10),
 		close: make(chan struct{}, 1),
 	}, nil
 }
@@ -169,10 +170,14 @@ func (a *Combi) Open(ctx context.Context, mode uint8) error {
 	if err != nil {
 		return err
 	}
-	if rx.cmd != tx.cmd || rx.term != 0 {
-		return errors.New("woops")
-	}
+
 	return nil
+}
+func (a *Combi) CloseCombi() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	err := a.Open(ctx, 0)
+	return err
 }
 
 func (a *Combi) ReadVersion(ctx context.Context) (error, string) {
@@ -189,10 +194,7 @@ func (a *Combi) ReadVersion(ctx context.Context) (error, string) {
 	if err != nil {
 		return err, ver
 	}
-	if rx.cmd != tx.cmd || rx.term != 0 {
-		return errors.New("woops"), ver
-	}
-	ver = "CombiAdapter: v" + strconv.Itoa(int(rx.data[1])) + "." + strconv.Itoa(int(rx.data[0]))
+	ver = "CombiAdapter: v" + strconv.Itoa(int(rx.data[0])) + "." + strconv.Itoa(int(rx.data[1]))
 	return nil, ver
 }
 
@@ -238,9 +240,7 @@ func (a *Combi) txFrame(ctx context.Context, f gocan.CANFrame) error {
 	if err != nil {
 		return err
 	}
-
 	wg.Wait()
-
 	return err
 }
 
@@ -264,6 +264,9 @@ func (a *Combi) SendCmd(ctx context.Context, tx Packet, rx *Packet) error {
 		return err
 	}
 	err = a.readPacket(ctx, rx)
+	if rx.cmd != tx.cmd || rx.term != 0 {
+		return fmt.Errorf("error rx id: %x, tx id: %x, term %x", rx.cmd, tx.cmd, rx.term)
+	}
 	return err
 }
 
@@ -274,7 +277,6 @@ func (a *Combi) readPacket(ctx context.Context, rx *Packet) error {
 		fmt.Println("Read returned an error:", err)
 	}
 	if readBytes == 0 {
-		a.cfg.OnError(fmt.Errorf("received 0 bytes of data"))
 		return err
 	}
 	rx.cmd = rBuf[0]
@@ -288,20 +290,21 @@ func (a *Combi) readPacket(ctx context.Context, rx *Packet) error {
 
 func (a *Combi) recvManager(ctx context.Context) {
 	runtime.LockOSThread()
+	var err error
 	for {
 		select {
 		case <-a.close:
 			return
 		default:
 			var rx Packet
-			err := a.readPacket(ctx, &rx)
+			err = a.readPacket(ctx, &rx)
 			if err != nil {
 				continue
 			}
 			switch rx.cmd {
 			case rxFrame:
 				if rx.len != 15 {
-					err = errors.New("woops")
+					err = errors.New("invalid Frame len")
 					return
 				}
 				frame := gocan.NewFrame(
@@ -345,10 +348,22 @@ func (a *Combi) Send() chan<- gocan.CANFrame {
 }
 
 func (a *Combi) Close() error {
+	err := a.CloseCombi()
+	//give some time to process all messages from buffer
+	time.Sleep(10 * time.Millisecond)
 	close(a.close)
 	a.intf.Close()
-	a.dev.Close()
-	a.usbCtx.Close()
-	a.ucfg.Close()
+	err = a.ucfg.Close()
+	if err != nil {
+		return err
+	}
+	err = a.dev.Close()
+	if err != nil {
+		return err
+	}
+	err = a.usbCtx.Close()
+	if err != nil {
+		return err
+	}
 	return nil
 }
