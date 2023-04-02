@@ -129,6 +129,9 @@ func (ca *CombiAdapter) Init(ctx context.Context) error {
 		return fmt.Errorf("failed to close can-bus: %w", err)
 	}
 
+	dump := make([]byte, 256)
+	ca.in.Read(dump)
+
 	if ca.cfg.PrintVersion {
 		if ver, err := ca.ReadVersion(ctx); err == nil {
 			ca.cfg.OnMessage(ver)
@@ -168,7 +171,7 @@ func (ca *CombiAdapter) closeAdapter(sendCloseCMD, closeIface, closeDevCfg, clos
 		if err := ca.canCtrl(0); err != nil {
 			ca.cfg.OnError(fmt.Errorf("failed to close can-bus: %w", err))
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 	}
 
 	close(ca.close)
@@ -197,11 +200,7 @@ func (ca *CombiAdapter) closeAdapter(sendCloseCMD, closeIface, closeDevCfg, clos
 }
 
 func (ca *CombiAdapter) sendManager() {
-	sw, err := ca.out.NewStream(ca.out.Desc.MaxPacketSize, 1)
-	if err != nil {
-		ca.cfg.OnError(fmt.Errorf("failed to create stream writer: %w", err))
-		return
-	}
+
 	for {
 		select {
 		case <-ca.close:
@@ -219,7 +218,7 @@ func (ca *CombiAdapter) sendManager() {
 			//buff[16] = 0x00 // is extended
 			//buff[17] = 0x00 // is remote
 			//buff[18] = 0x00 // terminator
-			if _, err := sw.Write(buff); err != nil {
+			if _, err := ca.out.Write(buff); err != nil {
 				ca.cfg.OnError(fmt.Errorf("failed to send frame: %w", err))
 			}
 		}
@@ -244,7 +243,7 @@ func (ca *CombiAdapter) recvManager() {
 
 			switch cmd {
 			case combiCmdrxFrame:
-				for ca.rb.Length() < 2 {
+				for ca.rb.Length() < 18 {
 					//log.Println("waiting for rx data length")
 					time.Sleep(10 * time.Microsecond)
 				}
@@ -253,15 +252,11 @@ func (ca *CombiAdapter) recvManager() {
 				case <-ca.sendSem:
 				default:
 				}
-				for ca.rb.Length() < 3 {
-					//log.Println("waiting for tx data")
-					time.Sleep(10 * time.Microsecond)
-				}
-			default:
-				for ca.rb.Length() < 3 {
-					//log.Println("waiting for command data")
-					time.Sleep(10 * time.Microsecond)
-				}
+			}
+
+			for ca.rb.Length() < 3 {
+				//log.Println("waiting for command data")
+				time.Sleep(10 * time.Microsecond)
 			}
 
 			dataLenBytes := make([]byte, 2)
@@ -269,13 +264,6 @@ func (ca *CombiAdapter) recvManager() {
 				ca.cfg.OnError(fmt.Errorf("failed to read len from ringbuffer: %w", err))
 			}
 			dataLen := int(binary.BigEndian.Uint16(dataLenBytes) + 0x01) // +1 for terminator
-
-			if cmd == combiCmdrxFrame {
-				for ca.rb.Length() < dataLen {
-					//log.Println("waiting for rx data")
-					time.Sleep(10 * time.Microsecond)
-				}
-			}
 
 			data := make([]byte, dataLen)
 			n, err := ca.rb.Read(data)
@@ -286,26 +274,24 @@ func (ca *CombiAdapter) recvManager() {
 				ca.cfg.OnError(fmt.Errorf("read %d bytes, expected %d", n, dataLen))
 			}
 
-			switch cmd {
-			case 0x82: //rx
-				frame := gocan.NewFrame(
+			if cmd == combiCmdrxFrame { //rx
+				ca.recv <- gocan.NewFrame(
 					binary.LittleEndian.Uint32(data[:4]),
 					data[4:4+data[12]],
 					gocan.Incoming,
 				)
-				ca.recv <- frame
-			default:
-				if ca.cfg.Debug {
-					log.Printf("cmd: %02X, len: %d, data: %X, term: %02X", cmd, dataLen, data[:dataLen-2], data[dataLen-1])
-				}
+			}
+
+			if ca.cfg.Debug {
+				log.Printf("cmd: %02X, len: %d, data: %X, term: %02X", cmd, dataLen, data[:dataLen-2], data[dataLen-1])
 			}
 		}
 	}
 }
 
 func (ca *CombiAdapter) ringManager() {
-	buff := make([]byte, ca.in.Desc.MaxPacketSize)
-	rs, err := ca.in.NewStream(ca.in.Desc.MaxPacketSize, 1)
+	buff := make([]byte, 512)
+	rs, err := ca.in.NewStream(ca.in.Desc.MaxPacketSize, 4)
 	if err != nil {
 		ca.cfg.OnError(fmt.Errorf("failed to create stream reader: %w", err))
 		return
@@ -323,7 +309,6 @@ func (ca *CombiAdapter) ringManager() {
 			}
 			if _, err := ca.rb.Write(buff[:n]); err != nil {
 				ca.cfg.OnError(fmt.Errorf("failed to write to ringbuffer: %w", err))
-				continue
 			}
 		}
 	}
@@ -356,7 +341,8 @@ func (ca *CombiAdapter) ReadVersion(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("CombiAdapter v%d.%d", vers[8], vers[7]), nil
+	//  20 00 02 01 01 00 A8 03
+	return fmt.Sprintf("CombiAdapter v%d.%d", vers[4], vers[3]), nil
 }
 
 /*
