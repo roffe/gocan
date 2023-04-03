@@ -200,14 +200,14 @@ func (ca *CombiAdapter) closeAdapter(sendCloseCMD, closeIface, closeDevCfg, clos
 }
 
 func (ca *CombiAdapter) sendManager() {
-
+	buff := make([]byte, 19)
+	zeros := make([]byte, 19)
 	for {
 		select {
 		case <-ca.close:
 			return
 		case frame := <-ca.send:
 			ca.sendSem <- struct{}{}
-			buff := make([]byte, 19)
 			buff[0] = combiCmdtxFrame
 			//buff[1] = 15 >> 8
 			//buff[2] = 15 & 0xff
@@ -221,6 +221,7 @@ func (ca *CombiAdapter) sendManager() {
 			if _, err := ca.out.Write(buff); err != nil {
 				ca.cfg.OnError(fmt.Errorf("failed to send frame: %w", err))
 			}
+			copy(buff, zeros)
 		}
 	}
 }
@@ -252,11 +253,12 @@ func (ca *CombiAdapter) recvManager() {
 				case <-ca.sendSem:
 				default:
 				}
-			}
-
-			for ca.rb.Length() < 3 {
-				//log.Println("waiting for command data")
-				time.Sleep(10 * time.Microsecond)
+				fallthrough
+			default:
+				for ca.rb.Length() < 3 {
+					//log.Println("waiting for command data")
+					time.Sleep(10 * time.Microsecond)
+				}
 			}
 
 			dataLenBytes := make([]byte, 2)
@@ -274,7 +276,10 @@ func (ca *CombiAdapter) recvManager() {
 				ca.cfg.OnError(fmt.Errorf("read %d bytes, expected %d", n, dataLen))
 			}
 
-			if cmd == combiCmdrxFrame { //rx
+			switch cmd {
+			case combiCmdSetCanBitrate:
+				log.Printf("set bitrate: %X", data)
+			case combiCmdrxFrame: //rx
 				ca.recv <- gocan.NewFrame(
 					binary.LittleEndian.Uint32(data[:4]),
 					data[4:4+data[12]],
@@ -290,7 +295,7 @@ func (ca *CombiAdapter) recvManager() {
 }
 
 func (ca *CombiAdapter) ringManager() {
-	buff := make([]byte, 512)
+	buff := make([]byte, ca.in.Desc.MaxPacketSize*4)
 	rs, err := ca.in.NewStream(ca.in.Desc.MaxPacketSize, 4)
 	if err != nil {
 		ca.cfg.OnError(fmt.Errorf("failed to create stream reader: %w", err))
@@ -341,7 +346,7 @@ func (ca *CombiAdapter) ReadVersion(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	//  20 00 02 01 01 00 A8 03
+	//  20 00 02 01 01 00
 	return fmt.Sprintf("CombiAdapter v%d.%d", vers[4], vers[3]), nil
 }
 
