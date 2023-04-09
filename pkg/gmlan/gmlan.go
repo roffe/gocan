@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"strings"
 	"time"
 
@@ -354,9 +355,7 @@ func (cl *Client) ReadDataByIdentifierString(ctx context.Context, pid byte) (str
 }
 
 func (cl *Client) ReadDataByIdentifier(ctx context.Context, pid byte) ([]byte, error) {
-	out := bytes.NewBuffer([]byte{})
-	f := gocan.NewFrame(cl.canID, []byte{0x02, 0x1A, pid}, gocan.ResponseRequired)
-	resp, err := cl.c.SendAndPoll(ctx, f, cl.defaultTimeout, cl.recvID...)
+	resp, err := cl.c.SendAndPoll(ctx, gocan.NewFrame(cl.canID, []byte{0x02, 0x1A, pid}, gocan.ResponseRequired), cl.defaultTimeout, cl.recvID...)
 	if err != nil {
 		return nil, err
 	}
@@ -367,72 +366,50 @@ func (cl *Client) ReadDataByIdentifier(ctx context.Context, pid byte) ([]byte, e
 	switch {
 	case d[1] == 0x5A: // only one frame in this response
 		length := d[0]
-		for i := 3; i <= int(length); i++ {
-			out.WriteByte(d[i])
-		}
-		return out.Bytes(), nil
-	case d[2] == 0x5A:
-		leng := d[1]
-
-		lenThisFrame := int(leng)
-		if lenThisFrame > 4 {
-			lenThisFrame = 4
-		}
-
-		left := int(leng) - 2
-		framesToReceive := (leng - 4) / 8
-		if (leng-4)%8 > 0 {
-			framesToReceive++
-		}
-
-		for i := 4; i < 4+lenThisFrame; i++ {
-			out.WriteByte(d[i])
-			left--
-		}
-
-		cl.c.SendFrame(cl.canID, []byte{0x30, 0x00, 0x00}, gocan.CANFrameType{Type: 2, Responses: int(framesToReceive)})
-
-		var seq byte = 0x21
-
+		return d[3 : 3+(length-2)], nil
+	case d[0] == 0x10 && d[2] == 0x5A: // Multi frame response
+		left := int(d[1]) - 2
+		out := bytes.NewBuffer(make([]byte, 0, left))
+		rb := min(4, left)
+		out.Write(d[4 : 4+rb])
+		left -= rb
 		cc := cl.c.Subscribe(ctx, cl.recvID...)
-
+		framesToReceive := math.Ceil(float64(left) / 7)
+		cl.c.SendFrame(cl.canID, []byte{0x30, 0x00, 0x00}, gocan.CANFrameType{Type: 2, Responses: int(framesToReceive)})
+		var seq byte = 0x21
 		for framesToReceive > 0 {
 			select {
-			case resp2 := <-cc:
-				//resp2, err := cl.c.Poll(ctx, cl.defaultTimeout, cl.recvID...)
-				//if err != nil {
-				//	return nil, err
-				//}
-				if err := CheckErr(resp2); err != nil {
+			case response := <-cc:
+				if err := CheckErr(response); err != nil {
 					return nil, err
 				}
-				frameData := resp2.Data()
+				frameData := response.Data()
 				if frameData[0] != seq {
 					return nil, fmt.Errorf("frame sequence out of order, expected 0x%X got 0x%X", seq, frameData[0])
 				}
-
-				for i := 1; i < 8; i++ {
-					out.WriteByte(frameData[i])
-					left--
-					if left == 0 {
-						return out.Bytes(), nil
-					}
+				rb = min(7, left)
+				out.Write(frameData[1 : 1+rb])
+				left -= rb
+				if seq == 0x2F {
+					seq = 0x19
 				}
-				framesToReceive--
 				seq++
-				if seq == 0x30 {
-					seq = 0x20
-				}
-			case <-time.After(5 * time.Second):
+				framesToReceive--
+			case <-time.After(1 * time.Second):
 				return nil, errors.New("timeout waiting for response")
 			}
 		}
 		return out.Bytes(), nil
 	default:
-		//log.Println(resp.String())
 		return nil, errors.New("unhandled response")
 	}
-	//log.Println(resp.String())
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // 8.19 ReadDataByPacketIdentifier ($AA) Service.
@@ -714,9 +691,7 @@ func (cl *Client) WriteDataByIdentifier(ctx context.Context, pid byte, data []by
 
 func (cl *Client) writeDataByIdentifierMultiframe(ctx context.Context, pid byte, data []byte) error {
 	r := bytes.NewReader(data)
-
 	firstPart := make([]byte, 4)
-
 	_, err := r.Read(firstPart)
 	if err != nil {
 		if err == io.EOF {
@@ -788,3 +763,87 @@ func (cl *Client) writeDataByIdentifierMultiframe(ctx context.Context, pid byte,
 	}
 	return nil
 }
+
+/*
+func (cl *Client) ReadDataByIdentifier(ctx context.Context, pid byte) ([]byte, error) {
+	out := bytes.NewBuffer([]byte{})
+	f := gocan.NewFrame(cl.canID, []byte{0x02, 0x1A, pid}, gocan.ResponseRequired)
+	resp, err := cl.c.SendAndPoll(ctx, f, cl.defaultTimeout, cl.recvID...)
+	if err != nil {
+		return nil, err
+	}
+	if err := CheckErr(resp); err != nil {
+		return nil, err
+	}
+	d := resp.Data()
+	switch {
+	case d[1] == 0x5A: // only one frame in this response
+		length := d[0]
+		for i := 3; i <= int(length); i++ {
+			out.WriteByte(d[i])
+		}
+		return out.Bytes(), nil
+	case d[2] == 0x5A:
+		leng := d[1]
+
+		lenThisFrame := int(leng)
+		if lenThisFrame > 4 {
+			lenThisFrame = 4
+		}
+
+		left := int(leng) - 2
+		framesToReceive := (leng - 4) / 8
+		if (leng-4)%8 > 0 {
+			framesToReceive++
+		}
+
+		for i := 4; i < 4+lenThisFrame; i++ {
+			out.WriteByte(d[i])
+			left--
+		}
+
+		cl.c.SendFrame(cl.canID, []byte{0x30, 0x00, 0x00}, gocan.CANFrameType{Type: 2, Responses: int(framesToReceive)})
+
+		var seq byte = 0x21
+
+		cc := cl.c.Subscribe(ctx, cl.recvID...)
+
+		for framesToReceive > 0 {
+			select {
+			case resp2 := <-cc:
+				//resp2, err := cl.c.Poll(ctx, cl.defaultTimeout, cl.recvID...)
+				//if err != nil {
+				//	return nil, err
+				//}
+				if err := CheckErr(resp2); err != nil {
+					return nil, err
+				}
+				frameData := resp2.Data()
+				if frameData[0] != seq {
+					return nil, fmt.Errorf("frame sequence out of order, expected 0x%X got 0x%X", seq, frameData[0])
+				}
+
+				for i := 1; i < 8; i++ {
+					out.WriteByte(frameData[i])
+					left--
+					if left == 0 {
+						return out.Bytes(), nil
+					}
+				}
+				framesToReceive--
+				seq++
+				if seq == 0x30 {
+					seq = 0x20
+				}
+			case <-time.After(5 * time.Second):
+				return nil, errors.New("timeout waiting for response")
+			}
+		}
+		return out.Bytes(), nil
+	default:
+		//log.Println(resp.String())
+		return nil, errors.New("unhandled response")
+	}
+	//log.Println(resp.String())
+}
+*/

@@ -1,15 +1,16 @@
+//go:build combi
+// +build combi
+
 package adapter
 
 import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/google/gousb"
 	"github.com/roffe/gocan"
-	"github.com/smallnest/ringbuffer"
 )
 
 const (
@@ -23,17 +24,17 @@ const (
 )
 
 type CombiAdapter struct {
-	cfg        *gocan.AdapterConfig
-	send, recv chan gocan.CANFrame
-	close      chan struct{}
-	usbCtx     *gousb.Context
-	dev        *gousb.Device
-	devCfg     *gousb.Config
-	iface      *gousb.Interface
-	in         *gousb.InEndpoint
-	out        *gousb.OutEndpoint
-	sendSem    chan struct{}
-	rb         *ringbuffer.RingBuffer
+	cfg             *gocan.AdapterConfig
+	send, recv      chan gocan.CANFrame
+	close           chan struct{}
+	usbCtx          *gousb.Context
+	dev             *gousb.Device
+	devCfg          *gousb.Config
+	iface           *gousb.Interface
+	in              *gousb.InEndpoint
+	out             *gousb.OutEndpoint
+	sendSem         chan struct{}
+	partialTransfer []byte
 }
 
 func init() {
@@ -60,13 +61,13 @@ func init() {
 }
 
 func NewCombi(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
+
 	return &CombiAdapter{
 		cfg:     cfg,
 		send:    make(chan gocan.CANFrame, 10),
 		recv:    make(chan gocan.CANFrame, 20),
 		close:   make(chan struct{}, 1),
 		sendSem: make(chan struct{}, 1),
-		rb:      ringbuffer.New(4096),
 	}, nil
 }
 
@@ -129,7 +130,7 @@ func (ca *CombiAdapter) Init(ctx context.Context) error {
 		return fmt.Errorf("failed to close can-bus: %w", err)
 	}
 
-	dump := make([]byte, 256)
+	dump := make([]byte, 32)
 	ca.in.Read(dump)
 
 	if ca.cfg.PrintVersion {
@@ -156,7 +157,9 @@ func (ca *CombiAdapter) Init(ctx context.Context) error {
 }
 
 func (ca *CombiAdapter) canCtrl(mode byte) error {
-	if _, err := ca.out.Write([]byte{combiCmdOpen, 0, 1, mode, 0}); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if _, err := ca.out.WriteContext(ctx, []byte{combiCmdOpen, 0, 1, mode, 0}); err != nil {
 		return fmt.Errorf("failed to write to usb device: %w", err)
 	}
 	return nil
@@ -199,6 +202,73 @@ func (ca *CombiAdapter) closeAdapter(sendCloseCMD, closeIface, closeDevCfg, clos
 	return nil
 }
 
+func (ca *CombiAdapter) recvManager() {
+	for {
+		select {
+		case <-ca.close:
+			return
+		default:
+			buff := make([]byte, 8)
+			n, err := ca.in.Read(buff)
+			if err != nil {
+				ca.cfg.OnError(fmt.Errorf("failed to read from usb device: %w", err))
+				if n == 0 {
+					continue
+				}
+			}
+			if err := ca.parseCMD(buff[:n]); err != nil {
+				ca.cfg.OnError(fmt.Errorf("failed to parse command: %w", err))
+				continue
+			}
+		}
+	}
+}
+
+func (ca *CombiAdapter) parseCMD(data []byte) error {
+	// If there's a partial transfer from previous call, concatenate it with the new data
+	if len(ca.partialTransfer) > 0 {
+		data = append(ca.partialTransfer, data...)
+		ca.partialTransfer = nil
+	}
+
+	for len(data) > 0 {
+		// Check if there's enough data to form a complete command
+		if data[0] == combiCmdrxFrame && len(data) < 19 || len(data) < 4 {
+			ca.partialTransfer = data
+			break
+		}
+
+		// Get size
+		size := binary.BigEndian.Uint16(data[1:3])
+
+		// Check if there's enough data to form the complete command including data and terminator
+		if len(data) < int(size+4) { // cmd ID(1) + size(2) + terminator(1)
+			ca.partialTransfer = data
+			break
+		}
+
+		switch data[0] {
+		case combiCmdtxFrame, combiCmdSetCanBitrate, combiCmdOpen, combiCmdVersion:
+			select {
+			case <-ca.sendSem:
+			default:
+			}
+		case combiCmdrxFrame:
+			f := gocan.NewFrame(
+				binary.LittleEndian.Uint32(data[3:7]),
+				data[7:data[15]+7],
+				gocan.Incoming,
+			)
+			ca.recv <- f
+		}
+
+		// Advance to next transfer
+		data = data[size+4:]
+	}
+
+	return nil
+}
+
 func (ca *CombiAdapter) sendManager() {
 	buff := make([]byte, 19)
 	zeros := make([]byte, 19)
@@ -207,7 +277,6 @@ func (ca *CombiAdapter) sendManager() {
 		case <-ca.close:
 			return
 		case frame := <-ca.send:
-			ca.sendSem <- struct{}{}
 			buff[0] = combiCmdtxFrame
 			//buff[1] = 15 >> 8
 			//buff[2] = 15 & 0xff
@@ -218,6 +287,8 @@ func (ca *CombiAdapter) sendManager() {
 			//buff[16] = 0x00 // is extended
 			//buff[17] = 0x00 // is remote
 			//buff[18] = 0x00 // terminator
+			ca.sendSem <- struct{}{}
+
 			if _, err := ca.out.Write(buff); err != nil {
 				ca.cfg.OnError(fmt.Errorf("failed to send frame: %w", err))
 			}
@@ -226,103 +297,13 @@ func (ca *CombiAdapter) sendManager() {
 	}
 }
 
-func (ca *CombiAdapter) recvManager() {
-	go ca.ringManager()
-	for {
-		select {
-		case <-ca.close:
-			return
-		default:
-			if ca.rb.IsEmpty() {
-				continue
-			}
-			cmd, err := ca.rb.ReadByte()
-			if err != nil {
-				ca.cfg.OnError(fmt.Errorf("failed to read cmd from ringbuffer: %w", err))
-				continue
-			}
-
-			switch cmd {
-			case combiCmdrxFrame:
-				for ca.rb.Length() < 18 {
-					//log.Println("waiting for rx data length")
-					time.Sleep(10 * time.Microsecond)
-				}
-			case combiCmdtxFrame:
-				select {
-				case <-ca.sendSem:
-				default:
-				}
-				fallthrough
-			default:
-				for ca.rb.Length() < 3 {
-					//log.Println("waiting for command data")
-					time.Sleep(10 * time.Microsecond)
-				}
-			}
-
-			dataLenBytes := make([]byte, 2)
-			if _, err := ca.rb.Read(dataLenBytes); err != nil {
-				ca.cfg.OnError(fmt.Errorf("failed to read len from ringbuffer: %w", err))
-			}
-			dataLen := int(binary.BigEndian.Uint16(dataLenBytes) + 0x01) // +1 for terminator
-
-			data := make([]byte, dataLen)
-			n, err := ca.rb.Read(data)
-			if err != nil {
-				ca.cfg.OnError(fmt.Errorf("failed to read data from ringbuffer: %w", err))
-			}
-			if n != dataLen {
-				ca.cfg.OnError(fmt.Errorf("read %d bytes, expected %d", n, dataLen))
-			}
-
-			switch cmd {
-			case combiCmdSetCanBitrate:
-				log.Printf("set bitrate: %X", data)
-			case combiCmdrxFrame: //rx
-				ca.recv <- gocan.NewFrame(
-					binary.LittleEndian.Uint32(data[:4]),
-					data[4:4+data[12]],
-					gocan.Incoming,
-				)
-			}
-
-			if ca.cfg.Debug {
-				log.Printf("cmd: %02X, len: %d, data: %X, term: %02X", cmd, dataLen, data[:dataLen-2], data[dataLen-1])
-			}
-		}
-	}
-}
-
-func (ca *CombiAdapter) ringManager() {
-	buff := make([]byte, ca.in.Desc.MaxPacketSize*4)
-	rs, err := ca.in.NewStream(ca.in.Desc.MaxPacketSize, 4)
-	if err != nil {
-		ca.cfg.OnError(fmt.Errorf("failed to create stream reader: %w", err))
-		return
-	}
-	defer rs.Close()
-	for {
-		select {
-		case <-ca.close:
-			return
-		default:
-			n, err := rs.Read(buff)
-			if err != nil {
-				ca.cfg.OnError(fmt.Errorf("failed to read from usb: %w", err))
-				continue
-			}
-			if _, err := ca.rb.Write(buff[:n]); err != nil {
-				ca.cfg.OnError(fmt.Errorf("failed to write to ringbuffer: %w", err))
-			}
-		}
-	}
-}
-
 func (ca *CombiAdapter) setBitrate(ctx context.Context) error {
 	canrate := uint32(ca.cfg.CANRate * 1000)
 	payload := []byte{combiCmdSetCanBitrate, 0x00, 0x04, byte(canrate >> 24), byte(canrate >> 16), byte(canrate >> 8), byte(canrate), 0x00}
-	if _, err := ca.out.Write(payload); err != nil {
+
+	ctx2, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer cancel()
+	if _, err := ca.out.WriteContext(ctx2, payload); err != nil {
 		ca.cfg.OnError(fmt.Errorf("failed to set bitrate: %w", err))
 		return err
 	}
@@ -338,7 +319,9 @@ func (ca *CombiAdapter) Send() chan<- gocan.CANFrame {
 }
 
 func (ca *CombiAdapter) ReadVersion(ctx context.Context) (string, error) {
-	if _, err := ca.out.Write([]byte{combiCmdVersion, 0x00, 0x00, 0x00}); err != nil {
+	ctx2, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer cancel()
+	if _, err := ca.out.WriteContext(ctx2, []byte{combiCmdVersion, 0x00, 0x00, 0x00}); err != nil {
 		return "", err
 	}
 	vers := make([]byte, ca.in.Desc.MaxPacketSize)
@@ -408,5 +391,70 @@ func (cp *CombiPacket) Bytes() []byte {
 	}
 	buf.WriteByte(cp.term)
 	return buf.Bytes()
+}
+
+func (ca *CombiAdapter) recvManager() {
+	go ca.ringManager()
+	dataBuff := make([]byte, 32)
+	for {
+		select {
+		case <-ca.close:
+			return
+		default:
+			if ca.rb.IsEmpty() {
+				continue
+			}
+			cmd, err := ca.rb.ReadByte()
+			if err != nil {
+				ca.cfg.OnError(fmt.Errorf("failed to read cmd from ringbuffer: %w", err))
+				continue
+			}
+
+			switch cmd {
+			case combiCmdrxFrame:
+				for ca.rb.Length() < 18 {
+					//log.Println("waiting for rx data length")
+					time.Sleep(10 * time.Microsecond)
+				}
+			case combiCmdtxFrame, combiCmdVersion, combiCmdOpen:
+				select {
+				case <-ca.sendSem:
+				default:
+				}
+				fallthrough
+			default:
+				for ca.rb.Length() < 3 {
+					//log.Println("waiting for command data")
+					time.Sleep(10 * time.Microsecond)
+				}
+			}
+
+			if _, err := ca.rb.Read(dataBuff[:2]); err != nil {
+				ca.cfg.OnError(fmt.Errorf("failed to read length from ringbuffer: %w", err))
+			}
+			dataLen := int(binary.BigEndian.Uint16(dataBuff[:2]) + 0x01) // +1 for terminator
+
+			n, err := ca.rb.Read(dataBuff[:dataLen])
+			if err != nil {
+				ca.cfg.OnError(fmt.Errorf("failed to read data from ringbuffer: %w", err))
+			}
+			if n != dataLen {
+				ca.cfg.OnError(fmt.Errorf("read %d bytes, expected %d", n, dataLen))
+			}
+
+			switch cmd {
+			case combiCmdrxFrame: //rx
+				ca.recv <- gocan.NewFrame(
+					binary.LittleEndian.Uint32(dataBuff[:4]),
+					dataBuff[4:4+dataBuff[12]],
+					gocan.Incoming,
+				)
+			}
+
+			if ca.cfg.Debug {
+				log.Printf("cmd: %02X, len: %d, data: %X, term: %02X", cmd, dataLen, dataBuff[:dataLen-2], dataBuff[dataLen-1])
+			}
+		}
+	}
 }
 */

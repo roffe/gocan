@@ -54,7 +54,7 @@ func NewJ2534(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	ma := &J2534{
 		cfg:       cfg,
 		send:      make(chan gocan.CANFrame, 10),
-		recv:      make(chan gocan.CANFrame, 10),
+		recv:      make(chan gocan.CANFrame, 20),
 		close:     make(chan struct{}, 1),
 		channelID: 1,
 		deviceID:  1,

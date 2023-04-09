@@ -318,6 +318,10 @@ func FindDLLs() (dlls []J2534DLL) {
 		}
 		if val, _, err := k3.GetIntegerValue("SW_CAN_PS"); err == nil {
 			capabilities.SWCANPS = val == 1 || strings.ToLower(name) == "tech2"
+		} else {
+			if strings.ToLower(name) == "tech2" {
+				capabilities.SWCANPS = true
+			}
 		}
 		dlls = append(dlls, J2534DLL{Name: name, FunctionLibrary: functionLibrary, Capabilities: capabilities})
 	}

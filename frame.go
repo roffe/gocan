@@ -54,9 +54,11 @@ type Frame struct {
 }
 
 func NewFrame(identifier uint32, data []byte, frameType CANFrameType) *Frame {
+	db := make([]byte, len(data))
+	copy(db, data)
 	return &Frame{
 		identifier: identifier,
-		data:       data,
+		data:       db,
 		frameType:  frameType,
 	}
 }

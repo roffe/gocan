@@ -57,6 +57,8 @@ func newFrameHandler(incoming <-chan CANFrame) *FrameHandler {
 func (h *FrameHandler) run(ctx context.Context) {
 	for {
 		select {
+		case <-h.close:
+			return
 		case <-ctx.Done():
 			//			log.Println("exit framehandler")
 			return
