@@ -83,6 +83,10 @@ func (f *Frame) SetTimeout(t time.Duration) {
 	f.timeout = t
 }
 
+func (f *Frame) SetType(t CANFrameType) {
+	f.frameType = t
+}
+
 func (f *Frame) Timeout() time.Duration {
 	return f.timeout
 }

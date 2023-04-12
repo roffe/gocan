@@ -82,12 +82,35 @@ func NewJust4Trionic(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	return adapter, nil
 }
 func (a *Just4Trionic) SetFilter(filters []uint32) error {
-	filter, mask := calcAcceptanceFilters(filters)
+	filter, mask := a.calcAcceptanceFilters(filters)
 	a.send <- gocan.NewRawCommand("C")
 	a.send <- gocan.NewRawCommand(filter)
 	a.send <- gocan.NewRawCommand(mask)
 	a.send <- gocan.NewRawCommand("O")
 	return nil
+}
+
+func (*Just4Trionic) calcAcceptanceFilters(idList []uint32) (string, string) {
+	if len(idList) == 1 && idList[0] == 0 {
+		return "\r", "\r"
+	}
+	var code = ^uint32(0)
+	var mask uint32 = 0
+
+	if len(idList) == 0 {
+		code = 0
+		mask = ^uint32(0)
+	} else {
+		code = 0
+		for _, canID := range idList {
+			code &= (canID & 0x7FF) << 5
+			mask |= (canID & 0x7FF) << 5
+		}
+	}
+	code |= code << 16
+	mask |= mask << 16
+
+	return fmt.Sprintf("M%08X", code), fmt.Sprintf("m%08X", mask)
 }
 
 func (a *Just4Trionic) Name() string {
@@ -110,7 +133,7 @@ func (a *Just4Trionic) Init(ctx context.Context) error {
 
 	p.ResetOutputBuffer()
 
-	code, mask := calcAcceptanceFilters(a.cfg.CANFilter)
+	code, mask := a.calcAcceptanceFilters(a.cfg.CANFilter)
 
 	var cmds = []string{
 		"\x1B", // Empty buffer

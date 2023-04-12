@@ -55,7 +55,7 @@ func NewCanusb(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	if err := cu.setCANrate(cfg.CANRate); err != nil {
 		return nil, err
 	}
-	cu.filter, cu.mask = calcAcceptanceFilters(cfg.CANFilter)
+	cu.filter, cu.mask = cu.calcAcceptanceFilters(cfg.CANFilter)
 	return cu, nil
 }
 
@@ -64,7 +64,7 @@ func (cu *Canusb) Name() string {
 }
 
 func (cu *Canusb) SetFilter(filters []uint32) error {
-	filter, mask := calcAcceptanceFilters(filters)
+	filter, mask := cu.calcAcceptanceFilters(filters)
 	cu.send <- gocan.NewRawCommand("C")
 	cu.send <- gocan.NewRawCommand(filter)
 	cu.send <- gocan.NewRawCommand(mask)
@@ -172,7 +172,7 @@ func (cu *Canusb) Close() error {
 	return cu.port.Close()
 }
 
-func calcAcceptanceFilters(idList []uint32) (string, string) {
+func (*Canusb) calcAcceptanceFilters(idList []uint32) (string, string) {
 	if len(idList) == 1 && idList[0] == 0 {
 		return "\r", "\r"
 	}
@@ -259,11 +259,11 @@ func (cu *Canusb) recvManager(ctx context.Context) {
 		if n == 0 {
 			continue
 		}
-		cu.parse(ctx, readBuffer[:n], buff)
+		cu.parse(ctx, buff, readBuffer[:n])
 	}
 }
 
-func (cu *Canusb) parse(ctx context.Context, readBuffer []byte, buff *bytes.Buffer) {
+func (cu *Canusb) parse(ctx context.Context, buff *bytes.Buffer, readBuffer []byte) {
 	for _, b := range readBuffer {
 		select {
 		case <-ctx.Done():
