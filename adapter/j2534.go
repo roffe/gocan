@@ -312,7 +312,7 @@ func (ma *J2534) sendMsg(msg *passthru.PassThruMsg) error {
 		defer ma.Unlock()
 	}
 	numMsg := uint32(1)
-	if err := ma.h.PassThruWriteMsgs(ma.channelID, msg, &numMsg, 0); err != nil {
+	if err := ma.h.PassThruWriteMsgs(ma.channelID, msg, &numMsg, 100); err != nil {
 		if errStr, err2 := ma.h.PassThruGetLastError(); err2 == nil {
 			return fmt.Errorf("%w: %s", err, errStr)
 		}

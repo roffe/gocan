@@ -143,7 +143,7 @@ func (f *Frame) String() string {
 	return out.String()
 }
 
-func (f *Frame) String2() string {
+func (f *Frame) ColorString() string {
 	var out strings.Builder
 
 	switch f.frameType.Type {

@@ -6,11 +6,11 @@ package adapter
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
-	"time"
-
 	"github.com/google/gousb"
 	"github.com/roffe/gocan"
+	"time"
 )
 
 const (
@@ -38,13 +38,13 @@ type CombiAdapter struct {
 }
 
 func init() {
-	ctx := gousb.NewContext()
-	defer ctx.Close()
-	dev, err := ctx.OpenDeviceWithVIDPID(combiVid, combiPid)
-	if err != nil || dev == nil {
-		return
-	}
-	defer dev.Close()
+	//ctx := gousb.NewContext()
+	//defer ctx.Close()
+	//dev, err := ctx.OpenDeviceWithVIDPID(combiVid, combiPid)
+	//if err != nil || dev == nil {
+	//	return
+	//}
+	//defer dev.Close()
 	if err := Register(&AdapterInfo{
 		Name:               "CombiAdapter",
 		Description:        "libusb windows driver",
@@ -83,8 +83,11 @@ func (ca *CombiAdapter) Init(ctx context.Context) error {
 	var err error
 	ca.usbCtx = gousb.NewContext()
 	ca.dev, err = ca.usbCtx.OpenDeviceWithVIDPID(combiVid, combiPid)
-	if err != nil && ca.dev == nil {
+	if err != nil || ca.dev == nil {
 		ca.closeAdapter(false, false, false, false, true)
+		if ca.dev == nil {
+			return errors.New("CombiAdapter not found")
+		}
 		return err
 	} else if err != nil && ca.dev != nil {
 		ca.closeAdapter(false, false, false, true, true)
