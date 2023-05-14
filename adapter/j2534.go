@@ -55,7 +55,7 @@ func NewJ2534(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 		cfg:       cfg,
 		send:      make(chan gocan.CANFrame, 10),
 		recv:      make(chan gocan.CANFrame, 20),
-		close:     make(chan struct{}, 1),
+		close:     make(chan struct{}, 2),
 		channelID: 1,
 		deviceID:  1,
 	}
@@ -330,7 +330,9 @@ func (ma *J2534) Send() chan<- gocan.CANFrame {
 }
 
 func (ma *J2534) Close() error {
-	close(ma.close)
+	for i := 0; i < 2; i++ {
+		ma.close <- struct{}{}
+	}
 	time.Sleep(200 * time.Millisecond)
 	err := ma.h.PassThruIoctl(ma.channelID, passthru.CLEAR_MSG_FILTERS, nil, nil)
 	if err != nil {

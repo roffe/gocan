@@ -41,17 +41,28 @@ type FrameHandler struct {
 	register   chan *Sub
 	unregister chan *Sub
 	incoming   <-chan CANFrame
+	onIncoming func(CANFrame)
+	onOutgoing func(CANFrame)
 	close      chan struct{}
 }
 
 func newFrameHandler(incoming <-chan CANFrame) *FrameHandler {
-	return &FrameHandler{
+	f := &FrameHandler{
 		subs:       make(map[*Sub]bool),
 		register:   make(chan *Sub, 10),
 		unregister: make(chan *Sub, 10),
 		close:      make(chan struct{}, 1),
 		incoming:   incoming,
 	}
+	return f
+}
+
+func (h *FrameHandler) setOnIncoming(fn func(CANFrame)) {
+	h.onIncoming = fn
+}
+
+func (h *FrameHandler) setOnOutgoing(fn func(CANFrame)) {
+	h.onOutgoing = fn
 }
 
 func (h *FrameHandler) run(ctx context.Context) {
@@ -68,6 +79,9 @@ func (h *FrameHandler) run(ctx context.Context) {
 			h.unsub(sub)
 		case frame := <-h.incoming:
 			h.fanout(frame)
+			if h.onIncoming != nil {
+				h.onIncoming(frame)
+			}
 		}
 	}
 }

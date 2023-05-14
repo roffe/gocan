@@ -61,7 +61,6 @@ func init() {
 }
 
 func NewCombi(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
-
 	return &CombiAdapter{
 		cfg:     cfg,
 		send:    make(chan gocan.CANFrame, 10),

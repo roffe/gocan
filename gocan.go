@@ -30,12 +30,30 @@ type AdapterConfig struct {
 	OnError      func(error)
 }
 
+type Opts func(*Client)
+
+func OptOnIncoming(fn func(CANFrame)) Opts {
+	return func(c *Client) {
+		c.fh.setOnIncoming(fn)
+	}
+}
+
+func OptOnOutgoing(fn func(CANFrame)) Opts {
+	return func(c *Client) {
+		c.fh.setOnOutgoing(fn)
+	}
+}
+
 type Client struct {
 	fh      *FrameHandler
 	adapter Adapter
 }
 
 func New(ctx context.Context, adapter Adapter) (*Client, error) {
+	return NewWithOpts(ctx, adapter)
+}
+
+func NewWithOpts(ctx context.Context, adapter Adapter, opts ...Opts) (*Client, error) {
 	if err := adapter.Init(ctx); err != nil {
 		return nil, err
 	}
@@ -43,6 +61,11 @@ func New(ctx context.Context, adapter Adapter) (*Client, error) {
 		fh:      newFrameHandler(adapter.Recv()),
 		adapter: adapter,
 	}
+
+	for _, opt := range opts {
+		opt(c)
+	}
+
 	go c.fh.run(ctx)
 	return c, nil
 }
@@ -64,6 +87,9 @@ func (c *Client) Close() error {
 func (c *Client) Send(msg CANFrame) error {
 	select {
 	case c.adapter.Send() <- msg:
+		if c.fh.onOutgoing != nil {
+			c.fh.onOutgoing(msg)
+		}
 		return nil
 	case <-time.After(5 * time.Second):
 		return errors.New("gocan failed to send frame")
