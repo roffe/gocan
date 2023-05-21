@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"math"
 	"strings"
 	"time"
@@ -22,6 +23,23 @@ type Client struct {
 	recvID         []uint32
 }
 
+const (
+	TRANSFER_DATA                  = 0x36
+	DEVICE_CONTROL                 = 0xAE
+	DISABLE_NORMAL_COMMUNICATION   = 0x28
+	INITIATE_DIAGNOSTIC_OPERATION  = 0x10
+	PROGRAMMING_MODE               = 0xA5
+	RETURN_TO_NORMAL_MODE          = 0x20
+	REPORT_PROGRAMMED_STATE        = 0xA2
+	READ_DATA_BY_IDENTIFIER        = 0x1A
+	READ_DATA_BY_PACKET_IDENTIFIER = 0xAA
+	SECURITY_ACCESS                = 0x27
+	REQUEST_DOWNLOAD               = 0x34
+	WRITE_DATA_BY_IDENTIFIER       = 0x3B
+	DYNAMICALLY_DEFINE_MESSAGE     = 0x2C
+	READ_MEMORY_BY_ADDRESS         = 0x23
+)
+
 func New(c *gocan.Client, canID uint32, recvID ...uint32) *Client {
 	return &Client{
 		c:              c,
@@ -29,121 +47,6 @@ func New(c *gocan.Client, canID uint32, recvID ...uint32) *Client {
 		canID:          canID,
 		recvID:         recvID,
 	}
-}
-
-// 8.13 TransferData ($36) Service.
-//
-// This service is used to transfer and/or execute a block of data, usually for
-// reprogramming purposes.
-
-// 80 downloadAndExecuteOrExecute
-// This sub-parameter level of operation is used to command a node to receive a block
-// transfer, download the data received to the memory address specified in the
-// startingAddress[] parameter, and execute the data (program) downloaded. This subparameter command can also be used to execute a previously downloaded program by
-// sending the request message with no data in the dataRecord[ ].
-
-func (cl *Client) Execute(ctx context.Context, startAddress uint32) error {
-	payload := []byte{
-		0x06, 0x36, 0x80,
-		byte(startAddress >> 24),
-		byte(startAddress >> 16),
-		byte(startAddress >> 8),
-		byte(startAddress),
-	}
-	resp, err := cl.c.SendAndPoll(ctx, gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired), cl.defaultTimeout, cl.recvID...)
-	if err != nil {
-		return err
-	}
-	return CheckErr(resp)
-}
-
-//8.20 DeviceControl ($AE) Service.
-//The purpose of this service is to allow a test device to override normal
-//output control functions in order to verify proper operation of a component or system, or to reset/clear variables
-//used within normal control algorithms. The tool may take control of multiple outputs simultaneously with a
-//single request message or by sending multiple device control service messages.
-
-func (cl *Client) DeviceControl(ctx context.Context, command byte) error {
-	payload := []byte{0x02, 0xAE, command}
-	frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
-	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
-	if err != nil {
-		return err
-	}
-	return CheckErr(resp)
-}
-
-func (cl *Client) DeviceControlWithCode(ctx context.Context, command byte, code []byte) error {
-	payload := []byte{0x07, 0xAE, command}
-	payload = append(payload, code...)
-	frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
-	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
-	if err != nil {
-		return err
-	}
-	return CheckErr(resp)
-}
-
-// 00 Download
-// This sub-parameter level of operation is used to command a node to receive a block
-// transfer and (only) download the data received to the memory address specified in the
-// startingAddress[] parameter.
-func (cl *Client) TransferData(ctx context.Context, subFunc byte, length byte, startAddress int) error {
-	payload := []byte{
-		0x10, length, 0x36,
-		subFunc,                  // Byte 3 is present when the memoryAddress parameter contains 3 or 4 bytes
-		byte(startAddress >> 24), // Byte 4 is present , the memoryAddress parameter contains 4 bytes.
-		byte(startAddress >> 16),
-		byte(startAddress >> 8),
-		byte(startAddress),
-	}
-
-	f := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
-	resp, err := cl.c.SendAndPoll(ctx, f, cl.defaultTimeout, cl.recvID...)
-	if err != nil {
-		return err
-	}
-
-	if err := CheckErr(resp); err != nil {
-		return err
-	}
-
-	d := resp.Data()
-	if d[0] != 0x30 || d[1] != 0x00 {
-		return errors.New("/!\\ Did not receive correct response from TransferData")
-	}
-
-	return nil
-}
-
-//8.9 DisableNormalCommunication ($28) Service.
-/*
-The purpose of this service is to prevent a device from
-transmitting or receiving all messages which are not the direct result of a diagnostic request. The primary use
-of the service is to set up a programming event. This is a required service that must be supported by all nodes
-*/
-func (cl *Client) DisableNormalCommunication(ctx context.Context) error {
-	frame := gocan.NewFrame(cl.canID, []byte{0x01, 0x28}, gocan.ResponseRequired)
-	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
-	if err != nil {
-		return fmt.Errorf("DisableNormalCommunication: %w", err)
-	}
-	if err := CheckErr(resp); err != nil {
-		return err
-	}
-	d := resp.Data()
-	if d[0] != 0x01 || d[1] != 0x68 {
-		return errors.New("invalid response to DisableNormalCommunication")
-	}
-	return nil
-}
-
-// AllNodes functional diagnostic request CANId ($101) and the AllNodes extended address ($FE).
-func (cl *Client) DisableNormalCommunicationAllNodes() error {
-	if err := cl.c.SendFrame(0x101, []byte{0xFE, 0x01, 0x28}, gocan.Outgoing); err != nil {
-		return err
-	}
-	return nil
 }
 
 // 8.2 InitiateDiagnosticOperation ($10) Service.
@@ -191,7 +94,7 @@ This service allows the tester to perform the following tasks:
    gateway (or longer if the ECU would otherwise keep t
 */
 func (cl *Client) InitiateDiagnosticOperation(ctx context.Context, subFunc byte) error {
-	payload := []byte{0x02, 0x10, subFunc}
+	payload := []byte{0x02, INITIATE_DIAGNOSTIC_OPERATION, subFunc}
 	frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
 	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
@@ -208,71 +111,11 @@ func (cl *Client) InitiateDiagnosticOperation(ctx context.Context, subFunc byte)
 	return nil
 }
 
-//8.17 ProgrammingMode ($A5) Service.
-/*
-This service provides for the following levels of operation:
-* Verifies that all criteria are met to enable the programming services for all receiving nodes.
-* Enables the high speed mode of operation (83.33 kbps) for all receiving nodes on the Single Wire CAN
-(SWCAN) bus (if high speed programming was requested by the tool).
-* Enables programming services for all receiving nodes.
-This service shall only be available if normal communications have already been disabled (via service $28)
-
-subFunc
-01 requestProgrammingMode
-  Request by the tester to verify the capability of the node(s) to enter into a normal speed
-  programming event.
-
-02 requestProgrammingMode_HighSpeed
-  Request by the tester to verify the capability of the node(s) to enter into a high speed
-  programming event.
-
-03 enableProgrammingMode
-  Request by the tester to have the node(s) enter into a programming event. This can only
-  be sent if preceded by one of the valid requestProgrammingMode messages (above).
-*/
-func (cl *Client) ProgrammingModeRequest(ctx context.Context) error {
-	return cl.ProgrammingMode(ctx, 0x01)
-}
-
-func (cl *Client) ProgrammingModeRequestHighSpeed(ctx context.Context) error {
-	return cl.ProgrammingMode(ctx, 0x02)
-}
-
-func (cl *Client) ProgrammingModeEnable(ctx context.Context) error {
-	return cl.ProgrammingMode(ctx, 0x03)
-}
-
-func (cl *Client) ProgrammingMode(ctx context.Context, subFunc byte) error {
-	payload := []byte{0x02, 0xA5, subFunc}
-	switch subFunc {
-	case 0x01, 0x02:
-		frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
-		resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
-		if err != nil {
-			return err
-		}
-		d := resp.Data()
-		if d[0] != 0x01 || d[1] != 0xE5 {
-			return errors.New("request ProgrammingMode invalid response")
-		}
-		return nil
-
-	case 0x03:
-		frame := gocan.NewFrame(cl.canID, payload, gocan.Outgoing)
-		if err := cl.c.Send(frame); err != nil {
-			return err
-		}
-		return nil
-	default:
-		return errors.New("ProgrammingMode: unknown subFunc")
-	}
-}
-
 // $20
 func (cl *Client) ReturnToNormalMode(ctx context.Context) error {
 	resp, err := cl.c.SendAndPoll(
 		ctx,
-		gocan.NewFrame(cl.canID, []byte{0x01, 0x20}, gocan.ResponseRequired),
+		gocan.NewFrame(cl.canID, []byte{0x01, RETURN_TO_NORMAL_MODE}, gocan.ResponseRequired),
 		cl.defaultTimeout,
 		cl.recvID...,
 	)
@@ -280,54 +123,6 @@ func (cl *Client) ReturnToNormalMode(ctx context.Context) error {
 		return fmt.Errorf("ReturnToNormalMode: %w", err)
 	}
 	return CheckErr(resp)
-}
-
-// 8.16 ReportProgrammedState ($A2) Service.
-//
-// The reportProgrammedState is used by the tester to determine:
-// * Which nodes on the link are programmable.
-// * The current programmed state of each programmable node.
-func (cl *Client) ReportProgrammedState(ctx context.Context) (byte, error) {
-	frame := gocan.NewFrame(cl.canID, []byte{0x01, 0xA2}, gocan.ResponseRequired)
-	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
-	if err != nil {
-		return 0, fmt.Errorf("ReportProgrammedState: %w", err)
-	}
-	if err := CheckErr(resp); err != nil {
-		return 0, err
-	}
-	d := resp.Data()
-	if d[0] != 0x02 || d[1] != 0xE2 {
-		return 0, errors.New("invalid response to ReportProgrammedState request")
-	}
-	return d[2], nil
-}
-
-func TranslateProgrammedState(state byte) string {
-	switch state {
-	case 0x00:
-		return "fully programmed"
-	case 0x01:
-		return "no op s/w or cal data"
-	case 0x02:
-		return "op s/w present, cal data missing"
-	case 0x03:
-		return "s/w present, default or no start cal present"
-	case 0x50:
-		return "General Memory Fault"
-	case 0x51:
-		return "RAM Memory Fault"
-	case 0x52:
-		return "NVRAM Memory Fault"
-	case 0x53:
-		return "Boot Memory Failure"
-	case 0x54:
-		return "Flash Memory Failure"
-	case 0x55:
-		return "EEPROM Memory Failure "
-	default:
-		return "unknown"
-	}
 }
 
 // 8.4 ReadDataByIdentifier ($1A) Service.
@@ -355,15 +150,23 @@ func (cl *Client) ReadDataByIdentifierString(ctx context.Context, pid byte) (str
 }
 
 func (cl *Client) ReadDataByIdentifier(ctx context.Context, pid byte) ([]byte, error) {
-	resp, err := cl.c.SendAndPoll(ctx, gocan.NewFrame(cl.canID, []byte{0x02, 0x1A, pid}, gocan.ResponseRequired), cl.defaultTimeout, cl.recvID...)
+	frame := gocan.NewFrame(cl.canID, []byte{0x02, READ_DATA_BY_IDENTIFIER, pid}, gocan.ResponseRequired)
+	return cl.ReadDataByIdentifierFrame(ctx, frame)
+}
+
+func (cl *Client) ReadDataByIdentifierFrame(ctx context.Context, frame gocan.CANFrame) ([]byte, error) {
+	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
 		return nil, err
 	}
 	if err := CheckErr(resp); err != nil {
+		log.Println(resp.String())
 		return nil, err
 	}
 	d := resp.Data()
 	switch {
+	//case d[0] == 0x02 && d[1] == 0x1A && d[2] == frame.Data()[2]:
+	//	return nil, fmt.Errorf("ReadDataByIdentifier: no more data")
 	case d[1] == 0x5A: // only one frame in this response
 		length := d[0]
 		return d[3 : 3+(length-2)], nil
@@ -380,18 +183,22 @@ func (cl *Client) ReadDataByIdentifier(ctx context.Context, pid byte) ([]byte, e
 		for framesToReceive > 0 {
 			select {
 			case response := <-cc:
-				if err := CheckErr(response); err != nil {
-					return nil, err
-				}
 				frameData := response.Data()
+				if frameData[0]&0x20 != 0x20 {
+					if err := CheckErr(response); err != nil {
+						log.Println(response.String())
+						return nil, err
+					}
+				}
 				if frameData[0] != seq {
+					log.Println(response.String())
 					return nil, fmt.Errorf("frame sequence out of order, expected 0x%X got 0x%X", seq, frameData[0])
 				}
 				rb = min(7, left)
 				out.Write(frameData[1 : 1+rb])
 				left -= rb
 				if seq == 0x2F {
-					seq = 0x19
+					seq = 0x1F //was 19?
 				}
 				seq++
 				framesToReceive--
@@ -401,6 +208,7 @@ func (cl *Client) ReadDataByIdentifier(ctx context.Context, pid byte) ([]byte, e
 		}
 		return out.Bytes(), nil
 	default:
+		log.Println(resp.String())
 		return nil, errors.New("unhandled response")
 	}
 }
@@ -412,45 +220,27 @@ func min(a, b int) int {
 	return b
 }
 
-// 8.19 ReadDataByPacketIdentifier ($AA) Service.
 /*
-The purpose of the ReadDataByPacketIdentifier($AA)
-service is to allow a tester to request data packets that contain diagnostic information (e.g., sensor input or
-output values) which are packaged in a UUDT diagnostic message format. Refer to paragraph 4.5.1.2 for more
-information on UUDT diagnostic message format. Each diagnostic data packet includes one byte that contains
-a Data Packet IDentifier (DPID) number, and one to seven bytes of additional data. The DPID number
-occupies the message number byte position of the UUDT diagnostic response message and is used by the
-tester to determine the data contents of the remaining bytes of the message.
-This service is intended to be used to retrieve ECU data which is most likely changing during normal operation
-(e.g., ECU sensor inputs, ECU commanded output states, etc). Static information such as VIN or Part
-Numbers should be retrieved via the ReadDataByIdentifier ($1A) service.
-The DPIDs requested via this service can be sent as a one-time response or scheduled periodically. Each
-DPID scheduled can be transmitted at one of three predefined periodic rates (slow, medium, or fast). Periodic
-rates require a TesterPresent ($3E) message to be sent on the bus to keep the Periodic DPID Scheduler
-(PDS) active (reference $3E service description).
+8.7 ReadMemoryByAddress ($23) Service. The purpose of this service is to retrieve data from a contiguous
+range of ECU memory addresses. The range of ECU addresses is defined by a starting memory address
+parameter and a length (memory size) parameter included in the request message. This service is intended to
+be used during a device’s development cycle to allow access to data that may not be available via another
+diagnostic service. The ReadMemoryByAddress service is only available as a one shot request-response
+service
 */
-func (cl *Client) ReadDataByPacketIdentifier(ctx context.Context, subFunc byte, dpid ...byte) ([]byte, error) {
-	f := gocan.NewFrame(
-		cl.canID,
-		append(
-			[]byte{byte(len(dpid) + 2), 0xAA, subFunc},
-			dpid...,
-		),
-		gocan.CANFrameType{
-			Type:      2,
-			Responses: len(dpid),
-		},
-	)
-	resp, err := cl.c.SendAndPoll(ctx, f, cl.defaultTimeout, cl.recvID...)
+
+func (cl *Client) ReadMemoryByAddress(ctx context.Context, address, length uint32) error {
+	data := []byte{0x07, READ_MEMORY_BY_ADDRESS, byte(address >> 24), byte(address >> 16), byte(address >> 8), byte(address), byte(length >> 8), byte(length)}
+	frame := gocan.NewFrame(cl.canID, data, gocan.ResponseRequired)
+	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
-		return nil, fmt.Errorf("ReadDataByPacketIdentifier: %w", err)
+		return err
 	}
-
+	log.Println(resp.String())
 	if err := CheckErr(resp); err != nil {
-		return nil, err
+		return err
 	}
-
-	return resp.Data(), nil
+	return nil
 }
 
 //func (cl *Client) sendAndReceive(ctx context.Context, payload []byte) (gocan.CANFrame, error) {
@@ -462,69 +252,6 @@ func (cl *Client) ReadDataByPacketIdentifier(ctx context.Context, subFunc byte, 
 //	return resp, CheckErr(resp)
 //}
 
-// ReadDiagnosticInformation $A9 Service
-//
-//	readStatusOfDTCByStatusMask $81 Request
-//	    DTCStatusMask $12= 0001 0010
-//	      0 Bit 7 warningIndicatorRequestedState
-//	      0 Bit 6 currentDTCSincePowerUp
-//	      0 Bit 5 testNotPassedSinceCurrentPowerUp
-//	      1 Bit 4 historyDTC
-//	      0 Bit 3 testFailedSinceDTCCleared
-//	      0 Bit 2 testNotPassedSinceDTCCleared
-//	      1 Bit 1 currentDTC
-//	      0 Bit 0 DTCSupportedByCalibration
-func (cl *Client) ReadDiagnosticInformationStatusOfDTCByStatusMask(ctx context.Context, DTCStatusMask byte) ([][]byte, error) {
-	return cl.readDiagnosticInformation(ctx, 0x81, []byte{DTCStatusMask})
-}
-
-// 8.18 ReadDiagnosticInformation ($) Service.
-//
-// This service allows a tester to read the status of
-// node-resident Diagnostic Trouble Code (DTC) information from any controller, or group of controllers within a
-// vehicle. This service allows the tester to do the following:
-// 1. Retrieve the status of a specific DTC and FaultType combination.
-// 2. Retrieve the list of DTCs that match a tester defined DTC status mask.
-// 3. Enable a node resident algorithm which periodically calculates the number of DTCs that match a tester
-// defined DTC status mask. The ECU shall send a response message each time the calculation yields a
-// different result than the one calculated the previous time.
-func (cl *Client) readDiagnosticInformation(ctx context.Context, subFunc byte, payload []byte) ([][]byte, error) {
-	if len(payload) > 3 {
-		return nil, errors.New("to big payload for readDiagnosticInformation")
-	}
-	header := []byte{0x03, 0xA9, subFunc}
-	frame := gocan.NewFrame(cl.canID, append(header, payload...), gocan.CANFrameType{Type: 2, Responses: 15})
-	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
-	if err != nil {
-		return nil, err
-	}
-
-	var out [][]byte
-	if err := CheckErr(resp); err != nil {
-		if strings.Contains(err.Error(), "Response pending") {
-			ch := cl.c.Subscribe(ctx, cl.recvID...)
-		outer:
-			for {
-				select {
-				case resp := <-ch:
-					d := resp.Data()
-					if d[1] == 0x00 && d[2] == 0x00 && d[3] == 0x00 { // No more DTCs
-						break outer
-					}
-					//log.Println("append")
-					out = append(out, []byte{d[1], d[2], d[3], d[4]})
-				case <-time.After(00 * time.Millisecond):
-					break outer
-				}
-			}
-		} else {
-			//log.Println("not pending")
-			return nil, err
-		}
-	}
-	return out, nil
-}
-
 // 8.8 SecurityAccess ($27) Service.
 //
 // The purpose of this service is to provide a means to access data and/or
@@ -534,7 +261,7 @@ func (cl *Client) readDiagnosticInformation(ctx context.Context, subFunc byte, p
 // damage the electronics or other vehicle components or risk the vehicle’s compliance to emission, safety, or
 // security standards. This mode is intended
 func (cl *Client) SecurityAccessRequestSeed(ctx context.Context, accessLevel byte) ([]byte, error) {
-	payload := []byte{0x02, 0x27, accessLevel}
+	payload := []byte{0x02, SECURITY_ACCESS, accessLevel}
 	frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
 	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
@@ -552,7 +279,7 @@ func (cl *Client) SecurityAccessRequestSeed(ctx context.Context, accessLevel byt
 }
 
 func (cl *Client) SecurityAccessSendKey(ctx context.Context, accessLevel, high, low byte) error {
-	respPayload := []byte{0x04, 0x27, accessLevel + 0x01, high, low}
+	respPayload := []byte{0x04, SECURITY_ACCESS, accessLevel + 0x01, high, low}
 	frame := gocan.NewFrame(cl.canID, respPayload, gocan.ResponseRequired)
 	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
@@ -599,9 +326,59 @@ func (cl *Client) RequestSecurityAccess(ctx context.Context, accesslevel byte, d
 	return nil
 }
 
+//8.9 DisableNormalCommunication ($28) Service.
+/*
+The purpose of this service is to prevent a device from
+transmitting or receiving all messages which are not the direct result of a diagnostic request. The primary use
+of the service is to set up a programming event. This is a required service that must be supported by all nodes
+*/
+func (cl *Client) DisableNormalCommunication(ctx context.Context) error {
+	frame := gocan.NewFrame(cl.canID, []byte{0x01, DISABLE_NORMAL_COMMUNICATION}, gocan.ResponseRequired)
+	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
+	if err != nil {
+		return fmt.Errorf("DisableNormalCommunication: %w", err)
+	}
+	if err := CheckErr(resp); err != nil {
+		return err
+	}
+	d := resp.Data()
+	if d[0] != 0x01 || d[1] != 0x68 {
+		return errors.New("invalid response to DisableNormalCommunication")
+	}
+	return nil
+}
+
+// AllNodes functional diagnostic request CANId ($101) and the AllNodes extended address ($FE).
+func (cl *Client) DisableNormalCommunicationAllNodes() error {
+	if err := cl.c.SendFrame(0x101, []byte{0xFE, 0x01, DISABLE_NORMAL_COMMUNICATION}, gocan.Outgoing); err != nil {
+		return err
+	}
+	return nil
+}
+
+/*
+8.10 DynamicallyDefineMessage ($2C) Service. This service is used to dynamically define the contents of
+diagnostic data packets which are formatted as UUDT messages and can be requested via the
+ReadDataByPacketIdentifier ($AA) service. The use of dynamic data packets allows a test device to optimize
+its diagnostic routines and bus bandwidth utilization by packing
+*/
+func (cl *Client) DynamicallyDefineMessage(ctx context.Context, ids ...uint16) error {
+	//id := 4027
+	frame := gocan.NewFrame(cl.canID, []byte{0x06, DYNAMICALLY_DEFINE_MESSAGE, 0xFE, 0x03, 0x8D, 0x01, 0x01}, gocan.ResponseRequired)
+	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
+	if err != nil {
+		return fmt.Errorf("DynamicallyDefineMessage: %w", err)
+	}
+	log.Println(resp.String())
+	if err := CheckErr(resp); err != nil {
+		return err
+	}
+	return nil
+}
+
 // 8.12 RequestDownload ($34) Service. This service is used in order to prepare a node to be programmed
 func (cl *Client) RequestDownload(ctx context.Context, z22se bool) error {
-	payload := []byte{0x06, 0x34, 0x00, 0x00, 0x00, 0x00, 0x00}
+	payload := []byte{0x06, REQUEST_DOWNLOAD, 0x00, 0x00, 0x00, 0x00, 0x00}
 
 	if z22se {
 		payload[0] = 0x05
@@ -625,26 +402,62 @@ func (cl *Client) RequestDownload(ctx context.Context, z22se bool) error {
 	return nil
 }
 
-// 8.15 TesterPresent ($3E) Service
-/*
- This service is used to indicate to a node (or nodes) that a tester is still
- connected to the vehicle and that certain diagnostic services that have been previously activated are to remain
- active. Some diagnostic services require that a tester send a request for this service periodically in order to
- keep the functionality of the other service active. Documentation within this specification of each diagnostic
- service indicates if a given service requires the periodic TesterPresent request to remain active
-*/
-func (cl *Client) TesterPresentResponseRequired(ctx context.Context) error {
-	payload := []byte{0x01, 0x3E}
-	f := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
-	resp, err := cl.c.SendAndPoll(ctx, f, cl.defaultTimeout, cl.recvID...)
+// 8.13 TransferData ($36) Service.
+//
+// This service is used to transfer and/or execute a block of data, usually for
+// reprogramming purposes.
+
+// 80 downloadAndExecuteOrExecute
+// This sub-parameter level of operation is used to command a node to receive a block
+// transfer, download the data received to the memory address specified in the
+// startingAddress[] parameter, and execute the data (program) downloaded. This subparameter command can also be used to execute a previously downloaded program by
+// sending the request message with no data in the dataRecord[ ].
+
+func (cl *Client) Execute(ctx context.Context, startAddress uint32) error {
+	payload := []byte{
+		0x06, TRANSFER_DATA, 0x80,
+		byte(startAddress >> 24),
+		byte(startAddress >> 16),
+		byte(startAddress >> 8),
+		byte(startAddress),
+	}
+	resp, err := cl.c.SendAndPoll(ctx, gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired), cl.defaultTimeout, cl.recvID...)
 	if err != nil {
-		return fmt.Errorf("TesterPresentResponseRequired: %v", err)
+		return err
 	}
 	return CheckErr(resp)
 }
 
-func (cl *Client) TesterPresentNoResponseAllowed() error {
-	return cl.c.Send(gocan.NewFrame(0x101, []byte{0xFE, 0x01, 0x3E}, gocan.Outgoing))
+// 00 Download
+// This sub-parameter level of operation is used to command a node to receive a block
+// transfer and (only) download the data received to the memory address specified in the
+// startingAddress[] parameter.
+func (cl *Client) TransferData(ctx context.Context, subFunc byte, length byte, startAddress int) error {
+	payload := []byte{
+		0x10, length, TRANSFER_DATA,
+		subFunc,                  // Byte 3 is present when the memoryAddress parameter contains 3 or 4 bytes
+		byte(startAddress >> 24), // Byte 4 is present , the memoryAddress parameter contains 4 bytes.
+		byte(startAddress >> 16),
+		byte(startAddress >> 8),
+		byte(startAddress),
+	}
+
+	f := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
+	resp, err := cl.c.SendAndPoll(ctx, f, cl.defaultTimeout, cl.recvID...)
+	if err != nil {
+		return err
+	}
+
+	if err := CheckErr(resp); err != nil {
+		return err
+	}
+
+	d := resp.Data()
+	if d[0] != 0x30 || d[1] != 0x00 {
+		return errors.New("/!\\ Did not receive correct response from TransferData")
+	}
+
+	return nil
 }
 
 // 8.14 WriteDataByIdentifier ($3B) Service.
@@ -670,7 +483,7 @@ func (cl *Client) WriteDataByIdentifier(ctx context.Context, pid byte, data []by
 		return cl.writeDataByIdentifierMultiframe(ctx, pid, data)
 	}
 
-	payload := []byte{byte(len(data) + 2), 0x3B, pid}
+	payload := []byte{byte(len(data) + 2), WRITE_DATA_BY_IDENTIFIER, pid}
 	payload = append(payload, data...)
 	//for i := len(payload); i < 8; i++ {
 	//	payload = append(payload, 0x00)
@@ -701,7 +514,7 @@ func (cl *Client) writeDataByIdentifierMultiframe(ctx context.Context, pid byte,
 		}
 	}
 	leng := byte(len(data)) + 2
-	payload := []byte{0x10, leng, 0x3B, pid}
+	payload := []byte{0x10, leng, WRITE_DATA_BY_IDENTIFIER, pid}
 	payload = append(payload, firstPart...)
 	frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
 	//	log.Println(frame.String())
@@ -762,6 +575,287 @@ func (cl *Client) writeDataByIdentifierMultiframe(ctx context.Context, pid byte,
 		}
 	}
 	return nil
+}
+
+// 8.15 TesterPresent ($3E) Service
+/*
+ This service is used to indicate to a node (or nodes) that a tester is still
+ connected to the vehicle and that certain diagnostic services that have been previously activated are to remain
+ active. Some diagnostic services require that a tester send a request for this service periodically in order to
+ keep the functionality of the other service active. Documentation within this specification of each diagnostic
+ service indicates if a given service requires the periodic TesterPresent request to remain active
+*/
+func (cl *Client) TesterPresentResponseRequired(ctx context.Context) error {
+	payload := []byte{0x01, 0x3E}
+	f := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
+	resp, err := cl.c.SendAndPoll(ctx, f, cl.defaultTimeout, cl.recvID...)
+	if err != nil {
+		return fmt.Errorf("TesterPresentResponseRequired: %v", err)
+	}
+	return CheckErr(resp)
+}
+
+func (cl *Client) TesterPresentNoResponseAllowed() error {
+	return cl.c.Send(gocan.NewFrame(0x101, []byte{0xFE, 0x01, 0x3E}, gocan.Outgoing))
+}
+
+// ReadDiagnosticInformation $A9 Service
+//
+//	readStatusOfDTCByStatusMask $81 Request
+//	    DTCStatusMask $12= 0001 0010
+//	      0 Bit 7 warningIndicatorRequestedState
+//	      0 Bit 6 currentDTCSincePowerUp
+//	      0 Bit 5 testNotPassedSinceCurrentPowerUp
+//	      1 Bit 4 historyDTC
+//	      0 Bit 3 testFailedSinceDTCCleared
+//	      0 Bit 2 testNotPassedSinceDTCCleared
+//	      1 Bit 1 currentDTC
+//	      0 Bit 0 DTCSupportedByCalibration
+func (cl *Client) ReadDiagnosticInformationStatusOfDTCByStatusMask(ctx context.Context, DTCStatusMask byte) ([][]byte, error) {
+	return cl.readDiagnosticInformation(ctx, 0x81, []byte{DTCStatusMask})
+}
+
+// 8.16 ReportProgrammedState ($A2) Service.
+//
+// The reportProgrammedState is used by the tester to determine:
+// * Which nodes on the link are programmable.
+// * The current programmed state of each programmable node.
+func (cl *Client) ReportProgrammedState(ctx context.Context) (byte, error) {
+	frame := gocan.NewFrame(cl.canID, []byte{0x01, REPORT_PROGRAMMED_STATE}, gocan.ResponseRequired)
+	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
+	if err != nil {
+		return 0, fmt.Errorf("ReportProgrammedState: %w", err)
+	}
+	if err := CheckErr(resp); err != nil {
+		return 0, err
+	}
+	d := resp.Data()
+	if d[0] != 0x02 || d[1] != 0xE2 {
+		return 0, errors.New("invalid response to ReportProgrammedState request")
+	}
+	return d[2], nil
+}
+
+func TranslateProgrammedState(state byte) string {
+	switch state {
+	case 0x00:
+		return "fully programmed"
+	case 0x01:
+		return "no op s/w or cal data"
+	case 0x02:
+		return "op s/w present, cal data missing"
+	case 0x03:
+		return "s/w present, default or no start cal present"
+	case 0x50:
+		return "General Memory Fault"
+	case 0x51:
+		return "RAM Memory Fault"
+	case 0x52:
+		return "NVRAM Memory Fault"
+	case 0x53:
+		return "Boot Memory Failure"
+	case 0x54:
+		return "Flash Memory Failure"
+	case 0x55:
+		return "EEPROM Memory Failure "
+	default:
+		return "unknown"
+	}
+}
+
+//8.17 ProgrammingMode ($A5) Service.
+/*
+This service provides for the following levels of operation:
+* Verifies that all criteria are met to enable the programming services for all receiving nodes.
+* Enables the high speed mode of operation (83.33 kbps) for all receiving nodes on the Single Wire CAN
+(SWCAN) bus (if high speed programming was requested by the tool).
+* Enables programming services for all receiving nodes.
+This service shall only be available if normal communications have already been disabled (via service $28)
+
+subFunc
+01 requestProgrammingMode
+  Request by the tester to verify the capability of the node(s) to enter into a normal speed
+  programming event.
+
+02 requestProgrammingMode_HighSpeed
+  Request by the tester to verify the capability of the node(s) to enter into a high speed
+  programming event.
+
+03 enableProgrammingMode
+  Request by the tester to have the node(s) enter into a programming event. This can only
+  be sent if preceded by one of the valid requestProgrammingMode messages (above).
+*/
+func (cl *Client) ProgrammingModeRequest(ctx context.Context) error {
+	return cl.ProgrammingMode(ctx, 0x01)
+}
+
+func (cl *Client) ProgrammingModeRequestHighSpeed(ctx context.Context) error {
+	return cl.ProgrammingMode(ctx, 0x02)
+}
+
+func (cl *Client) ProgrammingModeEnable(ctx context.Context) error {
+	return cl.ProgrammingMode(ctx, 0x03)
+}
+
+func (cl *Client) ProgrammingMode(ctx context.Context, subFunc byte) error {
+	payload := []byte{0x02, PROGRAMMING_MODE, subFunc}
+	switch subFunc {
+	case 0x01, 0x02:
+		frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
+		resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
+		if err != nil {
+			return err
+		}
+		d := resp.Data()
+		if d[0] != 0x01 || d[1] != 0xE5 {
+			return errors.New("request ProgrammingMode invalid response")
+		}
+		return nil
+
+	case 0x03:
+		frame := gocan.NewFrame(cl.canID, payload, gocan.Outgoing)
+		if err := cl.c.Send(frame); err != nil {
+			return err
+		}
+		return nil
+	default:
+		return errors.New("ProgrammingMode: unknown subFunc")
+	}
+}
+
+// 8.18 ReadDiagnosticInformation ($) Service.
+//
+// This service allows a tester to read the status of
+// node-resident Diagnostic Trouble Code (DTC) information from any controller, or group of controllers within a
+// vehicle. This service allows the tester to do the following:
+// 1. Retrieve the status of a specific DTC and FaultType combination.
+// 2. Retrieve the list of DTCs that match a tester defined DTC status mask.
+// 3. Enable a node resident algorithm which periodically calculates the number of DTCs that match a tester
+// defined DTC status mask. The ECU shall send a response message each time the calculation yields a
+// different result than the one calculated the previous time.
+func (cl *Client) readDiagnosticInformation(ctx context.Context, subFunc byte, payload []byte) ([][]byte, error) {
+	if len(payload) > 3 {
+		return nil, errors.New("to big payload for readDiagnosticInformation")
+	}
+	header := []byte{0x03, 0xA9, subFunc}
+	frame := gocan.NewFrame(cl.canID, append(header, payload...), gocan.CANFrameType{Type: 2, Responses: 15})
+	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
+	if err != nil {
+		return nil, err
+	}
+
+	var out [][]byte
+	if err := CheckErr(resp); err != nil {
+		if strings.Contains(err.Error(), "Response pending") {
+			ch := cl.c.Subscribe(ctx, cl.recvID...)
+		outer:
+			for {
+				select {
+				case resp := <-ch:
+					d := resp.Data()
+					if d[1] == 0x00 && d[2] == 0x00 && d[3] == 0x00 { // No more DTCs
+						break outer
+					}
+					//log.Println("append")
+					out = append(out, []byte{d[1], d[2], d[3], d[4]})
+				case <-time.After(00 * time.Millisecond):
+					break outer
+				}
+			}
+		} else {
+			//log.Println("not pending")
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// 8.19 ReadDataByPacketIdentifier ($AA) Service.
+/*
+The purpose of the ReadDataByPacketIdentifier($AA)
+service is to allow a tester to request data packets that contain diagnostic information (e.g., sensor input or
+output values) which are packaged in a UUDT diagnostic message format. Refer to paragraph 4.5.1.2 for more
+information on UUDT diagnostic message format. Each diagnostic data packet includes one byte that contains
+a Data Packet IDentifier (DPID) number, and one to seven bytes of additional data. The DPID number
+occupies the message number byte position of the UUDT diagnostic response message and is used by the
+tester to determine the data contents of the remaining bytes of the message.
+This service is intended to be used to retrieve ECU data which is most likely changing during normal operation
+(e.g., ECU sensor inputs, ECU commanded output states, etc). Static information such as VIN or Part
+Numbers should be retrieved via the ReadDataByIdentifier ($1A) service.
+The DPIDs requested via this service can be sent as a one-time response or scheduled periodically. Each
+DPID scheduled can be transmitted at one of three predefined periodic rates (slow, medium, or fast). Periodic
+rates require a TesterPresent ($3E) message to be sent on the bus to keep the Periodic DPID Scheduler
+(PDS) active (reference $3E service description).
+*/
+func (cl *Client) ReadDataByPacketIdentifier(ctx context.Context, subFunc byte, dpid ...byte) ([]byte, error) {
+	f := gocan.NewFrame(
+		cl.canID,
+		append(
+			[]byte{byte(len(dpid) + 2), READ_DATA_BY_PACKET_IDENTIFIER, subFunc},
+			dpid...,
+		),
+		gocan.CANFrameType{
+			Type:      2,
+			Responses: len(dpid),
+		},
+	)
+	//	log.Println(f.String())
+
+	resp, err := cl.c.SendAndPoll(ctx, f, cl.defaultTimeout, cl.recvID...)
+	if err != nil {
+		return nil, fmt.Errorf("ReadDataByPacketIdentifier: %w", err)
+	}
+
+	// log.Println(resp.String())
+
+	if err := CheckErr(resp); err != nil {
+		return nil, err
+	}
+
+	/*
+		d := resp.Data()
+
+		log.Printf("messages %d", d[2])
+
+		noResp := d[2]
+
+		for noResp > 0 {
+			dd, err := cl.c.Poll(ctx, cl.defaultTimeout, cl.recvID...)
+			if err != nil {
+				return nil, fmt.Errorf("ReadDataByPacketIdentifier: %w", err)
+			}
+			log.Println(dd.String())
+			noResp--
+		}
+	*/
+	return resp.Data(), nil
+}
+
+//8.20 DeviceControl ($AE) Service.
+//The purpose of this service is to allow a test device to override normal
+//output control functions in order to verify proper operation of a component or system, or to reset/clear variables
+//used within normal control algorithms. The tool may take control of multiple outputs simultaneously with a
+//single request message or by sending multiple device control service messages.
+
+func (cl *Client) DeviceControl(ctx context.Context, command byte) error {
+	payload := []byte{0x02, DEVICE_CONTROL, command}
+	frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
+	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
+	if err != nil {
+		return err
+	}
+	return CheckErr(resp)
+}
+
+func (cl *Client) DeviceControlWithCode(ctx context.Context, command byte, code []byte) error {
+	payload := []byte{0x07, DEVICE_CONTROL, command}
+	payload = append(payload, code...)
+	frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
+	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
+	if err != nil {
+		return err
+	}
+	return CheckErr(resp)
 }
 
 /*
