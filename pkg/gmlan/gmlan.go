@@ -111,20 +111,6 @@ func (cl *Client) InitiateDiagnosticOperation(ctx context.Context, subFunc byte)
 	return nil
 }
 
-// $20
-func (cl *Client) ReturnToNormalMode(ctx context.Context) error {
-	resp, err := cl.c.SendAndPoll(
-		ctx,
-		gocan.NewFrame(cl.canID, []byte{0x01, RETURN_TO_NORMAL_MODE}, gocan.ResponseRequired),
-		cl.defaultTimeout,
-		cl.recvID...,
-	)
-	if err != nil {
-		return fmt.Errorf("ReturnToNormalMode: %w", err)
-	}
-	return CheckErr(resp)
-}
-
 // 8.4 ReadDataByIdentifier ($1A) Service.
 //
 // The purpose of this service is to provide the ability to read the
@@ -218,6 +204,27 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+/*
+8.5 ReturnToNormalMode ($20) Service. The purpose of this service is to return a node or group of nodes to
+normal mode operation by canceling all active diagnostic services and resetting normal message
+communications (if they were interrupted by a diagnostic operation).
+All nodes participating in a GMLAN network shall support this service even if the node itself is diagnosed over
+another vehicle bus (e.g., KWP2000 or Class 2). This requirement is necessary to facilitate programming of
+other devices on the GMLAN subnet.
+*/
+func (cl *Client) ReturnToNormalMode(ctx context.Context) error {
+	resp, err := cl.c.SendAndPoll(
+		ctx,
+		gocan.NewFrame(cl.canID, []byte{0x01, RETURN_TO_NORMAL_MODE}, gocan.ResponseRequired),
+		cl.defaultTimeout,
+		cl.recvID...,
+	)
+	if err != nil {
+		return fmt.Errorf("ReturnToNormalMode: %w", err)
+	}
+	return CheckErr(resp)
 }
 
 /*
