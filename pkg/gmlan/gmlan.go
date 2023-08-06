@@ -16,11 +16,14 @@ import (
 	"github.com/roffe/gocan"
 )
 
+type GMLanOption func(*Client)
+
 type Client struct {
 	c              *gocan.Client
 	defaultTimeout time.Duration
 	canID          uint32
 	recvID         []uint32
+	closed         chan struct{}
 }
 
 const (
@@ -41,11 +44,45 @@ const (
 )
 
 func New(c *gocan.Client, canID uint32, recvID ...uint32) *Client {
+	//return &Client{
+	//	c:              c,
+	//	defaultTimeout: 150 * time.Millisecond,
+	//	canID:          canID,
+	//	recvID:         recvID,
+	//}
+	return NewWithOpts(c, WithCanID(canID), WithRecvID(recvID...))
+}
+
+func NewWithOpts(client *gocan.Client, opts ...GMLanOption) *Client {
+	c := newDefault(client)
+	for _, opt := range opts {
+		opt(c)
+	}
+	return c
+}
+
+func newDefault(client *gocan.Client) *Client {
 	return &Client{
-		c:              c,
+		c:              client,
 		defaultTimeout: 150 * time.Millisecond,
-		canID:          canID,
-		recvID:         recvID,
+	}
+}
+
+func WithDefaultTimeout(timeout time.Duration) GMLanOption {
+	return func(c *Client) {
+		c.defaultTimeout = timeout
+	}
+}
+
+func WithCanID(canID uint32) GMLanOption {
+	return func(c *Client) {
+		c.canID = canID
+	}
+}
+
+func WithRecvID(recvID ...uint32) GMLanOption {
+	return func(c *Client) {
+		c.recvID = recvID
 	}
 }
 
