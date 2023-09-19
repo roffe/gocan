@@ -33,7 +33,19 @@ func init() {
 	}); err != nil {
 		panic(err)
 	}
-
+	if err := Register(&AdapterInfo{
+		Name:               "OBDLink EX",
+		Description:        "OBDLink EX",
+		RequiresSerialPort: true,
+		Capabilities: AdapterCapabilities{
+			HSCAN: true,
+			KLine: false,
+			SWCAN: false,
+		},
+		New: NewSTN,
+	}); err != nil {
+		panic(err)
+	}
 	if err := Register(&AdapterInfo{
 		Name:               "STN1170",
 		Description:        "ScanTool.net STN1170 based adapter",
@@ -94,14 +106,12 @@ func NewSTN(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 
 func (stn *STN) SetFilter(filters []uint32) error {
 	stn.setCANfilter(filters)
-
 	stn.send <- gocan.NewRawCommand("STPC")
 	stn.send <- gocan.NewRawCommand(stn.mask)
 	stn.send <- gocan.NewRawCommand(stn.filter)
 	stn.send <- gocan.NewRawCommand("STPO")
 	//stn.send <- gocan.NewRawCommand("ATCM7FF")
 	//stn.send <- gocan.NewRawCommand("ATCF258")
-
 	return nil
 }
 
@@ -294,9 +304,10 @@ func (stn *STN) Send() chan<- gocan.CANFrame {
 func (stn *STN) Close() error {
 	stn.closed = true
 	close(stn.close)
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(150 * time.Millisecond)
+	stn.port.ResetOutputBuffer()
 	stn.port.Write([]byte("ATZ\r"))
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 	stn.port.ResetInputBuffer()
 	return stn.port.Close()
 }
