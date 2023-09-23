@@ -148,9 +148,9 @@ func (stn *STN) Init(ctx context.Context) error {
 					stn.cfg.OnMessage(fmt.Sprintf("Switched adapter baudrate from %d to %d bps", from, to))
 				}
 				return nil
-			} else {
-				stn.cfg.OnError(err)
-			}
+			} //else {
+			//stn.cfg.OnError(err)
+			//}
 		}
 		return errors.New("Failed to switch adapter baudrate") //lint:ignore ST1005 ignore this
 	}
