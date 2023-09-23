@@ -312,7 +312,7 @@ func (cl *Client) SecurityAccessRequestSeed(ctx context.Context, accessLevel byt
 		return nil, fmt.Errorf("SecurityAccessRequestSeed: %w", err)
 	}
 	if err := CheckErr(resp); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("SecurityAccessRequestSeed: %w", err)
 	}
 	d := resp.Data()
 	if d[1] != 0x67 || d[2] != accessLevel {
@@ -573,7 +573,8 @@ func (cl *Client) writeDataByIdentifierMultiframe(ctx context.Context, pid byte,
 		return err
 	}
 
-	if d[0] != 0x30 || d[1] != 0x00 {
+	if d[0] != 0x30 || d[1] > 0x01 {
+		log.Printf(resp.String())
 		return errors.New("invalid response to initial writeDataByIdentifier")
 	}
 
