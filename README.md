@@ -5,7 +5,7 @@ J2534 support in Windows / Linux
 
 ## USB Serial
 
-* OBDLinx SX/MX/MX+: https://www.obdlink.com/
+* OBDLinx SX/EX/MX/MX+: https://www.obdlink.com/
 * STN1130
 * STN1170
 * STN2120
