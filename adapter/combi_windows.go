@@ -265,7 +265,7 @@ func (ca *CombiAdapter) parseCMD(data []byte) error {
 			select {
 			case ca.recv <- f:
 			default:
-				a.cfg.OnError(ErrDroppedFrame)
+				ca.cfg.OnError(ErrDroppedFrame)
 			}
 		}
 

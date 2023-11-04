@@ -312,7 +312,7 @@ func (a *Combi) recvManager(ctx context.Context) {
 				select {
 					case a.recv <- frame
 					default:
-						a.cfg.OnError(ErrDroppedFrame)
+						ca.cfg.OnError(ErrDroppedFrame)
 				}
 				break
 			case txFrame:
