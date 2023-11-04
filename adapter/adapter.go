@@ -74,3 +74,7 @@ func ListAdapters() []AdapterInfo {
 func GetAdapterMap() map[string]*AdapterInfo {
 	return adapterMap
 }
+
+var (
+	ErrDroppedFrame = fmt.Errorf("your computer is to slow, dropped incoming frame")
+)

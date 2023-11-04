@@ -3,14 +3,15 @@ package adapter
 import (
 	"context"
 	"fmt"
-	"github.com/roffe/gocan"
-	"go.einride.tech/can"
-	"go.einride.tech/can/pkg/candevice"
-	"go.einride.tech/can/pkg/socketcan"
 	"net"
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/roffe/gocan"
+	"go.einride.tech/can"
+	"go.einride.tech/can/pkg/candevice"
+	"go.einride.tech/can/pkg/socketcan"
 )
 
 func init() {
@@ -125,7 +126,11 @@ func (a *SocketCAN) recvManager(ctx context.Context) {
 							f.Data[0:f.Length],
 							gocan.Incoming,
 						)
-						a.recv <- frame
+						select {
+						case a.recv <- frame:
+						default:
+							a.cfg.OnError(ErrDroppedFrame)
+						}
 					}
 				}
 			}

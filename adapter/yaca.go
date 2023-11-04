@@ -195,7 +195,7 @@ func (ya *YACA) parse(ctx context.Context, buff *bytes.Buffer, readBuffer []byte
 				select {
 				case ya.recv <- f:
 				default:
-					ya.cfg.OnError(errors.New("dropped frame"))
+					ya.cfg.OnError(ErrDroppedFrame)
 				}
 				buff.Reset()
 			case 0x07: // bell, last command was unknown

@@ -296,7 +296,7 @@ func (cu *Canusb) parse(ctx context.Context, buff *bytes.Buffer, readBuffer []by
 				select {
 				case cu.recv <- f:
 				default:
-					cu.cfg.OnError(errors.New("dropped frame"))
+					cu.cfg.OnError(ErrDroppedFrame)
 				}
 				buff.Reset()
 			case 'z': // last command ok

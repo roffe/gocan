@@ -8,9 +8,10 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"time"
+
 	"github.com/google/gousb"
 	"github.com/roffe/gocan"
-	"time"
 )
 
 const (
@@ -261,7 +262,11 @@ func (ca *CombiAdapter) parseCMD(data []byte) error {
 				data[7:data[15]+7],
 				gocan.Incoming,
 			)
-			ca.recv <- f
+			select {
+			case ca.recv <- f:
+			default:
+				a.cfg.OnError(ErrDroppedFrame)
+			}
 		}
 
 		// Advance to next transfer

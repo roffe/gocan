@@ -251,11 +251,16 @@ func (ma *J2534) recvManager() {
 				ma.cfg.OnError(errors.New("empty message"))
 				continue
 			}
-			ma.recv <- gocan.NewFrame(
+			select {
+
+			case ma.recv <- gocan.NewFrame(
 				binary.BigEndian.Uint32(msg.Data[0:4]),
 				msg.Data[4:msg.DataSize],
 				gocan.Incoming,
-			)
+			):
+			default:
+				ma.cfg.OnError(ErrDroppedFrame)
+			}
 		}
 	}
 }

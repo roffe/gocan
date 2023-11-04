@@ -260,7 +260,7 @@ func (a *Just4Trionic) parse(ctx context.Context, readBuffer []byte, buff *bytes
 				select {
 				case a.recv <- f:
 				default:
-					a.cfg.OnError(fmt.Errorf("dropped frame: %v", f))
+					a.cfg.OnError(ErrDroppedFrame)
 				}
 				buff.Reset()
 			default:

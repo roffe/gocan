@@ -143,14 +143,16 @@ func (stn *STN) Init(ctx context.Context) error {
 	setSpeed := func() error {
 		to := stn.cfg.PortBaudrate
 		for _, from := range stnAdapterSpeeds {
-			if err := stn.setSpeed(stn.port, mode, from, to); err == nil {
+			if err := stn.setSpeed(stn.port, mode, from, to); err != nil {
+				if stn.cfg.Debug {
+					stn.cfg.OnError(err)
+				}
+			} else {
 				if stn.cfg.Debug {
 					stn.cfg.OnMessage(fmt.Sprintf("Switched adapter baudrate from %d to %d bps", from, to))
 				}
 				return nil
-			} //else {
-			//stn.cfg.OnError(err)
-			//}
+			}
 		}
 		return errors.New("Failed to switch adapter baudrate") //lint:ignore ST1005 ignore this
 	}
@@ -419,7 +421,7 @@ func (stn *STN) recvManager(ctx context.Context) {
 					select {
 					case stn.recv <- f:
 					default:
-						stn.cfg.OnError(fmt.Errorf("dropped frame: %s", f.String()))
+						stn.cfg.OnError(ErrDroppedFrame)
 					}
 					buff.Reset()
 				}

@@ -309,7 +309,11 @@ func (a *Combi) recvManager(ctx context.Context) {
 					rx.data[4:rx.data[12]+4],
 					gocan.Incoming,
 				)
-				a.recv <- frame
+				select {
+					case a.recv <- frame
+					default:
+						a.cfg.OnError(ErrDroppedFrame)
+				}
 				break
 			case txFrame:
 				wg.Done()
