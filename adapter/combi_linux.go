@@ -6,11 +6,12 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/google/gousb"
-	"github.com/roffe/gocan"
 	"runtime"
 	"strconv"
 	"sync"
+
+	"github.com/google/gousb"
+	"github.com/roffe/gocan"
 )
 
 var wg sync.WaitGroup
@@ -310,9 +311,9 @@ func (a *Combi) recvManager(ctx context.Context) {
 					gocan.Incoming,
 				)
 				select {
-					case a.recv <- frame
-					default:
-						ca.cfg.OnError(ErrDroppedFrame)
+				case a.recv <- frame:
+				default:
+					a.cfg.OnError(ErrDroppedFrame)
 				}
 				break
 			case txFrame:
