@@ -71,7 +71,6 @@ func (h *FrameHandler) run(ctx context.Context) {
 		case <-h.close:
 			return
 		case <-ctx.Done():
-			//			log.Println("exit framehandler")
 			return
 		case sub := <-h.register:
 			h.sub(sub)
