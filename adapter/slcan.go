@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"log"
 	"strconv"
@@ -146,29 +145,9 @@ func (sl *SLCan) sendManager(ctx context.Context) {
 	for {
 		select {
 		case v := <-sl.send:
-			switch v.(type) {
-			case *gocan.RawCommand:
-				if _, err := sl.port.Write(append(v.Data(), '\r')); err != nil {
-					sl.cfg.OnError(fmt.Errorf("failed to write to com port: %s, %w", f.String(), err))
-				}
-				if sl.cfg.Debug {
-					log.Println(">> " + v.String())
-				}
-			default:
-				idb := make([]byte, 4)
-				binary.BigEndian.PutUint32(idb, v.Identifier())
-				f.WriteString("t" + hex.EncodeToString(idb)[5:] +
-					strconv.Itoa(v.Length()) +
-					hex.EncodeToString(v.Data()) + "\x0D")
-				if _, err := sl.port.Write(f.Bytes()); err != nil {
-					sl.cfg.OnError(fmt.Errorf("failed to write to com port: %s, %w", f.String(), err))
-				}
-				if sl.cfg.Debug {
-					log.Println(">> " + f.String())
-				}
-				f.Reset()
+			if err := sl.handleSend(v, f); err != nil {
+				sl.cfg.OnError(fmt.Errorf("send error: %w", err))
 			}
-
 		case <-ctx.Done():
 			return
 		case <-sl.close:
@@ -177,47 +156,74 @@ func (sl *SLCan) sendManager(ctx context.Context) {
 	}
 }
 
+// handleSend processes a single send operation.
+func (sl *SLCan) handleSend(v gocan.CANFrame, f *bytes.Buffer) error {
+	switch frame := v.(type) {
+	case *gocan.RawCommand:
+		data := append(frame.Data(), '\r')
+		if _, err := sl.port.Write(data); err != nil {
+			sl.cfg.OnError(fmt.Errorf("failed to write to com port: %s, %w", f.String(), err))
+		}
+		if sl.cfg.Debug {
+			log.Println(">> " + frame.String())
+		}
+	default:
+		f.Reset()
+		f.WriteByte('t')
+		idb := make([]byte, 4)
+		binary.BigEndian.PutUint32(idb, frame.Identifier())
+		f.WriteString(hex.EncodeToString(idb)[5:]) // Skip the first byte
+		f.WriteString(strconv.Itoa(frame.Length()))
+		f.WriteString(hex.EncodeToString(frame.Data()))
+		f.WriteByte(0x0D)
+
+		if _, err := sl.port.Write(f.Bytes()); err != nil {
+			sl.cfg.OnError(fmt.Errorf("failed to write to com port: %s, %w", f.String(), err))
+		}
+		if sl.cfg.Debug {
+			log.Println(">> " + f.String())
+		}
+	}
+	return nil
+}
+
 func (sl *SLCan) parse(ctx context.Context, buff *bytes.Buffer, readBuffer []byte) {
 	for _, b := range readBuffer {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
 		if b == 0x0D {
 			if buff.Len() == 0 {
 				continue
 			}
 			by := buff.Bytes()
-			switch by[0] {
-			case 'F':
-				if err := decodeStatus(by); err != nil {
-					sl.cfg.OnError(fmt.Errorf("CAN status error: %w", err))
-				}
-			case 't':
+			if by[0] == 't' {
 				if sl.cfg.Debug {
 					log.Println("<< " + buff.String())
 				}
 				f, err := sl.decodeFrame(by)
 				if err != nil {
-					sl.cfg.OnError(fmt.Errorf("failed to decode frame: %X", buff.Bytes()))
+					sl.cfg.OnError(fmt.Errorf("failed to decode frame: %X", by))
 					continue
 				}
 				select {
 				case sl.recv <- f:
+				case <-ctx.Done():
+					return
 				default:
 					sl.cfg.OnError(ErrDroppedFrame)
 				}
-				buff.Reset()
-			case 0x07: // bell, last command was unknown
-				sl.cfg.OnError(errors.New("unknown command"))
-			default:
+			} else {
 				sl.cfg.OnMessage("Unknown>> " + buff.String())
 			}
 			buff.Reset()
-			continue
+		} else {
+			buff.WriteByte(b)
 		}
-		buff.WriteByte(b)
+
+		// Check for context cancellation at the end of the loop
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
 	}
 }
 
@@ -226,7 +232,14 @@ func (*SLCan) decodeFrame(buff []byte) (gocan.CANFrame, error) {
 	if err != nil {
 		return nil, fmt.Errorf("filed to decode identifier: %v", err)
 	}
-	data, err := hex.DecodeString(string(buff[5:]))
+	dataLen, err := strconv.ParseUint(string(buff[4]), 10, 8)
+	if dataLen > 16 {
+		return nil, fmt.Errorf("invalid data length: %d", dataLen)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("filed to decode data length: %v", err)
+	}
+	data, err := hex.DecodeString(string(buff[5 : 5+(dataLen*2)]))
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode frame body: %v", err)
 	}
