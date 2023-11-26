@@ -23,7 +23,7 @@ type Client struct {
 	defaultTimeout time.Duration
 	canID          uint32
 	recvID         []uint32
-	closed         chan struct{}
+	//closed         chan struct{}
 }
 
 const (
@@ -64,7 +64,7 @@ func NewWithOpts(client *gocan.Client, opts ...GMLanOption) *Client {
 func newDefault(client *gocan.Client) *Client {
 	return &Client{
 		c:              client,
-		defaultTimeout: 150 * time.Millisecond,
+		defaultTimeout: 70 * time.Millisecond,
 	}
 }
 
@@ -193,13 +193,13 @@ func (cl *Client) ReadDataByIdentifierFrame(ctx context.Context, frame gocan.CAN
 	case d[1] == 0x5A: // only one frame in this response
 		length := d[0]
 		return d[3 : 3+(length-2)], nil
-	case d[0] == 0x10 && d[2] == 0x5A: // Multi frame response
+	case d[0] == 0x10 && d[2] == READ_DATA_BY_IDENTIFIER+0x40: // Multi frame response
+		cc := cl.c.Subscribe(ctx, cl.recvID...)
 		left := int(d[1]) - 2
 		out := bytes.NewBuffer(make([]byte, 0, left))
 		rb := min(4, left)
 		out.Write(d[4 : 4+rb])
 		left -= rb
-		cc := cl.c.Subscribe(ctx, cl.recvID...)
 		framesToReceive := math.Ceil(float64(left) / 7)
 		cl.c.SendFrame(cl.canID, []byte{0x30, 0x00, 0x00}, gocan.CANFrameType{Type: 2, Responses: int(framesToReceive)})
 		var seq byte = 0x21
@@ -225,14 +225,14 @@ func (cl *Client) ReadDataByIdentifierFrame(ctx context.Context, frame gocan.CAN
 				}
 				seq++
 				framesToReceive--
-			case <-time.After(1 * time.Second):
+			case <-time.After(70 * time.Millisecond):
 				return nil, errors.New("timeout waiting for response")
 			}
 		}
 		return out.Bytes(), nil
 	default:
-		log.Println(resp.String())
-		return nil, errors.New("unhandled response")
+		log.Println("uk:", resp.String())
+		return nil, errors.New("unhandledx response")
 	}
 }
 
@@ -273,18 +273,67 @@ diagnostic service. The ReadMemoryByAddress service is only available as a one s
 service
 */
 
-func (cl *Client) ReadMemoryByAddress(ctx context.Context, address, length uint32) error {
-	data := []byte{0x07, READ_MEMORY_BY_ADDRESS, byte(address >> 24), byte(address >> 16), byte(address >> 8), byte(address), byte(length >> 8), byte(length)}
+func (cl *Client) ReadMemoryByAddress(ctx context.Context, address, length uint32) ([]byte, error) {
+	log.Printf("ReadMemoryByAddress: address: %X, length: %X", address, length)
+	data := []byte{0x06, READ_MEMORY_BY_ADDRESS, byte(address >> 16), byte(address >> 8), byte(address), byte(length >> 8), byte(length)}
 	frame := gocan.NewFrame(cl.canID, data, gocan.ResponseRequired)
+	//	log.Println(frame.String())
 	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	log.Println(resp.String())
 	if err := CheckErr(resp); err != nil {
-		return err
+		return nil, err
 	}
-	return nil
+	d := resp.Data()
+	switch {
+	//case d[0] == 0x02 && d[1] == 0x1A && d[2] == frame.Data()[2]:
+	//	return nil, fmt.Errorf("ReadDataByIdentifier: no more data")
+	case d[1] == READ_MEMORY_BY_ADDRESS+0x40: // only one frame in this response
+		length := d[0]
+		return d[3 : 3+(length-2)], nil
+	case d[0] == 0x10 && d[2] == READ_MEMORY_BY_ADDRESS+0x40: // Multi frame response
+		left := int(d[1]) - 4
+		out := bytes.NewBuffer(make([]byte, 0, left))
+		rb := min(2, left)
+		out.Write(d[6 : 6+rb])
+		left -= rb
+		cc := cl.c.Subscribe(ctx, cl.recvID...)
+		framesToReceive := math.Ceil(float64(left) / 7)
+		cl.c.SendFrame(cl.canID, []byte{0x30, 0x00, 0x00}, gocan.CANFrameType{Type: 2, Responses: int(framesToReceive)})
+		var seq byte = 0x21
+		for framesToReceive > 0 {
+			select {
+			case response := <-cc:
+				frameData := response.Data()
+				if frameData[0]&0x20 != 0x20 {
+					if err := CheckErr(response); err != nil {
+						log.Println(response.String())
+						return nil, err
+					}
+				}
+				if frameData[0] != seq {
+					log.Println(response.String())
+					return nil, fmt.Errorf("frame sequence out of order, expected 0x%X got 0x%X", seq, frameData[0])
+				}
+				rb = min(7, left)
+				out.Write(frameData[1 : 1+rb])
+				left -= rb
+				if seq == 0x2F {
+					seq = 0x1F //was 19?
+				}
+				seq++
+				framesToReceive--
+			case <-time.After(70 * time.Millisecond):
+				return nil, errors.New("timeout waiting for response")
+			}
+		}
+		return out.Bytes(), nil
+	default:
+		log.Println(resp.String())
+		return nil, errors.New("unhandled response")
+	}
 }
 
 //func (cl *Client) sendAndReceive(ctx context.Context, payload []byte) (gocan.CANFrame, error) {
@@ -574,7 +623,7 @@ func (cl *Client) writeDataByIdentifierMultiframe(ctx context.Context, pid byte,
 	}
 
 	if d[0] != 0x30 || d[1] > 0x01 {
-		log.Printf(resp.String())
+		log.Println(resp.String())
 		return errors.New("invalid response to initial writeDataByIdentifier")
 	}
 
