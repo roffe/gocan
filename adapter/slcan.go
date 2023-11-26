@@ -200,7 +200,8 @@ func (sl *SLCan) parse(ctx context.Context, buff *bytes.Buffer, readBuffer []byt
 				}
 				f, err := sl.decodeFrame(by)
 				if err != nil {
-					sl.cfg.OnError(fmt.Errorf("failed to decode frame: %X", by))
+					sl.cfg.OnError(fmt.Errorf("%w: %X", err, by))
+					buff.Reset()
 					continue
 				}
 				select {
@@ -230,14 +231,14 @@ func (sl *SLCan) parse(ctx context.Context, buff *bytes.Buffer, readBuffer []byt
 func (*SLCan) decodeFrame(buff []byte) (gocan.CANFrame, error) {
 	id, err := strconv.ParseUint(string(buff[1:4]), 16, 32)
 	if err != nil {
-		return nil, fmt.Errorf("filed to decode identifier: %v", err)
+		return nil, fmt.Errorf("failed to decode identifier: %v", err)
 	}
-	dataLen, err := strconv.ParseUint(string(buff[4]), 10, 8)
+	dataLen, err := strconv.ParseUint(string(buff[4]), 16, 8)
 	if dataLen > 16 {
 		return nil, fmt.Errorf("invalid data length: %d", dataLen)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("filed to decode data length: %v", err)
+		return nil, fmt.Errorf("failed to decode data length: %v", err)
 	}
 	data, err := hex.DecodeString(string(buff[5 : 5+(dataLen*2)]))
 	if err != nil {
