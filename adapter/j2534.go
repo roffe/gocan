@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"log"
 	"runtime"
 	"strings"
 	"sync"
@@ -56,8 +57,8 @@ func NewJ2534(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 		send:      make(chan gocan.CANFrame, 10),
 		recv:      make(chan gocan.CANFrame, 20),
 		close:     make(chan struct{}, 2),
-		channelID: 1,
-		deviceID:  1,
+		channelID: 0,
+		deviceID:  0,
 	}
 	return ma, nil
 }
@@ -82,6 +83,7 @@ func (ma *J2534) Name() string {
 }
 
 func (ma *J2534) Init(ctx context.Context) error {
+	runtime.LockOSThread()
 	var err error
 	ma.h, err = passthru.New(ma.cfg.Port)
 	if err != nil {
@@ -138,6 +140,10 @@ func (ma *J2534) Init(ctx context.Context) error {
 		return fmt.Errorf("PassThruConnect: %w", err)
 	}
 
+	if ma.tech2passThru {
+		time.Sleep(2 * time.Second)
+	}
+
 	if swcan {
 		opts := &passthru.SCONFIG_LIST{
 			NumOfParams: 1,
@@ -149,11 +155,19 @@ func (ma *J2534) Init(ctx context.Context) error {
 			},
 		}
 		if err := ma.h.PassThruIoctl(ma.channelID, passthru.SET_CONFIG, opts, nil); err != nil {
+			st, errz := ma.h.PassThruGetLastError()
+			if errz != nil {
+				log.Println(errz)
+			}
+			if st != "" {
+				log.Println(st)
+			}
 			if errg := ma.h.Close(); errg != nil {
 				ma.cfg.OnError(errg)
 			}
 			return fmt.Errorf("PassThruIoctl set SWCAN: %w", err)
 		}
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	if err := ma.h.PassThruIoctl(ma.channelID, passthru.CLEAR_RX_BUFFER, nil, nil); err != nil {
@@ -255,7 +269,7 @@ func (ma *J2534) recvManager() {
 
 			case ma.recv <- gocan.NewFrame(
 				binary.BigEndian.Uint32(msg.Data[0:4]),
-				msg.Data[4:msg.DataSize],
+				msg.Data[4:4+msg.DataSize],
 				gocan.Incoming,
 			):
 			default:
@@ -273,8 +287,9 @@ func (ma *J2534) readMsg() (*passthru.PassThruMsg, error) {
 	msg := &passthru.PassThruMsg{
 		ProtocolID: ma.protocol,
 	}
-	numMsgs := uint32(1)
-	if err := ma.h.PassThruReadMsgs(ma.channelID, msg, &numMsgs, 10); err != nil {
+	_, err := ma.h.PassThruReadMsg(ma.channelID, msg, 10)
+
+	if err != nil {
 		if errors.Is(err, passthru.ErrBufferEmpty) {
 			return nil, nil
 		}

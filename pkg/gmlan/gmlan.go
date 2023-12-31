@@ -193,7 +193,7 @@ func (cl *Client) ReadDataByIdentifierFrame(ctx context.Context, frame gocan.CAN
 	case d[1] == 0x5A: // only one frame in this response
 		length := d[0]
 		return d[3 : 3+(length-2)], nil
-	case d[0] == 0x10 && d[2] == READ_DATA_BY_IDENTIFIER+0x40: // Multi frame response
+	case d[0] == 0x10 /* && d[2] == READ_DATA_BY_IDENTIFIER+0x40: // Multi frame response */ :
 		cc := cl.c.Subscribe(ctx, cl.recvID...)
 		left := int(d[1]) - 2
 		out := bytes.NewBuffer(make([]byte, 0, left))
@@ -230,6 +230,10 @@ func (cl *Client) ReadDataByIdentifierFrame(ctx context.Context, frame gocan.CAN
 			}
 		}
 		return out.Bytes(), nil
+	case bytes.Contains(d, []byte{0x02, 0x1A, 0x18}):
+		log.Println("retry")
+		// return cl.ReadDataByIdentifierFrame(ctx, frame)
+		fallthrough
 	default:
 		log.Println("uk:", resp.String())
 		return nil, errors.New("unhandledx response")
@@ -282,7 +286,6 @@ func (cl *Client) ReadMemoryByAddress(ctx context.Context, address, length uint3
 	if err != nil {
 		return nil, err
 	}
-	log.Println(resp.String())
 	if err := CheckErr(resp); err != nil {
 		return nil, err
 	}
@@ -415,7 +418,7 @@ func (cl *Client) RequestSecurityAccess(ctx context.Context, accesslevel byte, d
 	if err := cl.SecurityAccessSendKey(ctx, accesslevel, high, low); err != nil {
 		return err
 	}
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(45 * time.Millisecond)
 	return nil
 }
 
