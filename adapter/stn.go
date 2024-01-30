@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -163,16 +164,17 @@ func (stn *STN) Init(ctx context.Context) error {
 
 	var initCmds = []string{
 		"ATE0",       // turn off echo
-		"ATS0",       // turn of spaces
+		"ATS0",       // turn off spaces
 		stn.protocol, // Set canbus protocol
 		"ATH1",       // Headers on
-		"ATAT2",      // Set adaptive timing mode, Adaptive timing on, aggressive mode. This option may increase throughput on slower connections, at the expense of slightly increasing the risk of missing frames.
+		"ATAT0",      // Set adaptive timing mode off
 		"ATCAF0",     // Automatic formatting off
 		stn.canrate,  // Set CANrate
 		"ATAL",       // Allow long messages
 		"ATCFC0",     //Turn automatic CAN flow control off
 		//"ATAR",      // Automatically set the receive address.
 		//"ATCSM1",  //Turn CAN silent monitoring off
+		"ATST32",   // Set timeout to 200msec
 		stn.mask,   // mask
 		stn.filter, // code
 	}
@@ -336,11 +338,14 @@ func (stn *STN) sendManager(ctx context.Context) {
 					"d:" + hex.EncodeToString(v.Data()),
 				)
 				// write timeout
-				if timeout > 300 {
+				if timeout != 0 && timeout != 200 {
+					log.Println(timeout)
 					f.WriteString(",t:" + strconv.Itoa(int(timeout)))
 				}
 				// write reply
-				f.WriteString(",r:" + strconv.Itoa(t.GetResponseCount()) + "\r")
+				if t.GetResponseCount() > 0 {
+					f.WriteString(",r:" + strconv.Itoa(t.GetResponseCount()) + "\r")
+				}
 
 			}
 			stn.semChan <- token{}
@@ -361,7 +366,7 @@ func (stn *STN) sendManager(ctx context.Context) {
 
 func (stn *STN) recvManager(ctx context.Context) {
 	buff := bytes.NewBuffer(nil)
-	readBuffer := make([]byte, 21)
+	readBuffer := make([]byte, 16)
 	for {
 		select {
 		case <-ctx.Done():
