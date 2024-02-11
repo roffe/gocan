@@ -202,6 +202,7 @@ func (cl *Client) ReadDataByIdentifierFrame(ctx context.Context, frame gocan.CAN
 		//		log.Println(left)
 		framesToReceive := math.Ceil(float64(left) / 7)
 		cc := cl.c.Subscribe(ctx, cl.recvID...)
+		defer cc.Close()
 		frame := gocan.NewFrame(cl.canID, []byte{0x30, 0x00, 0x00}, gocan.CANFrameType{Type: 2, Responses: int(framesToReceive)})
 		if err := cl.c.Send(frame); err != nil {
 			return nil, err
@@ -209,7 +210,7 @@ func (cl *Client) ReadDataByIdentifierFrame(ctx context.Context, frame gocan.CAN
 		var seq byte = 0x21
 		for framesToReceive > 0 {
 			select {
-			case response := <-cc:
+			case response := <-cc.C():
 				frameData := response.Data()
 				if frameData[0]&0x20 != 0x20 {
 					if err := CheckErr(response); err != nil {
@@ -235,6 +236,10 @@ func (cl *Client) ReadDataByIdentifierFrame(ctx context.Context, frame gocan.CAN
 		}
 		return out.Bytes(), nil
 	case bytes.HasPrefix(d, []byte{0x02, 0x1A, 0x18, 0x00}):
+		log.Println("retrying1")
+		return nil, ErrRetry
+	case bytes.Equal(d, []byte{0x01, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}):
+		log.Println("retrying2")
 		return nil, ErrRetry
 	default:
 		log.Println(resp.String())
@@ -307,12 +312,13 @@ func (cl *Client) ReadMemoryByAddress(ctx context.Context, address, length uint3
 		out.Write(d[6 : 6+rb])
 		left -= rb
 		cc := cl.c.Subscribe(ctx, cl.recvID...)
+		defer cc.Close()
 		framesToReceive := math.Ceil(float64(left) / 7)
-		cl.c.SendFrame(cl.canID, []byte{0x30, 0x00, 0x00}, gocan.CANFrameType{Type: 2, Responses: int(framesToReceive)})
+		cl.c.SendFrame(cl.canID, []byte{0x30, 0x00}, gocan.CANFrameType{Type: 2, Responses: int(framesToReceive)})
 		var seq byte = 0x21
 		for framesToReceive > 0 {
 			select {
-			case response := <-cc:
+			case response := <-cc.C():
 				frameData := response.Data()
 				if frameData[0]&0x20 != 0x20 {
 					if err := CheckErr(response); err != nil {
@@ -862,10 +868,11 @@ func (cl *Client) readDiagnosticInformation(ctx context.Context, subFunc byte, p
 	if err := CheckErr(resp); err != nil {
 		if strings.Contains(err.Error(), "Response pending") {
 			ch := cl.c.Subscribe(ctx, cl.recvID...)
+			defer ch.Close()
 		outer:
 			for {
 				select {
-				case resp := <-ch:
+				case resp := <-ch.C():
 					d := resp.Data()
 					if d[1] == 0x00 && d[2] == 0x00 && d[3] == 0x00 { // No more DTCs
 						break outer

@@ -287,7 +287,7 @@ func (ma *J2534) readMsg() (*passthru.PassThruMsg, error) {
 	msg := &passthru.PassThruMsg{
 		ProtocolID: ma.protocol,
 	}
-	_, err := ma.h.PassThruReadMsg(ma.channelID, msg, 10)
+	_, err := ma.h.PassThruReadMsg(ma.channelID, msg, 4)
 
 	if err != nil {
 		if errors.Is(err, passthru.ErrBufferEmpty) {
@@ -332,7 +332,7 @@ func (ma *J2534) sendMsg(msg *passthru.PassThruMsg) error {
 		defer ma.Unlock()
 	}
 	numMsg := uint32(1)
-	if err := ma.h.PassThruWriteMsgs(ma.channelID, msg, &numMsg, 100); err != nil {
+	if err := ma.h.PassThruWriteMsgs(ma.channelID, msg, &numMsg, 25); err != nil {
 		if errStr, err2 := ma.h.PassThruGetLastError(); err2 == nil {
 			return fmt.Errorf("%w: %s", err, errStr)
 		}

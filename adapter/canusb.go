@@ -279,6 +279,9 @@ func (cu *Canusb) parse(ctx context.Context, buff *bytes.Buffer, readBuffer []by
 				continue
 			}
 			by := buff.Bytes()
+			if cu.cfg.Debug {
+				fmt.Fprint(os.Stderr, "<< "+buff.String()+"\n")
+			}
 			switch by[0] {
 			case 'F':
 				if err := decodeStatus(by); err != nil {

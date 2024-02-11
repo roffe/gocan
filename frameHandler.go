@@ -8,16 +8,18 @@ import (
 )
 
 type Sub struct {
+	c           *Client
 	errcount    uint16
 	identifiers []uint32
 	callback    chan CANFrame
 }
 
-func newSub(bufferSize int, identifiers ...uint32) *Sub {
-	return &Sub{
-		identifiers: identifiers,
-		callback:    make(chan CANFrame, bufferSize),
-	}
+func (s *Sub) Close() {
+	s.c.fh.unregister <- s
+}
+
+func (s *Sub) C() chan CANFrame {
+	return s.callback
 }
 
 func (s *Sub) Wait(ctx context.Context, timeout time.Duration) (CANFrame, error) {
@@ -122,7 +124,7 @@ func (h *FrameHandler) deliver(sub *Sub, frame CANFrame) {
 	default:
 		sub.errcount++
 	}
-	if sub.errcount > 100 {
+	if sub.errcount > 20 {
 		delete(h.subs, sub)
 	}
 }
