@@ -287,11 +287,11 @@ service
 */
 
 func (cl *Client) ReadMemoryByAddress(ctx context.Context, address, length uint32) ([]byte, error) {
-	log.Printf("ReadMemoryByAddress: address: %X, length: %X", address, length)
+	//log.Printf("ReadMemoryByAddress: address: %X, length: %X", address, length)
 	data := []byte{0x06, READ_MEMORY_BY_ADDRESS, byte(address >> 16), byte(address >> 8), byte(address), byte(length >> 8), byte(length)}
 	frame := gocan.NewFrame(cl.canID, data, gocan.ResponseRequired)
 	//	log.Println(frame.String())
-	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
+	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout*2, cl.recvID...)
 	if err != nil {
 		return nil, err
 	}
@@ -303,18 +303,19 @@ func (cl *Client) ReadMemoryByAddress(ctx context.Context, address, length uint3
 	//case d[0] == 0x02 && d[1] == 0x1A && d[2] == frame.Data()[2]:
 	//	return nil, fmt.Errorf("ReadDataByIdentifier: no more data")
 	case d[1] == READ_MEMORY_BY_ADDRESS+0x40: // only one frame in this response
-		length := d[0]
-		return d[3 : 3+(length-2)], nil
+		return d[5 : 5+length], nil
 	case d[0] == 0x10 && d[2] == READ_MEMORY_BY_ADDRESS+0x40: // Multi frame response
 		left := int(d[1]) - 4
 		out := bytes.NewBuffer(make([]byte, 0, left))
 		rb := min(2, left)
 		out.Write(d[6 : 6+rb])
 		left -= rb
-		cc := cl.c.Subscribe(ctx, cl.recvID...)
-		defer cc.Close()
+
 		framesToReceive := math.Ceil(float64(left) / 7)
 		cl.c.SendFrame(cl.canID, []byte{0x30, 0x00}, gocan.CANFrameType{Type: 2, Responses: int(framesToReceive)})
+
+		cc := cl.c.Subscribe(ctx, cl.recvID...)
+		defer cc.Close()
 		var seq byte = 0x21
 		for framesToReceive > 0 {
 			select {
@@ -338,7 +339,7 @@ func (cl *Client) ReadMemoryByAddress(ctx context.Context, address, length uint3
 				}
 				seq++
 				framesToReceive--
-			case <-time.After(70 * time.Millisecond):
+			case <-time.After(140 * time.Millisecond):
 				return nil, errors.New("timeout waiting for response")
 			}
 		}
@@ -585,7 +586,7 @@ func (cl *Client) WriteDataByIdentifierUint32(ctx context.Context, pid byte, val
 }
 
 func (cl *Client) WriteDataByIdentifier(ctx context.Context, pid byte, data []byte) error {
-	if len(data) > 5 {
+	if len(data) > 6 {
 		return cl.writeDataByIdentifierMultiframe(ctx, pid, data)
 	}
 
@@ -608,7 +609,110 @@ func (cl *Client) WriteDataByIdentifier(ctx context.Context, pid byte, data []by
 	return nil
 }
 
-func (cl *Client) writeDataByIdentifierMultiframe(ctx context.Context, pid byte, data []byte, asd ...byte) error {
+//func (cl *Client) WriteDataByAddress(ctx context.Context, address uint32, data []byte) error {
+// 	payload := []byte{0x10, WRITE_DATA_BY_IDENTIFIER, 0x15, byte(address >> 16), byte(address >> 8), byte(address)}
+// 	frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
+// 	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	log.Println(resp.String())
+// 	return nil
+// }
+
+// $15 - WDBA - Write Data By Address
+// This service is used to write data to a memory location in the ECU. All memory locations start with $15 so this is just a apptool call path inside the WriteDataBIdentifier
+// func (cl *Client) WriteDataByAddress22(ctx context.Context, address uint32, data []byte) error {
+// 	if len(data) > 2 {
+// 		return cl.writeDataByAddressMultiframe(ctx, 0x15, data)
+// 	}
+
+// 	payload := []byte{byte(len(data) + 2), WRITE_DATA_BY_IDENTIFIER, 0x15, byte(address >> 16), byte(address >> 8), byte(address)}
+// 	payload = append(payload, data...)
+// 	//for i := len(payload); i < 8; i++ {
+// 	//	payload = append(payload, 0x00)
+// 	//}
+// 	frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
+// 	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
+// 	if err != nil {
+// 		return fmt.Errorf("WriteDataByIdentifier: %w", err)
+// 	}
+// 	if err := CheckErr(resp); err != nil {
+// 		//		log.Println(frame.String())
+// 		//		log.Println(resp.String())
+// 		return err
+// 	}
+
+// 	return nil
+// }
+
+func (cl *Client) WriteDataByAddress(ctx context.Context, address uint32, data []byte) error {
+	leng := byte(len(data)) + 6
+	payload := []byte{0x10, leng, WRITE_DATA_BY_IDENTIFIER, 0x15, byte(address >> 16), byte(address >> 8), byte(address), byte(len(data))}
+	frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
+	//	log.Println(frame.String())
+	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
+	if err != nil {
+		return err
+	}
+	//log.Println(resp.String())
+	d := resp.Data()
+
+	if err := CheckErr(resp); err != nil {
+		return err
+	}
+
+	if d[0] != 0x30 || d[1] > 0x01 {
+		log.Println(resp.String())
+		return errors.New("invalid response to initial writeDataByIdentifier")
+	}
+
+	delay := d[2]
+
+	r := bytes.NewReader(data)
+	var seq byte = 0x21
+	for r.Len() > 0 {
+		pkg := []byte{seq}
+	inner:
+		for i := 1; i < 8; i++ {
+			b, err := r.ReadByte()
+			if err != nil {
+				if err == io.EOF {
+					//pkg = append(pkg, 0x00)
+					break inner
+				}
+				return err
+			}
+			pkg = append(pkg, b)
+		}
+
+		if r.Len() > 0 {
+			frame := gocan.NewFrame(cl.canID, pkg, gocan.Outgoing)
+			//log.Println(frame.String())
+			cl.c.Send(frame)
+			time.Sleep(time.Duration(delay) * time.Millisecond)
+		} else {
+			frame := gocan.NewFrame(cl.canID, pkg, gocan.ResponseRequired)
+			// log.Println(frame.String())
+			resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
+			if err != nil {
+				return err
+			}
+			// log.Println(resp.String())
+			if err := CheckErr(resp); err != nil {
+				return err
+			}
+		}
+
+		seq++
+		if seq == 0x30 {
+			seq = 0x20
+		}
+	}
+	return nil
+}
+
+func (cl *Client) writeDataByIdentifierMultiframe(ctx context.Context, pid byte, data []byte) error {
 	r := bytes.NewReader(data)
 	firstPart := make([]byte, 4)
 	_, err := r.Read(firstPart)
@@ -619,9 +723,8 @@ func (cl *Client) writeDataByIdentifierMultiframe(ctx context.Context, pid byte,
 			return err
 		}
 	}
-	leng := byte(len(data)) + 2 + byte(len(asd))
-	payload := append([]byte{0x10, leng, WRITE_DATA_BY_IDENTIFIER, pid}, asd...)
-	payload = append(payload, firstPart...)
+	leng := byte(len(data)) + 2
+	payload := append([]byte{0x10, leng, WRITE_DATA_BY_IDENTIFIER, pid}, firstPart...)
 	frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
 	//	log.Println(frame.String())
 	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
@@ -681,19 +784,6 @@ func (cl *Client) writeDataByIdentifierMultiframe(ctx context.Context, pid byte,
 			seq = 0x20
 		}
 	}
-	return nil
-}
-
-// $15 - WDBA - Write Data By Address
-// This service is used to write data to a memory location in the ECU. All memory locations start with $15 so this is just a apptool call path inside the WriteDataBIdentifier
-func (cl *Client) WriteDataByAddress(ctx context.Context, address uint32, data []byte) error {
-	payload := []byte{0x10, WRITE_DATA_BY_IDENTIFIER, 0x15, byte(address >> 16), byte(address >> 8), byte(address)}
-	frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
-	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
-	if err != nil {
-		return err
-	}
-	log.Println(resp.String())
 	return nil
 }
 
