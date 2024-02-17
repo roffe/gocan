@@ -346,9 +346,9 @@ func (stn *STN) sendManager(ctx context.Context) {
 				// write reply
 				if t.GetResponseCount() > 0 {
 					f.WriteString(",r:" + strconv.Itoa(t.GetResponseCount()))
-					stn.semChan <- token{}
 				}
 				f.WriteString("\r")
+				stn.semChan <- token{}
 			}
 			if stn.cfg.Debug {
 				stn.cfg.OnMessage("<o> " + f.String())
