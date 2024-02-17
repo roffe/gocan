@@ -175,6 +175,7 @@ func (stn *STN) Init(ctx context.Context) error {
 		//"ATAR",      // Automatically set the receive address.
 		//"ATCSM1",  //Turn CAN silent monitoring off
 		"ATST32",   // Set timeout to 200msec
+		"ATR0",     // Turn off replies
 		stn.mask,   // mask
 		stn.filter, // code
 	}
@@ -344,11 +345,11 @@ func (stn *STN) sendManager(ctx context.Context) {
 				}
 				// write reply
 				if t.GetResponseCount() > 0 {
-					f.WriteString(",r:" + strconv.Itoa(t.GetResponseCount()) + "\r")
+					f.WriteString(",r:" + strconv.Itoa(t.GetResponseCount()))
+					stn.semChan <- token{}
 				}
-
+				f.WriteString("\r")
 			}
-			stn.semChan <- token{}
 			if stn.cfg.Debug {
 				stn.cfg.OnMessage("<o> " + f.String())
 			}
