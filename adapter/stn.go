@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -340,7 +339,6 @@ func (stn *STN) sendManager(ctx context.Context) {
 				)
 				// write timeout
 				if timeout != 0 && timeout != 200 {
-					log.Println(timeout)
 					f.WriteString(",t:" + strconv.Itoa(int(timeout)))
 				}
 				// write reply
