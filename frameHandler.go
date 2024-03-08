@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 )
 
 type Sub struct {
+	ctx         context.Context
 	c           *Client
 	errcount    uint16
 	identifiers []uint32
@@ -46,6 +48,7 @@ type FrameHandler struct {
 	onIncoming func(CANFrame)
 	onOutgoing func(CANFrame)
 	close      chan struct{}
+	closeOnce  sync.Once
 }
 
 func newFrameHandler(incoming <-chan CANFrame) *FrameHandler {
@@ -53,7 +56,7 @@ func newFrameHandler(incoming <-chan CANFrame) *FrameHandler {
 		subs:       make(map[*Sub]bool),
 		register:   make(chan *Sub, 10),
 		unregister: make(chan *Sub, 10),
-		close:      make(chan struct{}, 1),
+		close:      make(chan struct{}),
 		incoming:   incoming,
 	}
 	return f
@@ -88,7 +91,9 @@ func (h *FrameHandler) run(ctx context.Context) {
 }
 
 func (h *FrameHandler) Close() {
-	h.close <- struct{}{}
+	h.closeOnce.Do(func() {
+		close(h.close)
+	})
 }
 
 func (h *FrameHandler) sub(sub *Sub) {
@@ -98,14 +103,20 @@ func (h *FrameHandler) sub(sub *Sub) {
 func (h *FrameHandler) fanout(frame CANFrame) {
 outer:
 	for sub := range h.subs {
-		if len(sub.identifiers) == 0 {
-			h.deliver(sub, frame)
+		select {
+		case <-sub.ctx.Done():
+			h.unsub(sub)
 			continue
-		}
-		for _, id := range sub.identifiers {
-			if id == frame.Identifier() {
+		default:
+			if len(sub.identifiers) == 0 {
 				h.deliver(sub, frame)
-				continue outer
+				continue
+			}
+			for _, id := range sub.identifiers {
+				if id == frame.Identifier() {
+					h.deliver(sub, frame)
+					continue outer
+				}
 			}
 		}
 	}

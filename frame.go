@@ -2,7 +2,6 @@ package gocan
 
 import (
 	"fmt"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -54,11 +53,11 @@ type Frame struct {
 }
 
 func NewFrame(identifier uint32, data []byte, frameType CANFrameType) *Frame {
-	db := make([]byte, len(data))
-	copy(db, data)
+	//db := make([]byte, len(data))
+	//copy(db, data)
 	return &Frame{
 		identifier: identifier,
-		data:       db,
+		data:       data,
 		frameType:  frameType,
 	}
 }
@@ -92,10 +91,10 @@ func (f *Frame) Timeout() time.Duration {
 }
 
 var (
-	yellow    = color.New(color.FgHiBlue).SprintfFunc()
-	red       = color.New(color.FgRed).SprintfFunc()
-	green     = color.New(color.FgGreen).SprintfFunc()
-	printable = regexp.MustCompile("[^A-Za-z0-9.,!?]+")
+	yellow = color.New(color.FgHiBlue).SprintfFunc()
+	red    = color.New(color.FgRed).SprintfFunc()
+	green  = color.New(color.FgGreen).SprintfFunc()
+	//printable = regexp.MustCompile("[^A-Za-z0-9.,!?]+")
 )
 
 func (f *Frame) String() string {

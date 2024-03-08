@@ -107,7 +107,7 @@ func (c *Client) SendFrame(identifier uint32, data []byte, f CANFrameType) error
 // Send and wait up to <timeout> for a answer on given identifiers
 func (c *Client) SendAndPoll(ctx context.Context, frame CANFrame, timeout time.Duration, identifiers ...uint32) (CANFrame, error) {
 	frame.SetTimeout(timeout)
-	p := c.newSub(1, identifiers...)
+	p := c.newSub(ctx, 1, identifiers...)
 	c.fh.register <- p
 	defer func() {
 		c.fh.unregister <- p
@@ -120,7 +120,7 @@ func (c *Client) SendAndPoll(ctx context.Context, frame CANFrame, timeout time.D
 
 // Poll for a certain CAN identifier for up to <timeout>
 func (c *Client) Poll(ctx context.Context, timeout time.Duration, identifiers ...uint32) (CANFrame, error) {
-	p := c.newSub(1, identifiers...)
+	p := c.newSub(ctx, 1, identifiers...)
 	c.fh.register <- p
 	defer func() {
 		c.fh.unregister <- p
@@ -130,20 +130,21 @@ func (c *Client) Poll(ctx context.Context, timeout time.Duration, identifiers ..
 
 // Subscribe to CAN identifiers and return a message channel
 func (c *Client) Subscribe2(ctx context.Context, identifiers ...uint32) chan CANFrame {
-	p := c.newSub(10, identifiers...)
+	p := c.newSub(ctx, 10, identifiers...)
 	c.fh.register <- p
 	return p.callback
 }
 
 // Subscribe to CAN identifiers and return a message channel
 func (c *Client) Subscribe(ctx context.Context, identifiers ...uint32) *Sub {
-	p := c.newSub(10, identifiers...)
+	p := c.newSub(ctx, 10, identifiers...)
 	c.fh.register <- p
 	return p
 }
 
-func (c *Client) newSub(bufferSize int, identifiers ...uint32) *Sub {
+func (c *Client) newSub(ctx context.Context, bufferSize int, identifiers ...uint32) *Sub {
 	return &Sub{
+		ctx:         ctx,
 		c:           c,
 		identifiers: identifiers,
 		callback:    make(chan CANFrame, bufferSize),
