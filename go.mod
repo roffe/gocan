@@ -18,15 +18,21 @@ require (
 )
 
 require (
+	github.com/go-ole/go-ole v1.2.6 // indirect
+	github.com/godbus/dbus/v5 v5.1.0 // indirect
 	github.com/golang/mock v1.6.0 // indirect
 	github.com/google/go-cmp v0.5.9 // indirect
 	github.com/josharian/native v1.0.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mdlayher/netlink v1.7.1 // indirect
 	github.com/mdlayher/socket v0.4.0 // indirect
+	github.com/saltosystems/winrt-go v0.0.0-20240110120258-ad49e9790c38 // indirect
+	github.com/sirupsen/logrus v1.9.3 // indirect
+	github.com/tinygo-org/cbgo v0.0.4 // indirect
 	golang.org/x/mod v0.8.0 // indirect
 	golang.org/x/net v0.7.0 // indirect
 	golang.org/x/tools v0.6.0 // indirect
+	tinygo.org/x/bluetooth v0.8.1-0.20240221113924-0087e0549b0b
 )
 
 require (

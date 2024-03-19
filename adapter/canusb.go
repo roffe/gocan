@@ -42,7 +42,7 @@ type Canusb struct {
 	send, recv   chan gocan.CANFrame
 	close        chan struct{}
 
-	//sendMutex chan token
+	buff      *bytes.Buffer
 	closeOnce sync.Once
 	mu        sync.Mutex
 }
@@ -53,6 +53,7 @@ func NewCanusb(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 		send:  make(chan gocan.CANFrame, 10),
 		recv:  make(chan gocan.CANFrame, 30),
 		close: make(chan struct{}, 1),
+		buff:  bytes.NewBuffer(nil),
 		//sendMutex: make(chan token, 1),
 	}
 	if err := cu.setCANrate(cfg.CANRate); err != nil {
@@ -86,7 +87,7 @@ func (cu *Canusb) Init(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to open com port %q : %v", cu.cfg.Port, err)
 	}
-	p.SetReadTimeout(2 * time.Millisecond)
+	p.SetReadTimeout(4 * time.Millisecond)
 	cu.port = p
 
 	var cmds = []string{
@@ -214,19 +215,16 @@ func (*Canusb) calcAcceptanceFilters(idList []uint32) (string, string) {
 }
 
 func (cu *Canusb) sendManager(ctx context.Context) {
-	t := time.NewTicker(600 * time.Millisecond)
+	t := time.NewTicker(800 * time.Millisecond)
 	f := bytes.NewBuffer(nil)
 	for {
 		select {
 		case <-t.C:
-			// cu.sendMutex <- token{}
 			cu.mu.Lock()
 			cu.port.Write([]byte{'F', '\r'})
-
 		case v := <-cu.send:
 			switch v.(type) {
 			case *gocan.RawCommand:
-				//cu.sendMutex <- token{}
 				cu.mu.Lock()
 				if _, err := cu.port.Write(append(v.Data(), '\r')); err != nil {
 					cu.cfg.OnError(fmt.Errorf("failed to write to com port: %s, %w", f.String(), err))
@@ -235,7 +233,6 @@ func (cu *Canusb) sendManager(ctx context.Context) {
 					fmt.Fprint(os.Stderr, ">> "+v.String()+"\n")
 				}
 			default:
-				//cu.sendMutex <- token{}
 				f.Reset()
 				cu.mu.Lock()
 				idb := make([]byte, 4)
@@ -247,7 +244,7 @@ func (cu *Canusb) sendManager(ctx context.Context) {
 					cu.cfg.OnError(fmt.Errorf("failed to write to com port: %s, %w", f.String(), err))
 				}
 				if cu.cfg.Debug {
-					fmt.Fprint(os.Stderr, ">> "+f.String()+"\n")
+					cu.cfg.OnMessage(">> " + f.String())
 				}
 			}
 
@@ -260,8 +257,7 @@ func (cu *Canusb) sendManager(ctx context.Context) {
 }
 
 func (cu *Canusb) recvManager(ctx context.Context) {
-	buff := bytes.NewBuffer(nil)
-	readBuffer := make([]byte, 16)
+	readBuffer := make([]byte, 20)
 	for {
 		select {
 		case <-ctx.Done():
@@ -285,33 +281,29 @@ func (cu *Canusb) recvManager(ctx context.Context) {
 			if n == 0 {
 				continue
 			}
-			cu.parse(ctx, buff, readBuffer[:n])
+			cu.parse(readBuffer[:n])
 		}
 
 	}
 }
 
-func (cu *Canusb) parse(ctx context.Context, buff *bytes.Buffer, readBuffer []byte) {
-	for _, b := range readBuffer {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-		if b != 0x0D {
-			buff.WriteByte(b)
+func (cu *Canusb) parse(data []byte) {
+	for _, b := range data {
+		if b == 0x07 { // BELL
+			cu.cfg.OnMessage("command error")
+			cu.mu.Unlock()
 			continue
 		}
-		//select {
-		//case <-cu.sendMutex:
-		//default:
-		//}
-		if buff.Len() == 0 {
+		if b != 0x0D { // CR
+			cu.buff.WriteByte(b)
 			continue
 		}
-		by := buff.Bytes()
+		if cu.buff.Len() == 0 {
+			continue
+		}
+		by := cu.buff.Bytes()
 		if cu.cfg.Debug {
-			fmt.Fprint(os.Stderr, "<< "+buff.String()+"\n")
+			cu.cfg.OnMessage("<< " + cu.buff.String())
 		}
 		switch by[0] {
 		case 'F':
@@ -320,12 +312,10 @@ func (cu *Canusb) parse(ctx context.Context, buff *bytes.Buffer, readBuffer []by
 			}
 			cu.mu.Unlock()
 		case 't':
-			//if cu.cfg.Debug {
-			//	fmt.Fprint(os.Stderr, "<< "+buff.String()+"\n")
-			//}
 			f, err := cu.decodeFrame(by)
 			if err != nil {
-				cu.cfg.OnError(fmt.Errorf("failed to decode frame: %X", buff.Bytes()))
+				cu.cfg.OnError(fmt.Errorf("failed to decode frame: %v", err))
+				cu.buff.Reset()
 				continue
 			}
 			select {
@@ -333,33 +323,29 @@ func (cu *Canusb) parse(ctx context.Context, buff *bytes.Buffer, readBuffer []by
 			default:
 				cu.cfg.OnError(ErrDroppedFrame)
 			}
-			buff.Reset()
+			cu.buff.Reset()
 		case 'z': // last command ok
-			//select {
-			//case <-cu.sendMutex:
-			//default:
-			//}
 			cu.mu.Unlock()
-		case 0x07: // bell, last command was error
 		case 'V':
 			if cu.cfg.PrintVersion {
-				cu.cfg.OnMessage("H/W version " + buff.String())
+				cu.cfg.OnMessage("H/W version " + cu.buff.String())
 			}
-			//			cu.mu.Unlock()
 		case 'N':
 			if cu.cfg.PrintVersion {
-				cu.cfg.OnMessage("H/W serial " + buff.String())
+				cu.cfg.OnMessage("H/W serial " + cu.buff.String())
 			}
 		default:
-			cu.cfg.OnMessage("Unknown>> " + buff.String())
-			//if cu.mu.TryLock() {
-			//	cu.mu.Unlock()
-			//} else {
-			//	cu.mu.Unlock()
-			//}
+			cu.cfg.OnMessage("Unknown>> " + cu.buff.String())
+			if cu.mu.TryLock() {
+				log.Println("was unlocked")
+				cu.mu.Unlock()
+			} else {
+				log.Println("was locked")
+				cu.mu.Unlock()
+			}
 
 		}
-		buff.Reset()
+		cu.buff.Reset()
 	}
 }
 
@@ -412,12 +398,18 @@ func (*Canusb) decodeFrame(buff []byte) (gocan.CANFrame, error) {
 		return nil, fmt.Errorf("failed to decode identifier: %v", err)
 	}
 
-	msgLen, err := strconv.Atoi(string(buff[4]))
+	/* leng, err := hex.DecodeString("0" + string(buff[4]))
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode message length: %v", err)
 	}
+	msgLen := int(leng[0])
+	if msgLen > 8 {
+		log.Println("msgLen", msgLen)
+	} */
 
-	data, err := hex.DecodeString(string(buff[5 : 5+(msgLen*2)]))
+	//data, err := hex.DecodeString(string(buff[5 : 5+(msgLen*2)]))
+
+	data, err := hex.DecodeString(string(buff[5:]))
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode body: %v", err)
 	}

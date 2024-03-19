@@ -2,6 +2,7 @@ package adapter
 
 import (
 	"context"
+	"sync"
 
 	"github.com/roffe/gocan"
 )
@@ -10,6 +11,7 @@ type Template struct {
 	cfg        *gocan.AdapterConfig
 	send, recv chan gocan.CANFrame
 	close      chan struct{}
+	closeOnce  sync.Once
 }
 
 func NewTemplate(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
@@ -17,7 +19,7 @@ func NewTemplate(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 		cfg:   cfg,
 		send:  make(chan gocan.CANFrame, 10),
 		recv:  make(chan gocan.CANFrame, 20),
-		close: make(chan struct{}, 1),
+		close: make(chan struct{}),
 	}, nil
 }
 
@@ -42,5 +44,8 @@ func (a *Template) Send() chan<- gocan.CANFrame {
 }
 
 func (a *Template) Close() error {
+	a.closeOnce.Do(func() {
+		close(a.close)
+	})
 	return nil
 }
