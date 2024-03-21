@@ -20,6 +20,7 @@ J2534 support in Windows / Linux
 * Scanmatik 2 PRO: https://scanmatik.pro/
 * Tech2 passthru ( limited support )
 * GM MDI
+* OBDX Pro GT/VT: https://www.obdxpro.com/
 
 ### Linux
 * Tactrix Openport 2.0: https://github.com/dschultzca/j2534
@@ -29,6 +30,8 @@ J2534 support in Windows / Linux
 ## Other
 
 * SocketCAN
+* OBDX Pro GT BLE & Wifi
+* Combiadapter via libusb
 
 ## Showcase
 
