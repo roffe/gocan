@@ -33,7 +33,7 @@ J2534 support in Windows / Linux
 ## Showcase
 
 [Saab CAN flasher](https://github.com/roffe/gocanflasher)
-
+[txlogger](https://github.com/roffe/txlogger)
 
 ## Example
 
