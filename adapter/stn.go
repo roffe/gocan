@@ -20,35 +20,42 @@ import (
 
 var stnAdapterSpeeds = []int{115200, 38400, 230400, 921600, 2000000, 1000000, 57600}
 
+const (
+	OBDLinkSX = "OBDLink SX"
+	OBDLinkEX = "OBDLink EX"
+	STN1170   = "STN1170"
+	STN2120   = "STN2120"
+)
+
 func init() {
 	if err := Register(&AdapterInfo{
-		Name:               "OBDLink SX",
-		Description:        "OBDLink SX",
+		Name:               OBDLinkSX,
+		Description:        OBDLinkSX,
 		RequiresSerialPort: true,
 		Capabilities: AdapterCapabilities{
 			HSCAN: true,
 			KLine: false,
 			SWCAN: false,
 		},
-		New: NewSTN,
+		New: NewSTN(OBDLinkSX),
 	}); err != nil {
 		panic(err)
 	}
 	if err := Register(&AdapterInfo{
-		Name:               "OBDLink EX",
-		Description:        "OBDLink EX",
+		Name:               OBDLinkEX,
+		Description:        OBDLinkEX,
 		RequiresSerialPort: true,
 		Capabilities: AdapterCapabilities{
 			HSCAN: true,
 			KLine: false,
 			SWCAN: false,
 		},
-		New: NewSTN,
+		New: NewSTN(OBDLinkEX),
 	}); err != nil {
 		panic(err)
 	}
 	if err := Register(&AdapterInfo{
-		Name:               "STN1170",
+		Name:               STN1170,
 		Description:        "ScanTool.net STN1170 based adapter",
 		RequiresSerialPort: true,
 		Capabilities: AdapterCapabilities{
@@ -56,12 +63,12 @@ func init() {
 			KLine: true,
 			SWCAN: true,
 		},
-		New: NewSTN,
+		New: NewSTN(STN1170),
 	}); err != nil {
 		panic(err)
 	}
 	if err := Register(&AdapterInfo{
-		Name:               "STN2120",
+		Name:               STN2120,
 		Description:        "ScanTool.net STN2120 based adapter",
 		RequiresSerialPort: true,
 		Capabilities: AdapterCapabilities{
@@ -69,13 +76,14 @@ func init() {
 			KLine: true,
 			SWCAN: true,
 		},
-		New: NewSTN,
+		New: NewSTN(STN2120),
 	}); err != nil {
 		panic(err)
 	}
 }
 
 type STN struct {
+	name               string
 	cfg                *gocan.AdapterConfig
 	port               serial.Port
 	canrateCMD         string
@@ -87,7 +95,27 @@ type STN struct {
 	sendLock           sync.Mutex
 }
 
-func NewSTN(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
+func NewSTN(name string) func(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
+	return func(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
+		stn := &STN{
+			name:     name,
+			cfg:      cfg,
+			outgoing: make(chan gocan.CANFrame, 10),
+			incoming: make(chan gocan.CANFrame, 20),
+			close:    make(chan struct{}),
+		}
+
+		if err := stn.setCANrate(cfg.CANRate); err != nil {
+			return nil, err
+		}
+
+		stn.setCANfilter(cfg.CANFilter)
+
+		return stn, nil
+	}
+}
+
+/* func NewSTN(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	sx := &STN{
 		cfg:      cfg,
 		outgoing: make(chan gocan.CANFrame, 10),
@@ -102,7 +130,7 @@ func NewSTN(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	sx.setCANfilter(cfg.CANFilter)
 
 	return sx, nil
-}
+} */
 
 func (stn *STN) SetFilter(filters []uint32) error {
 	stn.setCANfilter(filters)
@@ -272,8 +300,14 @@ func (stn *STN) setCANrate(rate float64) error {
 		stn.protocolCMD = "STP33"
 	case 615.384:
 		stn.protocolCMD = "STP33"
-		//stn.canrateCMD = "STCTR8101FC" // from 
-		stn.canrateCMD = "STCTR42039F"
+		switch stn.name {
+		case OBDLinkSX, STN1170:
+			stn.canrateCMD = "STCTR8101FC"
+		case OBDLinkEX, STN2120:
+			stn.canrateCMD = "STCTR42039F"
+		default:
+			return fmt.Errorf("unhandled adapter: %s", stn.name)
+		}
 	default:
 		return fmt.Errorf("unhandled CANBus rate: %f", rate)
 	}
