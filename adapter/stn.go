@@ -272,7 +272,8 @@ func (stn *STN) setCANrate(rate float64) error {
 		stn.protocolCMD = "STP33"
 	case 615.384:
 		stn.protocolCMD = "STP33"
-		stn.canrateCMD = "STCTR8101FC"
+		//stn.canrateCMD = "STCTR8101FC" // from 
+		stn.canrateCMD = "STCTR42039F"
 	default:
 		return fmt.Errorf("unhandled CANBus rate: %f", rate)
 	}
