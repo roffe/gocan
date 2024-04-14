@@ -305,7 +305,13 @@ func (ca *CombiAdapter) sendManager() {
 }
 
 func (ca *CombiAdapter) setBitrate(ctx context.Context) error {
-	canrate := uint32(ca.cfg.CANRate * 1000)
+	var canrate uint32
+	if ca.cfg.CANRate == 615.384 {
+		canrate = 615000
+	} else {
+		canrate = uint32(ca.cfg.CANRate * 1000)
+	}
+
 	payload := []byte{combiCmdSetCanBitrate, 0x00, 0x04, byte(canrate >> 24), byte(canrate >> 16), byte(canrate >> 8), byte(canrate), 0x00}
 
 	ctx2, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
