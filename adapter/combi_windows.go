@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/google/gousb"
@@ -36,6 +37,7 @@ type CombiAdapter struct {
 	out             *gousb.OutEndpoint
 	sendSem         chan struct{}
 	partialTransfer []byte
+	closeOnce       sync.Once
 }
 
 func init() {
@@ -114,6 +116,7 @@ func (ca *CombiAdapter) Init(ctx context.Context) error {
 	if err != nil {
 		ca.cfg.OnError(fmt.Errorf("InEndpoint(2): %w", err))
 		ca.closeAdapter(false, true, true, true, true)
+		return err
 	}
 
 	ca.out, err = ca.iface.OutEndpoint(5)
@@ -169,7 +172,11 @@ func (ca *CombiAdapter) canCtrl(mode byte) error {
 }
 
 func (ca *CombiAdapter) Close() error {
-	return ca.closeAdapter(true, true, true, true, true)
+	var err error
+	ca.closeOnce.Do(func() {
+		err = ca.closeAdapter(true, true, true, true, true)
+	})
+	return err
 }
 
 func (ca *CombiAdapter) closeAdapter(sendCloseCMD, closeIface, closeDevCfg, closeDev, closeCTX bool) error {

@@ -91,7 +91,7 @@ func (c *Client) Send(msg CANFrame) error {
 			c.fh.onOutgoing(msg)
 		}
 		return nil
-	case <-time.After(5 * time.Second):
+	default:
 		return errors.New("gocan failed to send frame")
 	}
 }
