@@ -133,6 +133,25 @@ func (j *PassThru) PassThruDisconnect(channelID uint32) error {
 	return CheckError(ret)
 }
 
+func (j *PassThru) PassThruReadMsg(channelID uint32, pMsg *PassThruMsg, timeout uint32) (uint32, error) {
+	pNumMsgs := uint32(1)
+	// long PassThruReadMsgs(unsigned long ChannelID, PassThruMsg *pMsg, unsigned long *pNumMsgs, unsigned long Timeout);
+	ret := j.passThruReadMsgs(
+		channelID,
+		pMsg,
+		&pNumMsgs,
+		timeout,
+	)
+	if err := CheckError(ret); err != nil {
+		if str, err2 := j.PassThruGetLastError(); err2 == nil {
+			return 0, fmt.Errorf("%s: %w", str, err)
+		} else {
+			return 0, err
+		}
+	}
+	return pNumMsgs, nil
+}
+
 // PassThruReadMsgs long PassThruReadMsgs(unsigned long ChannelID, PassThruMsg *pMsg, unsigned long *pNumMsgs, unsigned long Timeout);
 func (j *PassThru) PassThruReadMsgs(channelID uint32, pMsg *PassThruMsg, pNumMsgs *uint32, timeout uint32) error {
 	ret := j.passThruReadMsgs(
