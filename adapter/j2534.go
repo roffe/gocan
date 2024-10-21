@@ -39,6 +39,7 @@ type J2534 struct {
 	cfg                                  *gocan.AdapterConfig
 	send, recv                           chan gocan.CANFrame
 	close                                chan struct{}
+	useExtendedID                        bool
 
 	tech2passThru bool
 	sync.Mutex
@@ -191,6 +192,13 @@ func (ma *J2534) Init(ctx context.Context) error {
 	return nil
 }
 
+func (ma *J2534) idSizeFlag() uint32 {
+	if ma.cfg.UseExtendedID {
+		return passthru.CAN_29BIT_ID
+	}
+	return 0
+}
+
 func (ma *J2534) PrintVersions() error {
 	firmwareVersion, dllVersion, apiVersion, err := ma.h.PassThruReadVersion(ma.deviceID)
 	if err != nil {
@@ -209,12 +217,16 @@ func (ma *J2534) allowAll() {
 		DataSize:       4,
 		ExtraDataIndex: 4,
 		Data:           [4128]byte{0x00, 0x00, 0x00, 0x00},
+		TxFlags:        ma.idSizeFlag(),
+		RxStatus:       ma.idSizeFlag(),
 	}
 	patternMsg := &passthru.PassThruMsg{
 		ProtocolID:     ma.protocol,
 		DataSize:       4,
 		ExtraDataIndex: 4,
 		Data:           [4128]byte{0x00, 0x00, 0x00, 0x00},
+		TxFlags:        ma.idSizeFlag(),
+		RxStatus:       ma.idSizeFlag(),
 	}
 	if err := ma.h.PassThruStartMsgFilter(ma.channelID, passthru.PASS_FILTER, maskMsg, patternMsg, nil, &filterID); err != nil {
 		ma.cfg.OnError(fmt.Errorf("PassThruStartMsgFilter: %w", err))
@@ -230,6 +242,8 @@ func (ma *J2534) setupFilters() error {
 		DataSize:       4,
 		ExtraDataIndex: 4,
 		Data:           [4128]byte{0x00, 0x00, 0xff, 0xff},
+		TxFlags:        ma.idSizeFlag(),
+		RxStatus:       ma.idSizeFlag(),
 	}
 	for i, filter := range ma.cfg.CANFilter {
 		filterID := uint32(i)
@@ -237,6 +251,8 @@ func (ma *J2534) setupFilters() error {
 			ProtocolID:     ma.protocol,
 			DataSize:       4,
 			ExtraDataIndex: 4,
+			TxFlags:        ma.idSizeFlag(),
+			RxStatus:       ma.idSizeFlag(),
 		}
 		binary.BigEndian.PutUint32(patternMsg.Data[:], filter)
 		if err := ma.h.PassThruStartMsgFilter(ma.channelID, passthru.PASS_FILTER, maskMsg, patternMsg, nil, &filterID); err != nil {
@@ -286,6 +302,8 @@ func (ma *J2534) readMsg() (*passthru.PassThruMsg, error) {
 	}
 	msg := &passthru.PassThruMsg{
 		ProtocolID: ma.protocol,
+		TxFlags:    ma.idSizeFlag(),
+		RxStatus:   ma.idSizeFlag(),
 	}
 	_, err := ma.h.PassThruReadMsg(ma.channelID, msg, 4)
 
@@ -312,7 +330,8 @@ func (ma *J2534) sendManager() {
 				ProtocolID:     ma.protocol,
 				DataSize:       uint32(f.Length() + 4),
 				ExtraDataIndex: uint32(f.Length() + 4),
-				TxFlags:        0,
+				TxFlags:        ma.idSizeFlag(),
+				RxStatus:       ma.idSizeFlag(),
 			}
 			if ma.protocol == passthru.SW_CAN_PS && !ma.tech2passThru {
 				msg.TxFlags = passthru.SW_CAN_HV_TX
