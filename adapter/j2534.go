@@ -98,6 +98,9 @@ func (ma *J2534) Init(ctx context.Context) error {
 	var swcan bool
 	var baudRate uint32
 	switch ma.cfg.CANRate {
+	case 250:
+		baudRate = 250000
+		ma.protocol = passthru.CAN
 	case 33.3:
 		baudRate = 33333
 		ma.protocol = passthru.SW_CAN_PS
