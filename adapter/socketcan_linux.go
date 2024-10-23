@@ -146,6 +146,7 @@ func (a *SocketCAN) sendManager(ctx context.Context) {
 			return
 		case f := <-a.send:
 			frame := can.Frame{}
+			frame.IsExtended = a.cfg.UseExtendedID
 			frame.ID = f.Identifier()
 			frame.Length = uint8(f.Length())
 			data := can.Data{}
