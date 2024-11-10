@@ -5,14 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 type Sub struct {
 	ctx         context.Context
 	c           *Client
-	errcount    uint16
+	errcount    uint32
 	identifiers []uint32
+	filterCount int
 	callback    chan CANFrame
 }
 
@@ -54,8 +56,8 @@ type FrameHandler struct {
 func newFrameHandler(incoming <-chan CANFrame) *FrameHandler {
 	f := &FrameHandler{
 		subs:       make(map[*Sub]bool),
-		register:   make(chan *Sub, 10),
-		unregister: make(chan *Sub, 10),
+		register:   make(chan *Sub, 40),
+		unregister: make(chan *Sub, 40),
 		close:      make(chan struct{}),
 		incoming:   incoming,
 	}
@@ -71,12 +73,14 @@ func (h *FrameHandler) setOnOutgoing(fn func(CANFrame)) {
 }
 
 func (h *FrameHandler) run(ctx context.Context) {
+
+outer:
 	for {
 		select {
 		case <-h.close:
-			return
+			break outer
 		case <-ctx.Done():
-			return
+			break outer
 		case sub := <-h.register:
 			h.sub(sub)
 		case sub := <-h.unregister:
@@ -87,6 +91,11 @@ func (h *FrameHandler) run(ctx context.Context) {
 				h.onIncoming(frame)
 			}
 		}
+	}
+	// cleanup
+	for sub := range h.subs {
+		delete(h.subs, sub)
+		close(sub.callback)
 	}
 }
 
@@ -105,10 +114,10 @@ outer:
 	for sub := range h.subs {
 		select {
 		case <-sub.ctx.Done():
-			h.unsub(sub)
+			h.unregister <- sub
 			continue
 		default:
-			if len(sub.identifiers) == 0 {
+			if sub.filterCount == 0 {
 				h.deliver(sub, frame)
 				continue
 			}
@@ -133,9 +142,8 @@ func (h *FrameHandler) deliver(sub *Sub, frame CANFrame) {
 	select {
 	case sub.callback <- frame:
 	default:
-		sub.errcount++
-	}
-	if sub.errcount > 20 {
-		delete(h.subs, sub)
+		if atomic.AddUint32(&sub.errcount, 1) > 20 {
+			h.unregister <- sub
+		}
 	}
 }

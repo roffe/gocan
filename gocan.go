@@ -3,6 +3,7 @@ package gocan
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 )
 
@@ -46,8 +47,9 @@ func OptOnOutgoing(fn func(CANFrame)) Opts {
 }
 
 type Client struct {
-	fh      *FrameHandler
-	adapter Adapter
+	fh        *FrameHandler
+	adapter   Adapter
+	closeOnce sync.Once
 }
 
 func New(ctx context.Context, adapter Adapter) (*Client, error) {
@@ -79,9 +81,12 @@ func (c *Client) SetFilter(filters []uint32) error {
 	return c.adapter.SetFilter(filters)
 }
 
-func (c *Client) Close() error {
-	c.fh.Close()
-	return c.adapter.Close()
+func (c *Client) Close() (err error) {
+	c.closeOnce.Do(func() {
+		c.fh.Close()
+		err = c.adapter.Close()
+	})
+	return err
 }
 
 // Send a CAN Frame
@@ -130,7 +135,7 @@ func (c *Client) Poll(ctx context.Context, timeout time.Duration, identifiers ..
 }
 
 // Subscribe to CAN identifiers and return a message channel
-func (c *Client) Subscribe2(ctx context.Context, identifiers ...uint32) chan CANFrame {
+func (c *Client) SubscribeChan(ctx context.Context, identifiers ...uint32) chan CANFrame {
 	p := c.newSub(ctx, 10, identifiers...)
 	c.fh.register <- p
 	return p.callback
@@ -148,6 +153,7 @@ func (c *Client) newSub(ctx context.Context, bufferSize int, identifiers ...uint
 		ctx:         ctx,
 		c:           c,
 		identifiers: identifiers,
+		filterCount: len(identifiers),
 		callback:    make(chan CANFrame, bufferSize),
 	}
 }

@@ -9,6 +9,16 @@ import (
 	"github.com/roffe/gocan"
 )
 
+// We have 3 bits allowing 8 different system messages hidden in a 29bit can id stored in a uint32
+const (
+	SystemMsg uint32 = 0x80000000 + iota
+	SystemMsgError
+	SystemMsgDiagnostic
+	SystemMsgDebug
+	SystemMsgWBLReading
+	SystemMsgDataResponse
+)
+
 var adapterMap = make(map[string]*AdapterInfo)
 
 type token struct{}

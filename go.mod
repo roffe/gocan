@@ -5,7 +5,7 @@ go 1.20
 require (
 	github.com/albenik/bcd v0.0.0-20170831201648-635201416bc7
 	github.com/bendikro/dl v0.0.0-20190410215913-e41fdb9069d4
-	github.com/fatih/color v1.16.0
+	github.com/fatih/color v1.18.0
 	github.com/google/gousb v1.1.2
 	go.bug.st/serial v1.6.2
 	go.einride.tech/can v0.5.4
@@ -37,5 +37,5 @@ require (
 
 require (
 	github.com/creack/goselect v0.1.2 // indirect
-	golang.org/x/sys v0.22.0
+	golang.org/x/sys v0.27.0
 )
