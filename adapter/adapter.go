@@ -9,17 +9,22 @@ import (
 	"github.com/roffe/gocan"
 )
 
+var (
+	ErrDroppedFrame = fmt.Errorf("incoming buffer full")
+
+	adapterMap = make(map[string]*AdapterInfo)
+)
+
 // We have 3 bits allowing 8 different system messages hidden in a 29bit can id stored in a uint32
 const (
 	SystemMsg uint32 = 0x80000000 + iota
 	SystemMsgError
-	SystemMsgDiagnostic
 	SystemMsgDebug
 	SystemMsgWBLReading
 	SystemMsgDataResponse
+	SystemMsgDataRequest
+	SystemMsgWriteResponse
 )
-
-var adapterMap = make(map[string]*AdapterInfo)
 
 type token struct{}
 
@@ -84,7 +89,3 @@ func ListAdapters() []AdapterInfo {
 func GetAdapterMap() map[string]*AdapterInfo {
 	return adapterMap
 }
-
-var (
-	ErrDroppedFrame = fmt.Errorf("your computer is to slow, dropped incoming frame")
-)
