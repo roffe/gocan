@@ -69,7 +69,19 @@ func (tx *Txbridge) Init(ctx context.Context) error {
 	p.ResetInputBuffer()
 
 	tx.port.Write([]byte("ccc"))
-	tx.port.Write([]byte("o"))
+
+	canRate := uint16(tx.cfg.CANRate)
+
+	cmd := &gocan.SerialCommand{
+		Command: 'o',
+		Data:    []byte{uint8(canRate), uint8(canRate >> 8)},
+	}
+	openCmd, err := cmd.MarshalBinary()
+	if err != nil {
+		return err
+	}
+
+	tx.port.Write(openCmd)
 
 	go tx.recvManager(ctx)
 	go tx.sendManager(ctx)
@@ -88,7 +100,7 @@ func (tx *Txbridge) Send() chan<- gocan.CANFrame {
 func (tx *Txbridge) Close() error {
 	tx.closeOnce.Do(func() {
 		tx.port.Write([]byte("c"))
-		time.Sleep(200 * time.Millisecond)
+		time.Sleep(500 * time.Millisecond)
 		close(tx.close)
 		if tx.port != nil {
 			tx.port.Close()
@@ -139,7 +151,7 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 	cmdbuff := make([]byte, 256)
 	var cmdbuffPtr uint8
 
-	defer tx.Close()
+	//defer tx.Close()
 
 	readbuf := make([]byte, 16)
 	for {
@@ -163,7 +175,7 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 		for _, b := range readbuf[:n] {
 			if !parsingCommand {
 				switch b {
-				case 'e', 't', 'r', 'w':
+				case 'e', 't', 'r', 'R', 'w', 'W':
 					parsingCommand = true
 					command = b
 					commandSize = 0
@@ -210,6 +222,12 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 						cmd.Data[:commandSize],
 						gocan.Incoming,
 					)
+				case 'R':
+					frame = gocan.NewFrame(
+						SystemMsgDataRequest,
+						cmd.Data[:commandSize],
+						gocan.Incoming,
+					)
 				case 'r':
 					frame = gocan.NewFrame(
 						SystemMsgDataResponse,
@@ -222,8 +240,13 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 						cmd.Data[:commandSize],
 						gocan.Incoming,
 					)
+				case 'W':
+					frame = gocan.NewFrame(
+						SystemMsgWriteResponse,
+						cmd.Data[:commandSize],
+						gocan.Incoming,
+					)
 				}
-
 				select {
 				case tx.recv <- frame:
 				default:

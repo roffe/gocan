@@ -7,6 +7,13 @@ type SerialCommand struct {
 	Data    []byte
 }
 
+func NewSerialCommand(command byte, data []byte) *SerialCommand {
+	return &SerialCommand{
+		Command: command,
+		Data:    data,
+	}
+}
+
 func (sc *SerialCommand) MarshalBinary() ([]byte, error) {
 	if len(sc.Data) > 255 {
 		return nil, fmt.Errorf("data size is too big")
