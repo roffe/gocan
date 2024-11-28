@@ -34,18 +34,6 @@ type AdapterConfig struct {
 
 type Opts func(*Client)
 
-func OptOnIncoming(fn func(CANFrame)) Opts {
-	return func(c *Client) {
-		c.fh.setOnIncoming(fn)
-	}
-}
-
-func OptOnOutgoing(fn func(CANFrame)) Opts {
-	return func(c *Client) {
-		c.fh.setOnOutgoing(fn)
-	}
-}
-
 type Client struct {
 	fh        *FrameHandler
 	adapter   Adapter
@@ -93,9 +81,6 @@ func (c *Client) Close() (err error) {
 func (c *Client) Send(msg CANFrame) error {
 	select {
 	case c.adapter.Send() <- msg:
-		if c.fh.onOutgoing != nil {
-			c.fh.onOutgoing(msg)
-		}
 		return nil
 	default:
 		return errors.New("gocan failed to send frame")
