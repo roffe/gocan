@@ -290,11 +290,11 @@ func (cl *Client) ReadMemoryByAddress(ctx context.Context, address, length uint3
 	//log.Printf("ReadMemoryByAddress: address: %X, length: %X", address, length)
 	data := []byte{0x06, READ_MEMORY_BY_ADDRESS, byte(address >> 16), byte(address >> 8), byte(address), byte(length >> 8), byte(length)}
 	frame := gocan.NewFrame(cl.canID, data, gocan.ResponseRequired)
-	//	log.Println(frame.String())
 	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout*2, cl.recvID...)
 	if err != nil {
 		return nil, err
 	}
+
 	if err := CheckErr(resp); err != nil {
 		return nil, err
 	}
@@ -312,7 +312,7 @@ func (cl *Client) ReadMemoryByAddress(ctx context.Context, address, length uint3
 		left -= rb
 
 		framesToReceive := math.Ceil(float64(left) / 7)
-		cl.c.SendFrame(cl.canID, []byte{0x30, 0x00}, gocan.CANFrameType{Type: 2, Responses: int(framesToReceive)})
+		cl.c.SendFrame(cl.canID, []byte{0x30, 0x00, 0x00}, gocan.CANFrameType{Type: 2, Responses: int(framesToReceive)})
 
 		cc := cl.c.Subscribe(ctx, cl.recvID...)
 		defer cc.Close()
@@ -328,7 +328,6 @@ func (cl *Client) ReadMemoryByAddress(ctx context.Context, address, length uint3
 					}
 				}
 				if frameData[0] != seq {
-					log.Println(response.String())
 					return nil, fmt.Errorf("frame sequence out of order, expected 0x%X got 0x%X", seq, frameData[0])
 				}
 				rb = min(7, left)
