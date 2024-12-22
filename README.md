@@ -15,12 +15,16 @@ J2534 support in Windows / Linux
 
 ## J2534
 
+Most adapters that comes with a J2534 DLL will work. The list given is just ones verified to work.
+
 ### Windows
+
 * Drewtech Mongoose GM PRO II: https://www.drewtech.com/
 * Scanmatik 2 PRO: https://scanmatik.pro/
 * Tech2 passthru ( limited support )
 * GM MDI
 * OBDX Pro GT/VT: https://www.obdxpro.com/
+* Kvaser Leaf Light V2: https://kvaser.com/
 
 ### Linux
 * Tactrix Openport 2.0: https://github.com/dschultzca/j2534
