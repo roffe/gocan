@@ -3,11 +3,13 @@ package adapter
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
 	"github.com/roffe/gocan"
 	"go.bug.st/serial"
+	"golang.org/x/mod/semver"
 )
 
 func init() {
@@ -62,13 +64,50 @@ func (tx *Txbridge) Init(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to open com port %q : %v", tx.cfg.Port, err)
 	}
-	p.SetReadTimeout(20 * time.Millisecond)
+	p.SetReadTimeout(4 * time.Millisecond)
 	tx.port = p
 
 	p.ResetOutputBuffer()
 	p.ResetInputBuffer()
 
 	tx.port.Write([]byte("ccc"))
+
+	if tx.cfg.MinimumFirmwareVersion != "" {
+		cmd := gocan.NewSerialCommand('v', []byte{0x10})
+		buf, err := cmd.MarshalBinary()
+		if err != nil {
+			p.Close()
+			return err
+		}
+
+		if _, err := p.Write(buf); err != nil {
+			p.Close()
+			return err
+		}
+
+		cmd, err = readSerialCommand(p, 5*time.Second)
+		if err != nil {
+			p.Close()
+			return err
+		}
+
+		if err := checkErr(cmd); err != nil {
+			p.Close()
+			return fmt.Errorf("version check failed: %w", err)
+		}
+
+		if cmd.Command != 'v' {
+			p.Close()
+			return fmt.Errorf("unexpected response: %X %X", cmd.Command, cmd.Data)
+		}
+
+		tx.cfg.OnMessage("txbridge firmware version: " + string(cmd.Data))
+
+		if ver := semver.Compare("v"+string(cmd.Data), "v"+tx.cfg.MinimumFirmwareVersion); ver != 0 {
+			p.Close()
+			return fmt.Errorf("txbridge firmware %s is required, please update the dongle", tx.cfg.MinimumFirmwareVersion)
+		}
+	}
 
 	canRate := uint16(tx.cfg.CANRate)
 
@@ -78,6 +117,7 @@ func (tx *Txbridge) Init(ctx context.Context) error {
 	}
 	openCmd, err := cmd.MarshalBinary()
 	if err != nil {
+		p.Close()
 		return err
 	}
 
@@ -99,6 +139,7 @@ func (tx *Txbridge) Send() chan<- gocan.CANFrame {
 
 func (tx *Txbridge) Close() error {
 	tx.closeOnce.Do(func() {
+		tx.port.Drain()
 		tx.port.Write([]byte("c"))
 		time.Sleep(500 * time.Millisecond)
 		close(tx.close)
@@ -235,6 +276,7 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 						gocan.Incoming,
 					)
 				case 'w':
+					// log.Printf("WBLReading: % X", cmd.Data[:commandSize])
 					frame = gocan.NewFrame(
 						SystemMsgWBLReading,
 						cmd.Data[:commandSize],
@@ -268,4 +310,95 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 			}
 		}
 	}
+}
+
+func checkErr(cmd *gocan.SerialCommand) error {
+	if cmd.Command == 'e' {
+		return fmt.Errorf("error: %X %X", cmd.Command, cmd.Data)
+	}
+	return nil
+}
+
+// readSerialCommand reads a single command from the serial port with timeout
+func readSerialCommand(port serial.Port, timeout time.Duration) (*gocan.SerialCommand, error) {
+	deadline := time.Now().Add(timeout)
+
+	var (
+		parsingCommand  bool
+		command         byte
+		commandSize     byte
+		commandChecksum byte
+		cmdbuff         = make([]byte, 256)
+		cmdbuffPtr      byte
+	)
+
+	readbuf := make([]byte, 16)
+
+	for time.Now().Before(deadline) {
+		port.SetReadTimeout(10 * time.Millisecond)
+
+		n, err := port.Read(readbuf)
+		if err != nil {
+			return nil, fmt.Errorf("read error: %w", err)
+		}
+		if n == 0 {
+			continue
+		}
+
+		for _, b := range readbuf[:n] {
+			if !parsingCommand {
+				parsingCommand = true
+				command = b
+				continue
+			}
+
+			if commandSize == 0 {
+				commandSize = b
+				continue
+			}
+
+			if cmdbuffPtr == commandSize {
+				if commandChecksum != b {
+					log.Printf("dara: %X", cmdbuff[:cmdbuffPtr])
+					return nil, fmt.Errorf("checksum error: expected %02X, got %02X", b, commandChecksum)
+				}
+
+				data := make([]byte, cmdbuffPtr)
+				copy(data, cmdbuff[:cmdbuffPtr])
+
+				return &gocan.SerialCommand{
+					Command: command,
+					Data:    data,
+				}, nil
+			}
+
+			if cmdbuffPtr < commandSize {
+				cmdbuff[cmdbuffPtr] = b
+				cmdbuffPtr++
+				commandChecksum += b
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("timeout after %v", timeout)
+}
+
+// writeSerialCommand writes a single command to the serial port
+func writeSerialCommand(port serial.Port, command byte, data []byte) error {
+	cmd := &gocan.SerialCommand{
+		Command: command,
+		Data:    data,
+	}
+
+	buf, err := cmd.MarshalBinary()
+	if err != nil {
+		return fmt.Errorf("marshal error: %w", err)
+	}
+
+	_, err = port.Write(buf)
+	if err != nil {
+		return fmt.Errorf("write error: %w", err)
+	}
+
+	return nil
 }
