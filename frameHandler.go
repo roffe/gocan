@@ -75,7 +75,10 @@ outer:
 			h.sub(sub)
 		case sub := <-h.unregister:
 			h.unsub(sub)
-		case frame := <-h.incoming:
+		case frame, ok := <-h.incoming:
+			if !ok {
+				break outer
+			}
 			h.fanout(frame)
 		}
 	}
