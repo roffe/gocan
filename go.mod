@@ -9,30 +9,28 @@ require (
 	github.com/google/gousb v1.1.3
 	go.bug.st/serial v1.6.2
 	go.einride.tech/can v0.5.4
-	golang.org/x/sync v0.1.0
+	golang.org/x/sync v0.8.0
+	google.golang.org/grpc v1.69.4
+	google.golang.org/protobuf v1.35.1
 )
 
 require (
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/stretchr/testify v1.8.0 // indirect
+	golang.org/x/text v0.19.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20241015192408-796eee8c2d53 // indirect
 )
 
 require (
-	github.com/go-ole/go-ole v1.2.6 // indirect
-	github.com/godbus/dbus/v5 v5.1.0 // indirect
 	github.com/golang/mock v1.6.0 // indirect
-	github.com/google/go-cmp v0.5.9 // indirect
+	github.com/google/go-cmp v0.6.0 // indirect
 	github.com/josharian/native v1.0.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mdlayher/netlink v1.7.1 // indirect
 	github.com/mdlayher/socket v0.4.0 // indirect
-	github.com/saltosystems/winrt-go v0.0.0-20240110120258-ad49e9790c38 // indirect
-	github.com/sirupsen/logrus v1.9.3 // indirect
-	github.com/tinygo-org/cbgo v0.0.4 // indirect
-	golang.org/x/mod v0.8.0 // indirect
-	golang.org/x/net v0.7.0 // indirect
-	golang.org/x/tools v0.6.0 // indirect
-	tinygo.org/x/bluetooth v0.8.1-0.20240221113924-0087e0549b0b
+	golang.org/x/mod v0.17.0
+	golang.org/x/net v0.30.0 // indirect
+	golang.org/x/tools v0.21.1-0.20240508182429-e35e4ccd0d2d // indirect
 )
 
 require (

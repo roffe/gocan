@@ -1,0 +1,52 @@
+import "google/protobuf/empty.proto";
+
+option go_package = "github.com/roffe/gocan/proto";
+
+message Adapters { repeated AdapterInfo adapters = 1; }
+message AdapterInfo {
+  required string Name = 1;
+  optional string Description = 2;
+  required AdapterCapabilities Capabilities = 3;
+  required bool RequireSerialPort = 4;
+}
+
+message SerialPorts { repeated SerialPort ports = 1; }
+message SerialPort {
+  required string Name = 1;
+  optional string Description = 2;
+}
+
+message AdapterCapabilities {
+  optional bool HSCAN = 1;
+  optional bool SWCAN = 2;
+  optional bool KLine = 3;
+}
+
+message Command { required bytes data = 1; }
+
+message CommandResponse { required bytes data = 1; }
+
+service Gocan {
+  rpc SendCommand(Command) returns (CommandResponse) {}
+  rpc GetSerialPorts(google.protobuf.Empty) returns (SerialPorts) {}
+  rpc GetAdapters(google.protobuf.Empty) returns (Adapters) {}
+  rpc Stream(stream CANFrame) returns (stream CANFrame) {}
+}
+
+enum CANFrameTypeEnum {
+  Incoming = 0;
+  Outgoing = 1;
+  OutgoingResponseRequired = 2;
+}
+
+message CANFrameType {
+  required CANFrameTypeEnum FrameType = 1;
+  required uint32 Responses = 2;
+}
+
+message CANFrame {
+  optional bool extended = 1;
+  required uint32 id = 2;
+  required bytes data = 3;
+  required CANFrameType frameType = 4;
+}

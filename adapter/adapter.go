@@ -24,6 +24,7 @@ const (
 	SystemMsgDataResponse
 	SystemMsgDataRequest
 	SystemMsgWriteResponse
+	SystemMsgUnknown
 )
 
 type token struct{}

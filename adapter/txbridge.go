@@ -139,11 +139,11 @@ func (tx *Txbridge) Send() chan<- gocan.CANFrame {
 
 func (tx *Txbridge) Close() error {
 	tx.closeOnce.Do(func() {
-		tx.port.Drain()
-		tx.port.Write([]byte("c"))
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(200 * time.Millisecond)
 		close(tx.close)
 		if tx.port != nil {
+			tx.port.Write([]byte("c"))
+			tx.port.Drain()
 			tx.port.Close()
 		}
 	})
