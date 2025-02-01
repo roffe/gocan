@@ -1,3 +1,6 @@
+//go:build j2534
+// +build j2534
+
 package adapter
 
 import (
