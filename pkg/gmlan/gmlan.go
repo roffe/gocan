@@ -654,15 +654,15 @@ func (cl *Client) WriteDataByAddress(ctx context.Context, address uint32, data [
 	if err != nil {
 		return err
 	}
-	//log.Println(resp.String())
 	d := resp.Data()
 
 	if err := CheckErr(resp); err != nil {
+		// log.Println(resp.String())
 		return err
 	}
 
 	if d[0] != 0x30 || d[1] > 0x01 {
-		log.Println(resp.String())
+		// log.Println(resp.String())
 		return errors.New("invalid response to initial writeDataByIdentifier")
 	}
 
@@ -699,6 +699,7 @@ func (cl *Client) WriteDataByAddress(ctx context.Context, address uint32, data [
 			}
 			// log.Println(resp.String())
 			if err := CheckErr(resp); err != nil {
+				// log.Println(resp.String())
 				return err
 			}
 		}

@@ -19,7 +19,7 @@ import (
 )
 
 func init() {
-	log.SetFlags(log.LstdFlags | log.Lshortfile)
+	log.SetFlags(log.LstdFlags | log.Lshortfile | log.Lmicroseconds)
 }
 
 func fileExists(name string) bool {

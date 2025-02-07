@@ -18,6 +18,7 @@ type Adapter interface {
 	Name() string
 	Recv() <-chan CANFrame
 	Send() chan<- CANFrame
+	Err() <-chan error
 	Close() error
 	SetFilter([]uint32) error
 }
@@ -52,7 +53,7 @@ func NewWithOpts(ctx context.Context, adapter Adapter, opts ...Opts) (*Client, e
 		return nil, err
 	}
 	c := &Client{
-		fh:      newFrameHandler(adapter.Recv()),
+		fh:      newFrameHandler(adapter),
 		adapter: adapter,
 	}
 
@@ -68,14 +69,18 @@ func (c *Client) Adapter() Adapter {
 	return c.adapter
 }
 
+func (c *Client) Err() <-chan error {
+	return c.adapter.Err()
+}
+
 func (c *Client) SetFilter(filters []uint32) error {
 	return c.adapter.SetFilter(filters)
 }
 
 func (c *Client) Close() (err error) {
 	c.closeOnce.Do(func() {
-		c.fh.Close()
 		err = c.adapter.Close()
+		c.fh.Close()
 	})
 	return err
 }

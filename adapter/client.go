@@ -1,4 +1,4 @@
-package client
+package adapter
 
 import (
 	"bytes"
@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -40,33 +41,36 @@ func init() {
 }
 
 type Client struct {
+	*BaseAdapter
 	adapterName string
-	cfg         *gocan.AdapterConfig
-	close       chan struct{}
 	closeOnce   sync.Once
-	send        *UnboundedChan[gocan.CANFrame]
-	recv        *UnboundedChan[gocan.CANFrame]
 	conn        *grpc.ClientConn
 }
 
-func New(adapterName string, cfg *gocan.AdapterConfig) (*Client, error) {
+func NewClient(adapterName string, cfg *gocan.AdapterConfig) (*Client, error) {
 	if cfg.OnError == nil {
 		cfg.OnError = func(err error) {
-			log.Println(err)
+			_, file, no, ok := runtime.Caller(1)
+			if ok {
+				fmt.Printf("%s#%d %v\n", file, no, err)
+			} else {
+				log.Println(err)
+			}
 		}
 	}
-
 	if cfg.OnMessage == nil {
 		cfg.OnMessage = func(msg string) {
-			log.Println(msg)
+			_, file, no, ok := runtime.Caller(1)
+			if ok {
+				fmt.Printf("%s#%d %v\n", file, no, msg)
+			} else {
+				log.Println(msg)
+			}
 		}
 	}
 	return &Client{
 		adapterName: adapterName,
-		cfg:         cfg,
-		close:       make(chan struct{}),
-		send:        NewUnboundedChan[gocan.CANFrame](),
-		recv:        NewUnboundedChan[gocan.CANFrame](),
+		BaseAdapter: NewBaseAdapter(cfg),
 	}, nil
 }
 
@@ -130,12 +134,11 @@ func (c *Client) Init(gctx context.Context) error {
 }
 
 func (c *Client) sendManager(ctx context.Context, stream grpc.BidiStreamingClient[proto.CANFrame, proto.CANFrame]) {
-	send := c.send.Out()
 	for {
 		select {
 		case <-c.close:
 			return
-		case msg := <-send:
+		case msg := <-c.send:
 			var id uint32 = msg.Identifier()
 			typ := proto.CANFrameTypeEnum(msg.Type().Type)
 			resps := uint32(msg.Type().Responses)
@@ -148,10 +151,11 @@ func (c *Client) sendManager(ctx context.Context, stream grpc.BidiStreamingClien
 				},
 			}
 			if err := stream.Send(frame); err != nil {
-				c.cfg.OnError(fmt.Errorf("could not send: %w", err))
+				c.err <- fmt.Errorf("could not send: %w", err)
+				return
 			}
 		case <-ctx.Done():
-			c.send.Close()
+			close(c.send)
 			return
 		}
 	}
@@ -159,7 +163,6 @@ func (c *Client) sendManager(ctx context.Context, stream grpc.BidiStreamingClien
 }
 
 func (c *Client) recvManager(ctx context.Context, stream grpc.BidiStreamingClient[proto.CANFrame, proto.CANFrame]) {
-	recv := c.recv.In()
 	for {
 		in, err := stream.Recv()
 		if err != nil {
@@ -177,13 +180,12 @@ func (c *Client) recvManager(ctx context.Context, stream grpc.BidiStreamingClien
 					log.Println(e.Code(), e.Message())
 				}
 			}
-			c.cfg.OnError(fmt.Errorf("could not receive: %w", err))
-			c.recv.Close()
+			c.err <- fmt.Errorf("could not receive: %w", err)
 			return
 		}
 		frame := gocan.NewFrame(*in.Id, in.Data, gocan.Incoming)
 		select {
-		case recv <- frame:
+		case c.recv <- frame:
 		default:
 			c.cfg.OnError(errors.New("recv channel full"))
 		}
@@ -202,14 +204,6 @@ func (c *Client) Close() (err error) {
 
 func (c *Client) Name() string {
 	return c.adapterName
-}
-
-func (c *Client) Recv() <-chan gocan.CANFrame {
-	return c.recv.Out()
-}
-
-func (c *Client) Send() chan<- gocan.CANFrame {
-	return c.send.In()
 }
 
 func (c *Client) SetFilter([]uint32) error {

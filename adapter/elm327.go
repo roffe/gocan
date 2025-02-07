@@ -38,12 +38,12 @@ var elm327AdapterSpeeds = []int{38400, 115200, 230400, 285714, 500000, 1000000, 
 } */
 
 type ELM327 struct {
-	cfg          *gocan.AdapterConfig
-	port         serial.Port
-	canrate      string
-	protocol     string
-	send, recv   chan gocan.CANFrame
-	close        chan struct{}
+	*BaseAdapter
+
+	port     serial.Port
+	canrate  string
+	protocol string
+
 	closed       bool
 	filter, mask string
 	semChan      chan token
@@ -51,11 +51,8 @@ type ELM327 struct {
 
 func NewELM327(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	elm := &ELM327{
-		cfg:     cfg,
-		send:    make(chan gocan.CANFrame, 10),
-		recv:    make(chan gocan.CANFrame, 20),
-		close:   make(chan struct{}),
-		semChan: make(chan token, 1),
+		BaseAdapter: NewBaseAdapter(cfg),
+		semChan:     make(chan token, 1),
 	}
 
 	if err := elm.setCANrate(cfg.CANRate); err != nil {
@@ -67,52 +64,52 @@ func NewELM327(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	return elm, nil
 }
 
-func (stn *ELM327) SetFilter(filters []uint32) error {
-	stn.setCANfilter(filters)
-	stn.send <- gocan.NewRawCommand("STPC")
-	stn.send <- gocan.NewRawCommand(stn.mask)
-	stn.send <- gocan.NewRawCommand(stn.filter)
-	stn.send <- gocan.NewRawCommand("STPO")
-	//stn.send <- gocan.NewRawCommand("ATCM7FF")
-	//stn.send <- gocan.NewRawCommand("ATCF258")
+func (elm *ELM327) SetFilter(filters []uint32) error {
+	elm.setCANfilter(filters)
+	elm.send <- gocan.NewRawCommand("STPC")
+	elm.send <- gocan.NewRawCommand(elm.mask)
+	elm.send <- gocan.NewRawCommand(elm.filter)
+	elm.send <- gocan.NewRawCommand("STPO")
+	//elm.send <- gocan.NewRawCommand("ATCM7FF")
+	//elm.send <- gocan.NewRawCommand("ATCF258")
 	return nil
 }
 
-func (stn *ELM327) Name() string {
+func (elm *ELM327) Name() string {
 	return "ELM327"
 }
 
-func (stn *ELM327) Init(ctx context.Context) error {
+func (elm *ELM327) Init(ctx context.Context) error {
 	mode := &serial.Mode{
-		BaudRate: stn.cfg.PortBaudrate,
+		BaudRate: elm.cfg.PortBaudrate,
 		Parity:   serial.NoParity,
 		DataBits: 8,
 		StopBits: serial.OneStopBit,
 	}
 
-	if p, err := serial.Open(stn.cfg.Port, mode); err != nil {
-		return fmt.Errorf("failed to open com port %q : %v", stn.cfg.Port, err)
+	if p, err := serial.Open(elm.cfg.Port, mode); err != nil {
+		return fmt.Errorf("failed to open com port %q : %v", elm.cfg.Port, err)
 	} else {
-		stn.port = p
+		elm.port = p
 	}
 
-	if err := stn.port.SetReadTimeout(1 * time.Millisecond); err != nil {
+	if err := elm.port.SetReadTimeout(1 * time.Millisecond); err != nil {
 		return err
 	}
 
-	stn.port.ResetOutputBuffer()
-	stn.port.ResetInputBuffer()
+	elm.port.ResetOutputBuffer()
+	elm.port.ResetInputBuffer()
 
 	setSpeed := func() error {
-		to := stn.cfg.PortBaudrate
+		to := elm.cfg.PortBaudrate
 		for _, from := range elm327AdapterSpeeds {
-			if err := stn.setSpeed(stn.port, mode, from, to); err != nil {
-				if stn.cfg.Debug {
-					stn.cfg.OnError(err)
+			if err := elm.setSpeed(elm.port, mode, from, to); err != nil {
+				if elm.cfg.Debug {
+					elm.cfg.OnError(err)
 				}
 			} else {
-				if stn.cfg.Debug {
-					stn.cfg.OnMessage(fmt.Sprintf("Switched adapter baudrate from %d to %d bps", from, to))
+				if elm.cfg.Debug {
+					elm.cfg.OnMessage(fmt.Sprintf("Switched adapter baudrate from %d to %d bps", from, to))
 				}
 				return nil
 			}
@@ -120,24 +117,24 @@ func (stn *ELM327) Init(ctx context.Context) error {
 		return errors.New("Failed to switch adapter baudrate") //lint:ignore ST1005 ignore this
 	}
 	if err := setSpeed(); err != nil {
-		stn.port.Close()
+		elm.port.Close()
 		return err
 	}
 
 	var initCmds = []string{
 		"ATE0",       // turn off echo
 		"ATS0",       // turn of spaces
-		stn.protocol, // Set canbus protocol
+		elm.protocol, // Set canbus protocol
 		"ATH1",       // Headers on
 		"ATAT2",      // Set adaptive timing mode, Adaptive timing on, aggressive mode. This option may increase throughput on slower connections, at the expense of slightly increasing the risk of missing frames.
 		"ATCAF0",     // Automatic formatting off
-		stn.canrate,  // Set CANrate
+		elm.canrate,  // Set CANrate
 		"ATAL",       // Allow long messages
 		"ATCFC0",     //Turn automatic CAN flow control off
 		//"ATAR",      // Automatically set the receive address.
 		//"ATCSM1",  //Turn CAN silent monitoring off
-		stn.mask,   // mask
-		stn.filter, // code
+		elm.mask,   // mask
+		elm.filter, // code
 	}
 
 	delay := 15 * time.Millisecond
@@ -148,18 +145,18 @@ func (stn *ELM327) Init(ctx context.Context) error {
 			continue
 		}
 		out := []byte(c + "\r")
-		if stn.cfg.Debug {
-			stn.cfg.OnMessage(c)
+		if elm.cfg.Debug {
+			elm.cfg.OnMessage(c)
 		}
-		if _, err := stn.port.Write(out); err != nil {
-			stn.cfg.OnError(err)
+		if _, err := elm.port.Write(out); err != nil {
+			elm.cfg.OnError(err)
 		}
 		time.Sleep(delay)
 	}
-	stn.port.ResetInputBuffer()
+	elm.port.ResetInputBuffer()
 
-	go stn.recvManager(ctx)
-	go stn.sendManager(ctx)
+	go elm.recvManager(ctx)
+	go elm.sendManager(ctx)
 
 	return nil
 }
@@ -171,7 +168,7 @@ func calculateATBRDCommand(desiredBaudRate int) string {
 
 }
 
-func (stn *ELM327) setSpeed(p serial.Port, mode *serial.Mode, from, to int) error {
+func (elm *ELM327) setSpeed(p serial.Port, mode *serial.Mode, from, to int) error {
 	mode.BaudRate = from
 	if err := p.SetMode(mode); err != nil {
 		return err
@@ -205,8 +202,8 @@ func (stn *ELM327) setSpeed(p serial.Port, mode *serial.Mode, from, to int) erro
 						continue
 					}
 					if strings.HasPrefix(buff.String(), "ELM327") {
-						if stn.cfg.PrintVersion {
-							stn.cfg.OnMessage(buff.String())
+						if elm.cfg.PrintVersion {
+							elm.cfg.OnMessage(buff.String())
 						}
 						return nil
 					}
@@ -237,23 +234,23 @@ func (stn *ELM327) setSpeed(p serial.Port, mode *serial.Mode, from, to int) erro
 	return nil
 }
 
-func (stn *ELM327) setCANrate(rate float64) error {
+func (elm *ELM327) setCANrate(rate float64) error {
 	switch rate {
 	case 33.3: // STN1170 & STN2120 feature only
-		stn.protocol = "STP61"
-		stn.canrate = "STCSWM2"
+		elm.protocol = "STP61"
+		elm.canrate = "STCSWM2"
 	case 500:
-		stn.protocol = "ATSP6"
+		elm.protocol = "ATSP6"
 	case 615.384:
-		stn.protocol = "STP33"
-		stn.canrate = "STCTR8101FC"
+		elm.protocol = "STP33"
+		elm.canrate = "STCTR8101FC"
 	default:
 		return fmt.Errorf("unhandled CANBus rate: %f", rate)
 	}
 	return nil
 }
 
-func (stn *ELM327) setCANfilter(ids []uint32) {
+func (elm *ELM327) setCANfilter(ids []uint32) {
 	var filt uint32 = 0xFFF
 	var mask uint32 = 0x000
 	for _, id := range ids {
@@ -265,35 +262,27 @@ func (stn *ELM327) setCANfilter(ids []uint32) {
 		filt = 0
 		mask = 0x7FF
 	}
-	stn.filter = fmt.Sprintf("AT CF %03X", filt)
-	stn.mask = fmt.Sprintf("AT CM %03X", mask)
+	elm.filter = fmt.Sprintf("AT CF %03X", filt)
+	elm.mask = fmt.Sprintf("AT CM %03X", mask)
 }
 
-func (stn *ELM327) Recv() <-chan gocan.CANFrame {
-	return stn.recv
-}
-
-func (stn *ELM327) Send() chan<- gocan.CANFrame {
-	return stn.send
-}
-
-func (stn *ELM327) Close() error {
-	stn.closed = true
-	close(stn.close)
+func (elm *ELM327) Close() error {
+	elm.BaseAdapter.Close()
+	elm.closed = true
 	time.Sleep(150 * time.Millisecond)
-	stn.port.ResetOutputBuffer()
-	stn.port.Write([]byte("ATSP00\r"))
-	stn.port.Write([]byte("ATZ\r"))
+	elm.port.ResetOutputBuffer()
+	elm.port.Write([]byte("ATSP00\r"))
+	elm.port.Write([]byte("ATZ\r"))
 	time.Sleep(50 * time.Millisecond)
-	stn.port.ResetInputBuffer()
-	return stn.port.Close()
+	elm.port.ResetInputBuffer()
+	return elm.port.Close()
 }
 
-func (stn *ELM327) sendManager(ctx context.Context) {
+func (elm *ELM327) sendManager(ctx context.Context) {
 	f := bytes.NewBuffer(nil)
 	for {
 		select {
-		case v := <-stn.send:
+		case v := <-elm.send:
 			switch v.(type) {
 			case *gocan.RawCommand:
 				f.WriteString(v.String() + "\r")
@@ -318,23 +307,23 @@ func (stn *ELM327) sendManager(ctx context.Context) {
 				f.WriteString(",r:" + strconv.Itoa(t.GetResponseCount()) + "\r")
 
 			}
-			stn.semChan <- token{}
-			if stn.cfg.Debug {
-				stn.cfg.OnMessage("<o> " + f.String())
+			elm.semChan <- token{}
+			if elm.cfg.Debug {
+				elm.cfg.OnMessage("<o> " + f.String())
 			}
-			if _, err := stn.port.Write(f.Bytes()); err != nil {
-				stn.cfg.OnError(fmt.Errorf("failed to write to com port: %q, %w", f.String(), err))
+			if _, err := elm.port.Write(f.Bytes()); err != nil {
+				elm.cfg.OnError(fmt.Errorf("failed to write to com port: %q, %w", f.String(), err))
 			}
 			f.Reset()
 		case <-ctx.Done():
 			return
-		case <-stn.close:
+		case <-elm.close:
 			return
 		}
 	}
 }
 
-func (stn *ELM327) recvManager(ctx context.Context) {
+func (elm *ELM327) recvManager(ctx context.Context) {
 	buff := bytes.NewBuffer(nil)
 	readBuffer := make([]byte, 21)
 	for {
@@ -343,10 +332,10 @@ func (stn *ELM327) recvManager(ctx context.Context) {
 			return
 		default:
 		}
-		n, err := stn.port.Read(readBuffer)
+		n, err := elm.port.Read(readBuffer)
 		if err != nil {
-			if !stn.closed {
-				stn.cfg.OnError(fmt.Errorf("failed to read com port: %w", err))
+			if !elm.closed {
+				elm.cfg.OnError(fmt.Errorf("failed to read com port: %w", err))
 			}
 			return
 		}
@@ -362,7 +351,7 @@ func (stn *ELM327) recvManager(ctx context.Context) {
 
 			if b == '>' {
 				select {
-				case <-stn.semChan:
+				case <-elm.semChan:
 				default:
 				}
 				continue
@@ -372,31 +361,31 @@ func (stn *ELM327) recvManager(ctx context.Context) {
 				if buff.Len() == 0 {
 					continue
 				}
-				if stn.cfg.Debug {
-					stn.cfg.OnMessage("<i> " + buff.String())
+				if elm.cfg.Debug {
+					elm.cfg.OnMessage("<i> " + buff.String())
 				}
 				switch buff.String() {
 				case "CAN ERROR":
-					stn.cfg.OnError(errors.New("CAN ERROR"))
+					elm.cfg.OnError(errors.New("CAN ERROR"))
 					buff.Reset()
 				case "STOPPED":
 					buff.Reset()
 				case "?":
-					stn.cfg.OnError(errors.New("UNKNOWN COMMAND"))
+					elm.cfg.OnError(errors.New("UNKNOWN COMMAND"))
 					buff.Reset()
 				case "NO DATA", "OK":
 					buff.Reset()
 				default:
-					f, err := stn.decodeFrame(buff.Bytes())
+					f, err := elm.decodeFrame(buff.Bytes())
 					if err != nil {
-						stn.cfg.OnError(fmt.Errorf("failed to decode frame: %s %w", buff.String(), err))
+						elm.cfg.OnError(fmt.Errorf("failed to decode frame: %s %w", buff.String(), err))
 						buff.Reset()
 						continue
 					}
 					select {
-					case stn.recv <- f:
+					case elm.recv <- f:
 					default:
-						stn.cfg.OnError(ErrDroppedFrame)
+						elm.cfg.OnError(ErrDroppedFrame)
 					}
 					buff.Reset()
 				}

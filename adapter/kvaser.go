@@ -26,17 +26,12 @@ func init() {
 */
 
 type Kvaser struct {
-	cfg        *gocan.AdapterConfig
-	send, recv chan gocan.CANFrame
-	close      chan struct{}
+	*BaseAdapter
 }
 
 func NewKvaser(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	return &Kvaser{
-		cfg:   cfg,
-		send:  make(chan gocan.CANFrame, 10),
-		recv:  make(chan gocan.CANFrame, 20),
-		close: make(chan struct{}, 1),
+		BaseAdapter: NewBaseAdapter(cfg),
 	}, nil
 }
 
@@ -57,15 +52,8 @@ func (a *Kvaser) Init(ctx context.Context) error {
 	return nil
 }
 
-func (a *Kvaser) Recv() <-chan gocan.CANFrame {
-	return a.recv
-}
-
-func (a *Kvaser) Send() chan<- gocan.CANFrame {
-	return a.send
-}
-
 func (a *Kvaser) Close() error {
 	log.Println("Kvaser.Close()")
+	a.BaseAdapter.Close()
 	return nil
 }

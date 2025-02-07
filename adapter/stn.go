@@ -83,26 +83,21 @@ func init() {
 }
 
 type STN struct {
-	name               string
-	cfg                *gocan.AdapterConfig
-	port               serial.Port
-	canrateCMD         string
-	protocolCMD        string
-	outgoing, incoming chan gocan.CANFrame
-	close              chan struct{}
-	closed             bool
-	filter, mask       string
-	sendLock           sync.Mutex
+	*BaseAdapter
+	name         string
+	port         serial.Port
+	canrateCMD   string
+	protocolCMD  string
+	closed       bool
+	filter, mask string
+	sendLock     sync.Mutex
 }
 
 func NewSTN(name string) func(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	return func(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 		stn := &STN{
-			name:     name,
-			cfg:      cfg,
-			outgoing: make(chan gocan.CANFrame, 10),
-			incoming: make(chan gocan.CANFrame, 20),
-			close:    make(chan struct{}),
+			name:        name,
+			BaseAdapter: NewBaseAdapter(cfg),
 		}
 
 		if err := stn.setCANrate(cfg.CANRate); err != nil {
@@ -134,15 +129,15 @@ func NewSTN(name string) func(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 
 func (stn *STN) SetFilter(filters []uint32) error {
 	stn.setCANfilter(filters)
-	stn.outgoing <- gocan.NewRawCommand("STPC")
-	stn.outgoing <- gocan.NewRawCommand(stn.mask)
-	stn.outgoing <- gocan.NewRawCommand(stn.filter)
-	stn.outgoing <- gocan.NewRawCommand("STPO")
+	stn.send <- gocan.NewRawCommand("STPC")
+	stn.send <- gocan.NewRawCommand(stn.mask)
+	stn.send <- gocan.NewRawCommand(stn.filter)
+	stn.send <- gocan.NewRawCommand("STPO")
 	return nil
 }
 
 func (stn *STN) Name() string {
-	return "STN"
+	return stn.name
 }
 
 func (stn *STN) Init(ctx context.Context) error {
@@ -159,7 +154,7 @@ func (stn *STN) Init(ctx context.Context) error {
 		stn.port = p
 	}
 
-	if err := stn.port.SetReadTimeout(1 * time.Millisecond); err != nil {
+	if err := stn.port.SetReadTimeout(4 * time.Millisecond); err != nil {
 		return err
 	}
 
@@ -330,17 +325,9 @@ func (stn *STN) setCANfilter(ids []uint32) {
 	stn.mask = fmt.Sprintf("ATCM%03X", mask)
 }
 
-func (stn *STN) Recv() <-chan gocan.CANFrame {
-	return stn.incoming
-}
-
-func (stn *STN) Send() chan<- gocan.CANFrame {
-	return stn.outgoing
-}
-
 func (stn *STN) Close() error {
+	stn.BaseAdapter.Close()
 	stn.closed = true
-	close(stn.close)
 	time.Sleep(200 * time.Millisecond)
 	stn.port.ResetOutputBuffer()
 	stn.port.Write([]byte("ATZ\r"))
@@ -355,7 +342,7 @@ func (stn *STN) sendManager(ctx context.Context) {
 	var timeout int64
 	for {
 		select {
-		case v := <-stn.outgoing:
+		case v := <-stn.send:
 			switch v.(type) {
 			case *gocan.RawCommand:
 				f.WriteString(v.String() + "\r")
@@ -379,7 +366,8 @@ func (stn *STN) sendManager(ctx context.Context) {
 				stn.cfg.OnMessage("<o> " + f.String())
 			}
 			if _, err := stn.port.Write(f.Bytes()); err != nil {
-				stn.cfg.OnError(fmt.Errorf("failed to write: %q %w", f.String(), err))
+				stn.err <- fmt.Errorf("failed to write: %q %w", f.String(), err)
+				return
 			}
 			f.Reset()
 		case <-ctx.Done():
@@ -401,9 +389,10 @@ func (stn *STN) recvManager(ctx context.Context) {
 		}
 		n, err := stn.port.Read(readBuffer)
 		if err != nil {
-			if !stn.closed {
-				stn.cfg.OnError(fmt.Errorf("failed to read: %w", err))
+			if stn.closed {
+				return
 			}
+			stn.err <- fmt.Errorf("failed to read: %w", err)
 			return
 		}
 		if n == 0 {
@@ -447,7 +436,7 @@ func (stn *STN) recvManager(ctx context.Context) {
 						continue
 					}
 					select {
-					case stn.incoming <- f:
+					case stn.recv <- f:
 					default:
 						stn.cfg.OnError(ErrDroppedFrame)
 					}

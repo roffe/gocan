@@ -34,12 +34,10 @@ func init() {
 }
 
 type SocketCAN struct {
-	cfg        *gocan.AdapterConfig
-	send, recv chan gocan.CANFrame
-	close      chan struct{}
-	d          *candevice.Device
-	tx         *socketcan.Transmitter
-	rx         *socketcan.Receiver
+	*BaseAdapter
+	d  *candevice.Device
+	tx *socketcan.Transmitter
+	rx *socketcan.Receiver
 }
 
 func (a *SocketCAN) SetFilter(uint32s []uint32) error {
@@ -56,10 +54,7 @@ func NewSocketCANFromDevName(dev string) func(cfg *gocan.AdapterConfig) (gocan.A
 
 func NewSocketCAN(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	return &SocketCAN{
-		cfg:   cfg,
-		send:  make(chan gocan.CANFrame, 10),
-		recv:  make(chan gocan.CANFrame, 10),
-		close: make(chan struct{}, 1),
+		BaseAdapter: NewBaseAdapter(cfg),
 	}, nil
 }
 
@@ -93,15 +88,8 @@ func (a *SocketCAN) Init(ctx context.Context) error {
 	return err
 }
 
-func (a *SocketCAN) Recv() <-chan gocan.CANFrame {
-	return a.recv
-}
-
-func (a *SocketCAN) Send() chan<- gocan.CANFrame {
-	return a.send
-}
-
 func (a *SocketCAN) Close() error {
+	a.BaseAdapter.Close()
 	defer func(d *candevice.Device) {
 		err := d.SetDown()
 		if err != nil {

@@ -7,10 +7,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/albenik/bcd"
@@ -35,25 +33,18 @@ func init() {
 }
 
 type Canusb struct {
-	cfg          *gocan.AdapterConfig
+	*BaseAdapter
 	port         serial.Port
 	canRate      string
 	filter, mask string
-	send, recv   chan gocan.CANFrame
-	close        chan struct{}
-
-	buff      *bytes.Buffer
-	closeOnce sync.Once
+	buff         *bytes.Buffer
 	// mu        sync.Mutex
 }
 
 func NewCanusb(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	cu := &Canusb{
-		cfg:   cfg,
-		send:  make(chan gocan.CANFrame, 10),
-		recv:  make(chan gocan.CANFrame, 30),
-		close: make(chan struct{}, 1),
-		buff:  bytes.NewBuffer(nil),
+		BaseAdapter: NewBaseAdapter(cfg),
+		buff:        bytes.NewBuffer(nil),
 		//sendMutex: make(chan token, 1),
 	}
 	if err := cu.setCANrate(cfg.CANRate); err != nil {
@@ -157,38 +148,18 @@ func (cu *Canusb) setCANrate(rate float64) error {
 	return nil
 }
 
-func (cu *Canusb) Recv() <-chan gocan.CANFrame {
-	return cu.recv
-}
-
-func (cu *Canusb) Send() chan<- gocan.CANFrame {
-	return cu.send
-}
-
 func (cu *Canusb) Close() error {
-	var err error
-	cu.closeOnce.Do(func() {
-		_, err = cu.port.Write([]byte("C\r"))
-		if err != nil {
-			return
+	cu.BaseAdapter.Close()
+	if cu.port != nil {
+		cu.port.Write([]byte("C\r"))
+		cu.port.ResetInputBuffer()
+		cu.port.ResetOutputBuffer()
+		if err := cu.port.Close(); err != nil {
+			return fmt.Errorf("failed to close com port: %w", err)
 		}
-		time.Sleep(50 * time.Millisecond)
-		close(cu.close)
-		time.Sleep(10 * time.Millisecond)
-		err = cu.port.ResetInputBuffer()
-		if err != nil {
-			return
-		}
-		err = cu.port.ResetOutputBuffer()
-		if err != nil {
-			return
-		}
-		err = cu.port.Close()
-		if err != nil {
-			return
-		}
-	})
-	return err
+		cu.port = nil
+	}
+	return nil
 }
 
 func (*Canusb) calcAcceptanceFilters(idList []uint32) (string, string) {
@@ -216,6 +187,7 @@ func (*Canusb) calcAcceptanceFilters(idList []uint32) (string, string) {
 
 func (cu *Canusb) sendManager(ctx context.Context) {
 	t := time.NewTicker(800 * time.Millisecond)
+	defer t.Stop()
 	f := bytes.NewBuffer(nil)
 	for {
 		select {
@@ -227,7 +199,8 @@ func (cu *Canusb) sendManager(ctx context.Context) {
 			case *gocan.RawCommand:
 				// cu.mu.Lock()
 				if _, err := cu.port.Write(append(v.Data(), '\r')); err != nil {
-					cu.cfg.OnError(fmt.Errorf("failed to write to com port: %s, %w", f.String(), err))
+					cu.err <- fmt.Errorf("failed to write to com port: %s, %w", f.String(), err)
+					return
 				}
 				if cu.cfg.Debug {
 					fmt.Fprint(os.Stderr, ">> "+v.String()+"\n")
@@ -241,7 +214,8 @@ func (cu *Canusb) sendManager(ctx context.Context) {
 					strconv.Itoa(v.Length()) +
 					hex.EncodeToString(v.Data()) + "\r")
 				if _, err := cu.port.Write(f.Bytes()); err != nil {
-					cu.cfg.OnError(fmt.Errorf("failed to write to com port: %s, %w", f.String(), err))
+					cu.err <- fmt.Errorf("failed to write to com port: %s, %w", f.String(), err)
+					return
 				}
 				if cu.cfg.Debug {
 					cu.cfg.OnMessage(">> " + f.String())
@@ -257,7 +231,7 @@ func (cu *Canusb) sendManager(ctx context.Context) {
 }
 
 func (cu *Canusb) recvManager(ctx context.Context) {
-	readBuffer := make([]byte, 20)
+	readBuffer := make([]byte, 32)
 	for {
 		select {
 		case <-ctx.Done():
@@ -266,12 +240,12 @@ func (cu *Canusb) recvManager(ctx context.Context) {
 		}
 		n, err := cu.port.Read(readBuffer)
 		if err != nil {
-			var portError *serial.PortError
-			if errors.As(err, &portError) {
-				log.Println(portError.EncodedErrorString())
-				return
-			}
-			cu.cfg.OnError(fmt.Errorf("failed to read com port: %w", err))
+			//var portError *serial.PortError
+			//if errors.As(err, &portError) {
+			//	log.Println(portError.EncodedErrorString())
+			//	return
+			//}
+			cu.err <- fmt.Errorf("failed to read com port: %w", err)
 			return
 		}
 		select {

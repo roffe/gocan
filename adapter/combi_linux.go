@@ -39,15 +39,14 @@ func init() {
 }
 
 type Combi struct {
-	cfg        *gocan.AdapterConfig
-	send, recv chan gocan.CANFrame
-	close      chan struct{}
-	usbCtx     *gousb.Context
-	dev        *gousb.Device
-	epIn       *gousb.InEndpoint
-	epOut      *gousb.OutEndpoint
-	ucfg       *gousb.Config
-	intf       *gousb.Interface
+	*BaseAdapter
+
+	usbCtx *gousb.Context
+	dev    *gousb.Device
+	epIn   *gousb.InEndpoint
+	epOut  *gousb.OutEndpoint
+	ucfg   *gousb.Config
+	intf   *gousb.Interface
 }
 
 type Packet struct {
@@ -69,10 +68,7 @@ const (
 
 func NewCombi(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	return &Combi{
-		cfg:   cfg,
-		send:  make(chan gocan.CANFrame, 1),
-		recv:  make(chan gocan.CANFrame, 1),
-		close: make(chan struct{}, 1),
+		BaseAdapter: NewBaseAdapter(cfg),
 	}, nil
 }
 
@@ -300,12 +296,13 @@ func (a *Combi) recvManager(ctx context.Context) {
 			var rx Packet
 			err := a.readPacket(ctx, &rx)
 			if err != nil {
+				a.err <- fmt.Errorf("read error: %w", err)
 				continue
 			}
 			switch rx.cmd {
 			case rxFrame:
 				if rx.len != 15 {
-					err = errors.New("woops")
+					a.err <- errors.New("woops")
 					return
 				}
 				frame := gocan.NewFrame(
@@ -342,14 +339,6 @@ func (a *Combi) sendManager(ctx context.Context) {
 			}
 		}
 	}
-}
-
-func (a *Combi) Recv() <-chan gocan.CANFrame {
-	return a.recv
-}
-
-func (a *Combi) Send() chan<- gocan.CANFrame {
-	return a.send
 }
 
 func (a *Combi) Close() error {

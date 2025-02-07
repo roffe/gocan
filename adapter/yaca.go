@@ -32,20 +32,14 @@ func init() {
 }
 
 type YACA struct {
-	cfg        *gocan.AdapterConfig
-	port       serial.Port
-	send, recv chan gocan.CANFrame
-	close      chan struct{}
-	closed     bool
+	*BaseAdapter
+	port   serial.Port
+	closed bool
 }
 
 func NewYACA(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
-
 	ya := &YACA{
-		cfg:   cfg,
-		send:  make(chan gocan.CANFrame, 10),
-		recv:  make(chan gocan.CANFrame, 30),
-		close: make(chan struct{}, 1),
+		BaseAdapter: NewBaseAdapter(cfg),
 	}
 	return ya, nil
 }
@@ -148,15 +142,15 @@ func (ya *YACA) recvManager(ctx context.Context) {
 	readBuffer := make([]byte, 8)
 	for {
 		select {
+		case <-ya.close:
+			return
 		case <-ctx.Done():
 			return
 		default:
 		}
 		n, err := ya.port.Read(readBuffer)
 		if err != nil {
-			if !ya.closed {
-				ya.cfg.OnError(fmt.Errorf("failed to read com port: %w", err))
-			}
+			ya.err <- fmt.Errorf("failed to read from com port: %w", err)
 			return
 		}
 		if n == 0 {
@@ -263,17 +257,9 @@ func (*YACA) decodeFrame(buff []byte) (gocan.CANFrame, error) {
 	), nil
 }
 
-func (ya *YACA) Recv() <-chan gocan.CANFrame {
-	return ya.recv
-}
-
-func (ya *YACA) Send() chan<- gocan.CANFrame {
-	return ya.send
-}
-
 func (ya *YACA) Close() error {
+	ya.BaseAdapter.Close()
 	ya.closed = true
-	close(ya.close)
 	time.Sleep(10 * time.Millisecond)
 	ya.port.Write([]byte("C\r"))
 	time.Sleep(10 * time.Millisecond)

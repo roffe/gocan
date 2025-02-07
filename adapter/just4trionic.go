@@ -31,21 +31,16 @@ func init() {
 }
 
 type Just4Trionic struct {
-	cfg        *gocan.AdapterConfig
-	port       serial.Port
-	send, recv chan gocan.CANFrame
-	close      chan struct{}
+	*BaseAdapter
 
+	port    serial.Port
 	canRate string
 	closed  bool
 }
 
 func NewJust4Trionic(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	adapter := &Just4Trionic{
-		cfg:   cfg,
-		send:  make(chan gocan.CANFrame, 10),
-		recv:  make(chan gocan.CANFrame, 10),
-		close: make(chan struct{}, 1),
+		BaseAdapter: NewBaseAdapter(cfg),
 	}
 
 	/*
@@ -81,6 +76,7 @@ func NewJust4Trionic(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 
 	return adapter, nil
 }
+
 func (a *Just4Trionic) SetFilter(filters []uint32) error {
 	filter, mask := a.calcAcceptanceFilters(filters)
 	a.send <- gocan.NewRawCommand("C")
@@ -168,17 +164,9 @@ func (a *Just4Trionic) Init(ctx context.Context) error {
 	return nil
 }
 
-func (a *Just4Trionic) Recv() <-chan gocan.CANFrame {
-	return a.recv
-}
-
-func (a *Just4Trionic) Send() chan<- gocan.CANFrame {
-	return a.send
-}
-
 func (a *Just4Trionic) Close() error {
+	a.BaseAdapter.Close()
 	a.closed = true
-	a.close <- struct{}{}
 	time.Sleep(50 * time.Millisecond)
 	a.port.Write([]byte("\x1B"))
 	time.Sleep(10 * time.Millisecond)
@@ -225,7 +213,7 @@ func (a *Just4Trionic) recvManager(ctx context.Context) {
 		n, err := a.port.Read(readBuffer)
 		if err != nil {
 			if !a.closed {
-				a.cfg.OnError(fmt.Errorf("failed to read com port: %w", err))
+				a.err <- fmt.Errorf("failed to read com port: %w", err)
 			}
 			return
 		}
@@ -297,7 +285,7 @@ func (a *Just4Trionic) sendManager(ctx context.Context) {
 			switch v.(type) {
 			case *gocan.RawCommand:
 				if _, err := a.port.Write(append(v.Data(), '\r')); err != nil {
-					a.cfg.OnError(fmt.Errorf("failed to write to com port: %q, %w", f, err))
+					a.err <- fmt.Errorf("failed to write to com port: %q, %w", f, err)
 				}
 				if a.cfg.Debug {
 					fmt.Fprint(os.Stderr, ">> "+v.String()+"\n")

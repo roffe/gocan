@@ -3,69 +3,63 @@ package adapter
 import (
 	"context"
 	"fmt"
-	"io"
 	"log"
-	"sync"
+	"net"
 	"time"
 
 	"github.com/roffe/gocan"
-	"go.bug.st/serial"
 	"golang.org/x/mod/semver"
 )
 
 func init() {
 	if err := Register(&AdapterInfo{
-		Name:               "txbridge",
-		Description:        "txbridge",
-		RequiresSerialPort: true,
+		Name:               "txbridge wifi",
+		Description:        "txbridge over wifi",
+		RequiresSerialPort: false,
 		Capabilities: AdapterCapabilities{
 			HSCAN: true,
 			KLine: false,
 			SWCAN: false,
 		},
-		New: NewTxbridge,
+		New: NewTxbridgeWiFi,
 	}); err != nil {
 		panic(err)
 	}
 }
 
-type Txbridge struct {
+type TxbridgeWiFi struct {
 	*BaseAdapter
-	port      serial.Port
-	closeOnce sync.Once
+	port net.Conn
 }
 
-func NewTxbridge(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
-	tx := &Txbridge{
+func NewTxbridgeWiFi(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
+	return &TxbridgeWiFi{
 		BaseAdapter: NewBaseAdapter(cfg),
-	}
-	return tx, nil
+	}, nil
 }
 
-func (tx *Txbridge) SetFilter(filters []uint32) error {
+func (tx *TxbridgeWiFi) SetFilter(filters []uint32) error {
 	return nil
 }
 
-func (tx *Txbridge) Name() string {
-	return "txbridge"
+func (tx *TxbridgeWiFi) Name() string {
+	return "txbridge wifi"
 }
 
-func (tx *Txbridge) Init(ctx context.Context) error {
-	mode := &serial.Mode{
-		BaudRate: tx.cfg.PortBaudrate,
-		Parity:   serial.NoParity,
-		DataBits: 8,
-		StopBits: serial.OneStopBit,
-	}
-	p, err := serial.Open(tx.cfg.Port, mode)
-	if err != nil {
-		return fmt.Errorf("failed to open com port %q : %v", tx.cfg.Port, err)
-	}
-	p.SetReadTimeout(10 * time.Millisecond)
-	tx.port = p
+func (tx *TxbridgeWiFi) Init(ctx context.Context) error {
 
-	p.ResetOutputBuffer()
-	p.ResetInputBuffer()
+	d := net.Dialer{Timeout: 2 * time.Second}
+
+	var err error
+	tx.port, err = d.Dial("tcp", "192.168.4.1:1337")
+
+	if err != nil {
+		return err
+	}
+
+	if t, ok := tx.port.(*net.TCPConn); ok {
+		t.SetNoDelay(true)
+	}
 
 	tx.port.Write([]byte("ccc"))
 
@@ -73,35 +67,35 @@ func (tx *Txbridge) Init(ctx context.Context) error {
 		cmd := gocan.NewSerialCommand('v', []byte{0x10})
 		buf, err := cmd.MarshalBinary()
 		if err != nil {
-			p.Close()
+			tx.port.Close()
 			return err
 		}
 
-		if _, err := p.Write(buf); err != nil {
-			p.Close()
+		if _, err := tx.port.Write(buf); err != nil {
+			tx.port.Close()
 			return err
 		}
 
-		cmd, err = readSerialCommand(p, 5*time.Second)
+		cmd, err = readSerialCommand(tx.port, 5*time.Second)
 		if err != nil {
-			p.Close()
+			tx.port.Close()
 			return err
 		}
 
 		if err := checkErr(cmd); err != nil {
-			p.Close()
+			tx.port.Close()
 			return fmt.Errorf("version check failed: %w", err)
 		}
 
 		if cmd.Command != 'v' {
-			p.Close()
+			tx.port.Close()
 			return fmt.Errorf("unexpected response: %X %X", cmd.Command, cmd.Data)
 		}
 
 		tx.cfg.OnMessage("txbridge firmware version: " + string(cmd.Data))
 
 		if ver := semver.Compare("v"+string(cmd.Data), "v"+tx.cfg.MinimumFirmwareVersion); ver != 0 {
-			p.Close()
+			tx.port.Close()
 			return fmt.Errorf("txbridge firmware %s is required, please update the dongle", tx.cfg.MinimumFirmwareVersion)
 		}
 	}
@@ -114,10 +108,9 @@ func (tx *Txbridge) Init(ctx context.Context) error {
 	}
 	openCmd, err := cmd.MarshalBinary()
 	if err != nil {
-		p.Close()
+		tx.port.Close()
 		return err
 	}
-
 	tx.port.Write(openCmd)
 
 	go tx.recvManager(ctx)
@@ -126,21 +119,21 @@ func (tx *Txbridge) Init(ctx context.Context) error {
 	return nil
 }
 
-func (tx *Txbridge) Close() error {
+func (tx *TxbridgeWiFi) Close() error {
 	tx.BaseAdapter.Close()
-	tx.closeOnce.Do(func() {
-		time.Sleep(200 * time.Millisecond)
-		if tx.port != nil {
-			tx.port.Write([]byte("c"))
-			tx.port.Drain()
-			tx.port.Close()
+	if tx.port != nil {
+		if _, err := tx.port.Write([]byte("c")); err != nil {
+			return fmt.Errorf("failed to write txbridge: %w", err)
 		}
-	})
+		if err := tx.port.Close(); err != nil {
+			return fmt.Errorf("failed to close txbridge: %w", err)
+		}
+		tx.port = nil
+	}
 	return nil
 }
 
-func (tx *Txbridge) sendManager(_ context.Context) {
-	defer tx.Close()
+func (tx *TxbridgeWiFi) sendManager(_ context.Context) {
 	for {
 		select {
 		case <-tx.close:
@@ -149,7 +142,7 @@ func (tx *Txbridge) sendManager(_ context.Context) {
 			if frame.Identifier() == SystemMsg {
 				_, err := tx.port.Write(frame.Data())
 				if err != nil {
-					tx.cfg.OnError(err)
+					tx.err <- err
 				}
 				continue
 			}
@@ -160,19 +153,22 @@ func (tx *Txbridge) sendManager(_ context.Context) {
 			}
 			buf, err := cmd.MarshalBinary()
 			if err != nil {
-				tx.cfg.OnError(err)
+				tx.err <- err
 				continue
 			}
 			_, err = tx.port.Write(buf)
 			if err != nil {
-				tx.cfg.OnError(err)
+				tx.err <- err
 				continue
 			}
 		}
 	}
 }
 
-func (tx *Txbridge) recvManager(ctx context.Context) {
+func (tx *TxbridgeWiFi) recvManager(ctx context.Context) {
+	log.Println("recvManager start")
+	defer log.Println("recvManager exited")
+
 	var parsingCommand bool
 	var command uint8
 	var commandSize uint8
@@ -181,21 +177,22 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 	cmdbuff := make([]byte, 256)
 	var cmdbuffPtr uint8
 
-	//defer tx.Close()
-
-	readbuf := make([]byte, 16)
+	readbuf := make([]byte, 256)
 	for {
 		select {
 		case <-tx.close:
+			log.Println("recvManager adapter closed")
 			return
 		case <-ctx.Done():
+			log.Println("recvManager ctx done")
 			return
 		default:
 		}
 
 		n, err := tx.port.Read(readbuf)
 		if err != nil {
-			tx.cfg.OnError(err)
+			log.Println("recvManager read error", err)
+			tx.err <- err
 			return
 		}
 		if n == 0 {
@@ -299,93 +296,4 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 			}
 		}
 	}
-}
-
-func checkErr(cmd *gocan.SerialCommand) error {
-	if cmd.Command == 'e' {
-		return fmt.Errorf("error: %X %X", cmd.Command, cmd.Data)
-	}
-	return nil
-}
-
-// readSerialCommand reads a single command from the serial port with timeout
-func readSerialCommand(port io.Reader, timeout time.Duration) (*gocan.SerialCommand, error) {
-	deadline := time.Now().Add(timeout)
-
-	var (
-		parsingCommand  bool
-		command         byte
-		commandSize     byte
-		commandChecksum byte
-		cmdbuff         = make([]byte, 256)
-		cmdbuffPtr      byte
-	)
-
-	readbuf := make([]byte, 16)
-
-	for time.Now().Before(deadline) {
-		n, err := port.Read(readbuf)
-		if err != nil {
-			return nil, fmt.Errorf("read error: %w", err)
-		}
-		if n == 0 {
-			continue
-		}
-
-		for _, b := range readbuf[:n] {
-			if !parsingCommand {
-				parsingCommand = true
-				command = b
-				continue
-			}
-
-			if commandSize == 0 {
-				commandSize = b
-				continue
-			}
-
-			if cmdbuffPtr == commandSize {
-				if commandChecksum != b {
-					log.Printf("dara: %X", cmdbuff[:cmdbuffPtr])
-					return nil, fmt.Errorf("checksum error: expected %02X, got %02X", b, commandChecksum)
-				}
-
-				data := make([]byte, cmdbuffPtr)
-				copy(data, cmdbuff[:cmdbuffPtr])
-
-				return &gocan.SerialCommand{
-					Command: command,
-					Data:    data,
-				}, nil
-			}
-
-			if cmdbuffPtr < commandSize {
-				cmdbuff[cmdbuffPtr] = b
-				cmdbuffPtr++
-				commandChecksum += b
-			}
-		}
-	}
-
-	return nil, fmt.Errorf("timeout after %v", timeout)
-}
-
-// writeSerialCommand writes a single command to the serial port
-func writeSerialCommand(port serial.Port, command byte, data []byte) error {
-	cmd := &gocan.SerialCommand{
-		Command: command,
-		Data:    data,
-	}
-
-	buf, err := cmd.MarshalBinary()
-	if err != nil {
-		return fmt.Errorf("marshal error: %w", err)
-	}
-
-	_, err = port.Write(buf)
-	if err != nil {
-		return fmt.Errorf("write error: %w", err)
-	}
-
-	return nil
 }

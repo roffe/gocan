@@ -30,22 +30,15 @@ func init() {
 }
 
 type OBDXProWifi struct {
-	conn net.Conn
-
-	filters []*dvi.Command
-
-	cfg        *gocan.AdapterConfig
-	send, recv chan gocan.CANFrame
-	close      chan struct{}
-	closeOnce  sync.Once
+	*BaseAdapter
+	conn      net.Conn
+	filters   []*dvi.Command
+	closeOnce sync.Once
 }
 
 func NewOBDXProWifi(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	return &OBDXProWifi{
-		cfg:   cfg,
-		send:  make(chan gocan.CANFrame, 1),
-		recv:  make(chan gocan.CANFrame, 5),
-		close: make(chan struct{}),
+		BaseAdapter: NewBaseAdapter(cfg),
 	}, nil
 }
 
@@ -192,24 +185,14 @@ func (a *OBDXProWifi) recvManager() {
 
 }
 
-func (a *OBDXProWifi) Recv() <-chan gocan.CANFrame {
-	return a.recv
-}
-
-func (a *OBDXProWifi) Send() chan<- gocan.CANFrame {
-	return a.send
-}
-
 func (a *OBDXProWifi) Close() error {
+	a.BaseAdapter.Close()
 	a.closeOnce.Do(func() {
-		close(a.close)
 		time.Sleep(80 * time.Millisecond)
-
 		cmds := []*dvi.Command{
 			dvi.New(0x31, []byte{0x02, 0x00}), // disable networking
 			dvi.New(0x25, []byte{}),           // reset
 		}
-
 		for _, cmd := range cmds {
 			if _, err := a.conn.Write(cmd.Bytes()); err != nil {
 				log.Printf("Failed to send command: %v", err)

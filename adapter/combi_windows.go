@@ -26,9 +26,7 @@ const (
 )
 
 type CombiAdapter struct {
-	cfg             *gocan.AdapterConfig
-	send, recv      chan gocan.CANFrame
-	close           chan struct{}
+	*BaseAdapter
 	usbCtx          *gousb.Context
 	dev             *gousb.Device
 	devCfg          *gousb.Config
@@ -65,11 +63,8 @@ func init() {
 
 func NewCombi(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	return &CombiAdapter{
-		cfg:     cfg,
-		send:    make(chan gocan.CANFrame, 10),
-		recv:    make(chan gocan.CANFrame, 20),
-		close:   make(chan struct{}, 1),
-		sendSem: make(chan struct{}, 1),
+		BaseAdapter: NewBaseAdapter(cfg),
+		sendSem:     make(chan struct{}, 1),
 	}, nil
 }
 
@@ -221,7 +216,8 @@ func (ca *CombiAdapter) recvManager() {
 			buff := make([]byte, 8)
 			n, err := ca.in.Read(buff)
 			if err != nil {
-				ca.cfg.OnError(fmt.Errorf("failed to read from usb device: %w", err))
+				ca.err <- fmt.Errorf("failed to read from usb device: %w", err)
+				//ca.cfg.OnError(fmt.Errorf("failed to read from usb device: %w", err))
 				if n == 0 {
 					continue
 				}
@@ -302,9 +298,8 @@ func (ca *CombiAdapter) sendManager() {
 			//buff[17] = 0x00 // is remote
 			//buff[18] = 0x00 // terminator
 			ca.sendSem <- struct{}{}
-
 			if _, err := ca.out.Write(buff); err != nil {
-				ca.cfg.OnError(fmt.Errorf("failed to send frame: %w", err))
+				ca.err <- fmt.Errorf("failed to send frame: %w", err)
 			}
 			copy(buff, zeros)
 		}
@@ -328,14 +323,6 @@ func (ca *CombiAdapter) setBitrate(ctx context.Context) error {
 		return err
 	}
 	return nil
-}
-
-func (ca *CombiAdapter) Recv() <-chan gocan.CANFrame {
-	return ca.recv
-}
-
-func (ca *CombiAdapter) Send() chan<- gocan.CANFrame {
-	return ca.send
 }
 
 func (ca *CombiAdapter) ReadVersion(ctx context.Context) (string, error) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -51,41 +52,53 @@ type FrameHandler struct {
 	closeOnce  sync.Once
 }
 
-func newFrameHandler(incoming <-chan CANFrame) *FrameHandler {
+func newFrameHandler(adapter Adapter) *FrameHandler {
 	f := &FrameHandler{
 		subs:       make(map[*Sub]bool),
 		register:   make(chan *Sub, 40),
 		unregister: make(chan *Sub, 40),
 		close:      make(chan struct{}),
-		incoming:   incoming,
+		incoming:   adapter.Recv(),
 	}
 	return f
 }
 
 func (h *FrameHandler) run(ctx context.Context) {
+	defer func() {
+		log.Println("FrameHandler closed")
+		for sub := range h.subs {
+			delete(h.subs, sub)
+			close(sub.callback)
+		}
+	}()
 
-outer:
 	for {
 		select {
 		case <-h.close:
-			break outer
+			log.Println("close channel closed")
+			return
 		case <-ctx.Done():
-			break outer
-		case sub := <-h.register:
+			log.Println("context done")
+			return
+		case sub, ok := <-h.register:
+			if !ok {
+				log.Println("register channel closed")
+				return
+			}
 			h.sub(sub)
-		case sub := <-h.unregister:
+		case sub, ok := <-h.unregister:
+			if !ok {
+				log.Println("unregister channel closed")
+				return
+			}
 			h.unsub(sub)
 		case frame, ok := <-h.incoming:
 			if !ok {
-				break outer
+				log.Println("incoming channel closed")
+				return
 			}
 			h.fanout(frame)
 		}
-	}
-	// cleanup
-	for sub := range h.subs {
-		delete(h.subs, sub)
-		close(sub.callback)
 	}
 }
 

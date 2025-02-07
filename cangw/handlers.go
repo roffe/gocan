@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -107,11 +108,21 @@ func (s *Server) Stream(srv grpc.BidiStreamingServer[proto.CANFrame, proto.CANFr
 	adapterConfig.OnError = func(err error) {
 		send(srv, adapter.SystemMsgError, []byte(err.Error()))
 		log.Printf("adapter error: %v", err)
-
+		_, file, no, ok := runtime.Caller(1)
+		if ok {
+			fmt.Printf("%s#%d %v\n", file, no, err)
+		} else {
+			log.Println(err)
+		}
 	}
 
 	adapterConfig.OnMessage = func(s string) {
-		log.Printf("adapter message: %v", s)
+		_, file, no, ok := runtime.Caller(1)
+		if ok {
+			fmt.Printf("%s#%d %v\n", file, no, s)
+		} else {
+			log.Println(s)
+		}
 	}
 
 	dev, err := adapter.New(adaptername, adapterConfig)
@@ -121,17 +132,30 @@ func (s *Server) Stream(srv grpc.BidiStreamingServer[proto.CANFrame, proto.CANFr
 
 	errg, ctx := errgroup.WithContext(gctx)
 
-	c, err := gocan.New(ctx, dev)
+	cl, err := gocan.New(ctx, dev)
 	if err != nil {
 		send(srv, 0, []byte(err.Error()))
 		return fmt.Errorf("failed to create client: %w", err)
 	}
-	defer c.Close()
+	defer cl.Close()
 
-	canRX := c.SubscribeChan(ctx)
+	canRX := cl.SubscribeChan(ctx)
+
+	errg.Go(func() error {
+		for {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case err := <-dev.Err():
+				send(srv, adapter.SystemMsgError, []byte(err.Error()))
+				return fmt.Errorf("adapter error: %w", err)
+			}
+		}
+	})
 
 	// send mesage from canbus adapter to IPC
 	errg.Go(func() error {
+		defer log.Println("incoming closed")
 		for {
 			select {
 			case msg, ok := <-canRX:
@@ -140,7 +164,9 @@ func (s *Server) Stream(srv grpc.BidiStreamingServer[proto.CANFrame, proto.CANFr
 				}
 				id := msg.Identifier()
 				frameTyp := proto.CANFrameTypeEnum(msg.Type().Type)
+				//log.Println("frameTyp:", frameTyp)
 				responses := uint32(msg.Type().Responses)
+				//log.Println("responses:", responses)
 				mmsg := &proto.CANFrame{
 					Id:   &id,
 					Data: msg.Data(),
@@ -160,26 +186,33 @@ func (s *Server) Stream(srv grpc.BidiStreamingServer[proto.CANFrame, proto.CANFr
 
 	// send message from IPC to canbus adapter
 	errg.Go(func() error {
+		defer log.Println("outgoing closed")
 		for {
 			msg, err := srv.Recv()
 			if err != nil {
 				if errors.Is(err, io.EOF) {
+					log.Println("client closed connection")
 					return nil // Client closed connection
 				}
 				return fmt.Errorf("failed to receive outgoing %w", err) // Something unexpected happened
 			}
-			r := gocan.CANFrameType{
-				Type:      int(*msg.FrameType.FrameType),
-				Responses: int(*msg.FrameType.Responses),
-			}
-			frame := gocan.NewFrame(*msg.Id, msg.Data, r)
-			if err := c.Send(frame); err != nil {
-				return err
+
+			t := msg.GetFrameType()
+			frame := gocan.NewFrame(*msg.Id, msg.Data, gocan.CANFrameType{
+				Type:      int(t.GetFrameType()),
+				Responses: int(t.GetResponses()),
+			})
+			if err := cl.Send(frame); err != nil {
+				return fmt.Errorf("failed to send frame: %w", err)
 			}
 		}
 	})
 	send(srv, 0, []byte("OK"))
-	return errg.Wait()
+	if err := errg.Wait(); err != nil {
+		log.Println("stream error:", err)
+		return err
+	}
+	return nil
 }
 
 func (s *Server) GetAdapters(ctx context.Context, _ *emptypb.Empty) (*proto.Adapters, error) {

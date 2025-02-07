@@ -1,5 +1,4 @@
 //go:build j2534
-// +build j2534
 
 package adapter
 
@@ -37,11 +36,9 @@ func init() {
 }
 
 type J2534 struct {
+	*BaseAdapter
 	h                                    *passthru.PassThru
 	channelID, deviceID, flags, protocol uint32
-	cfg                                  *gocan.AdapterConfig
-	send, recv                           chan gocan.CANFrame
-	close                                chan struct{}
 	useExtendedID                        bool
 
 	tech2passThru bool
@@ -57,12 +54,9 @@ func NewJ2534FromDLLName(dllPath string) func(cfg *gocan.AdapterConfig) (gocan.A
 
 func NewJ2534(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	ma := &J2534{
-		cfg:       cfg,
-		send:      make(chan gocan.CANFrame, 10),
-		recv:      make(chan gocan.CANFrame, 20),
-		close:     make(chan struct{}, 2),
-		channelID: 0,
-		deviceID:  0,
+		BaseAdapter: NewBaseAdapter(cfg),
+		channelID:   0,
+		deviceID:    0,
 	}
 	return ma, nil
 }
@@ -277,18 +271,17 @@ func (ma *J2534) recvManager() {
 		default:
 			msg, err := ma.readMsg()
 			if err != nil {
-				ma.cfg.OnError(err)
+				ma.err <- err
 				continue
 			}
 			if msg == nil {
 				continue
 			}
 			if msg.DataSize == 0 {
-				ma.cfg.OnError(errors.New("empty message"))
+				ma.err <- errors.New("empty message")
 				continue
 			}
 			select {
-
 			case ma.recv <- gocan.NewFrame(
 				binary.BigEndian.Uint32(msg.Data[0:4]),
 				msg.Data[4:4+msg.DataSize],
@@ -345,7 +338,7 @@ func (ma *J2534) sendManager() {
 			binary.BigEndian.PutUint32(msg.Data[:], f.Identifier())
 			copy(msg.Data[4:], f.Data())
 			if err := ma.sendMsg(msg); err != nil {
-				ma.cfg.OnError(fmt.Errorf("send error: %w", err))
+				ma.err <- fmt.Errorf("send error: %w", err)
 			}
 		}
 	}
@@ -366,15 +359,8 @@ func (ma *J2534) sendMsg(msg *passthru.PassThruMsg) error {
 	return nil
 }
 
-func (ma *J2534) Recv() <-chan gocan.CANFrame {
-	return ma.recv
-}
-
-func (ma *J2534) Send() chan<- gocan.CANFrame {
-	return ma.send
-}
-
 func (ma *J2534) Close() error {
+	ma.BaseAdapter.Close()
 	for i := 0; i < 2; i++ {
 		ma.close <- struct{}{}
 	}

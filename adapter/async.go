@@ -1,4 +1,4 @@
-package client
+package adapter
 
 // UnboundedChan is a channel with an unbounded buffer for caching
 // Func objects. A channel must be closed via Close method.

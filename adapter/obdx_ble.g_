@@ -170,13 +170,6 @@ func (a *OBDXPro) Init(ctx context.Context) error {
 	return nil
 }
 
-func (a *OBDXPro) Recv() <-chan gocan.CANFrame {
-	return a.recv
-}
-
-func (a *OBDXPro) Send() chan<- gocan.CANFrame {
-	return a.send
-}
 
 func (a *OBDXPro) Close() (err error) {
 	a.closeOnce.Do(func() {

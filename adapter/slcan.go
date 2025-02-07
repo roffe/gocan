@@ -15,11 +15,9 @@ import (
 )
 
 type SLCan struct {
-	cfg        *gocan.AdapterConfig
-	port       serial.Port
-	send, recv chan gocan.CANFrame
-	close      chan struct{}
-	closed     bool
+	*BaseAdapter
+	port   serial.Port
+	closed bool
 }
 
 func init() {
@@ -40,10 +38,7 @@ func init() {
 
 func NewSLCan(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	sl := &SLCan{
-		cfg:   cfg,
-		send:  make(chan gocan.CANFrame, 10),
-		recv:  make(chan gocan.CANFrame, 30),
-		close: make(chan struct{}, 1),
+		BaseAdapter: NewBaseAdapter(cfg),
 	}
 	return sl, nil
 }
@@ -103,14 +98,6 @@ func (sl *SLCan) Close() error {
 	sl.port.Write([]byte("C\r"))
 	time.Sleep(10 * time.Millisecond)
 	return sl.port.Close()
-}
-
-func (sl *SLCan) Send() chan<- gocan.CANFrame {
-	return sl.send
-}
-
-func (sl *SLCan) Recv() <-chan gocan.CANFrame {
-	return sl.recv
 }
 
 func (sl *SLCan) Name() string {
