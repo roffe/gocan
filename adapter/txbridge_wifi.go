@@ -11,9 +11,13 @@ import (
 	"golang.org/x/mod/semver"
 )
 
+const (
+	TxbridgeWiFiAdapterName = "txbridge wifi"
+)
+
 func init() {
 	if err := Register(&AdapterInfo{
-		Name:               "txbridge wifi",
+		Name:               TxbridgeWiFiAdapterName,
 		Description:        "txbridge over wifi",
 		RequiresSerialPort: false,
 		Capabilities: AdapterCapabilities{
@@ -28,7 +32,7 @@ func init() {
 }
 
 type TxbridgeWiFi struct {
-	*BaseAdapter
+	BaseAdapter
 	port net.Conn
 }
 
@@ -43,19 +47,16 @@ func (tx *TxbridgeWiFi) SetFilter(filters []uint32) error {
 }
 
 func (tx *TxbridgeWiFi) Name() string {
-	return "txbridge wifi"
+	return TxbridgeWiFiAdapterName
 }
 
 func (tx *TxbridgeWiFi) Init(ctx context.Context) error {
-
 	d := net.Dialer{Timeout: 2 * time.Second}
-
-	var err error
-	tx.port, err = d.Dial("tcp", "192.168.4.1:1337")
-
+	port, err := d.Dial("tcp", "192.168.4.1:1337")
 	if err != nil {
 		return err
 	}
+	tx.port = port
 
 	if t, ok := tx.port.(*net.TCPConn); ok {
 		t.SetNoDelay(true)

@@ -83,7 +83,7 @@ func init() {
 }
 
 type STN struct {
-	*BaseAdapter
+	BaseAdapter
 	name         string
 	port         serial.Port
 	canrateCMD   string
@@ -347,6 +347,9 @@ func (stn *STN) sendManager(ctx context.Context) {
 			case *gocan.RawCommand:
 				f.WriteString(v.String() + "\r")
 			default:
+				if v.Identifier() >= SystemMsg {
+					continue
+				}
 				stn.sendLock.Lock()
 				binary.BigEndian.PutUint32(idb, v.Identifier())
 				f.WriteString("STPXh:" + hex.EncodeToString(idb)[5:] + ",d:" + hex.EncodeToString(v.Data()))

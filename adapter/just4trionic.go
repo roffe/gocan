@@ -31,7 +31,7 @@ func init() {
 }
 
 type Just4Trionic struct {
-	*BaseAdapter
+	BaseAdapter
 
 	port    serial.Port
 	canRate string

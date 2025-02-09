@@ -1,6 +1,9 @@
 package gmlan
 
 import (
+	"bytes"
+	"errors"
+
 	"github.com/roffe/gocan"
 )
 
@@ -17,6 +20,9 @@ func CheckErr(frame gocan.CANFrame) error {
 	d := frame.Data()
 	if d[1] == 0x7F {
 		return &GMError{TranslateServiceCode(d[2]), TranslateErrorCode(d[3])}
+	}
+	if bytes.Equal(d, []byte{0x01, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}) {
+		return errors.New("Busy, repeat request")
 	}
 	return nil
 }

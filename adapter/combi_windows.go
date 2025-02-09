@@ -1,5 +1,4 @@
 //go:build combi
-// +build combi
 
 package adapter
 
@@ -8,6 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -26,7 +26,7 @@ const (
 )
 
 type CombiAdapter struct {
-	*BaseAdapter
+	BaseAdapter
 	usbCtx          *gousb.Context
 	dev             *gousb.Device
 	devCfg          *gousb.Config
@@ -80,15 +80,17 @@ func (ca *CombiAdapter) Init(ctx context.Context) error {
 	var err error
 	ca.usbCtx = gousb.NewContext()
 	ca.dev, err = ca.usbCtx.OpenDeviceWithVIDPID(combiVid, combiPid)
-	if err != nil || ca.dev == nil {
-		ca.closeAdapter(false, false, false, false, true)
+	if err != nil {
 		if ca.dev == nil {
-			return errors.New("CombiAdapter not found")
+			ca.closeAdapter(false, false, false, false, true)
+			if ca.dev == nil {
+				return errors.New("CombiAdapter not found")
+			}
+			return err
+		} else if ca.dev != nil {
+			ca.closeAdapter(false, false, false, true, true)
+			return err
 		}
-		return err
-	} else if err != nil && ca.dev != nil {
-		ca.closeAdapter(false, false, false, true, true)
-		return err
 	}
 
 	if err := ca.dev.SetAutoDetach(true); err != nil {
@@ -167,6 +169,7 @@ func (ca *CombiAdapter) canCtrl(mode byte) error {
 }
 
 func (ca *CombiAdapter) Close() error {
+	ca.BaseAdapter.Close()
 	var err error
 	ca.closeOnce.Do(func() {
 		err = ca.closeAdapter(true, true, true, true, true)
@@ -181,9 +184,6 @@ func (ca *CombiAdapter) closeAdapter(sendCloseCMD, closeIface, closeDevCfg, clos
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-
-	close(ca.close)
-	time.Sleep(10 * time.Millisecond)
 
 	if closeIface && ca.iface != nil {
 		ca.iface.Close()
@@ -208,6 +208,7 @@ func (ca *CombiAdapter) closeAdapter(sendCloseCMD, closeIface, closeDevCfg, clos
 }
 
 func (ca *CombiAdapter) recvManager() {
+	defer log.Println("recvManager exited")
 	for {
 		select {
 		case <-ca.close:
@@ -280,6 +281,7 @@ func (ca *CombiAdapter) parseCMD(data []byte) error {
 }
 
 func (ca *CombiAdapter) sendManager() {
+	defer log.Println("sendManager exited")
 	buff := make([]byte, 19)
 	zeros := make([]byte, 19)
 	for {
@@ -287,6 +289,9 @@ func (ca *CombiAdapter) sendManager() {
 		case <-ca.close:
 			return
 		case frame := <-ca.send:
+			if frame.Identifier() >= SystemMsg {
+				continue
+			}
 			buff[0] = combiCmdtxFrame
 			//buff[1] = 15 >> 8
 			//buff[2] = 15 & 0xff

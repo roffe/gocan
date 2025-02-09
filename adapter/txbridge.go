@@ -30,7 +30,7 @@ func init() {
 }
 
 type Txbridge struct {
-	*BaseAdapter
+	BaseAdapter
 	port      serial.Port
 	closeOnce sync.Once
 }

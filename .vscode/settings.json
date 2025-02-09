@@ -1,3 +1,8 @@
 {
-    "go.buildTags": "combi j2534",
+    "go.useLanguageServer": true,
+    "go.buildTags": "kvaser j2534 combi",
+    "go.buildFlags": [
+        "-tags",
+        "kvaser,j2534,combi",
+    ],
 }

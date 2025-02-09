@@ -1,5 +1,4 @@
 //go:build combi
-// +build combi
 
 package adapter
 

@@ -142,6 +142,7 @@ func (cl *Client) InitiateDiagnosticOperation(ctx context.Context, subFunc byte)
 	}
 	d := resp.Data()
 	if d[0] != 0x01 || d[1] != 0x50 {
+		log.Println(resp.String())
 		return errors.New("InitiateDiagnosticOperation: invalid response to InitiateDiagnosticOperation request")
 	}
 

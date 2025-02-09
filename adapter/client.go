@@ -17,11 +17,9 @@ import (
 	"github.com/roffe/gocan"
 	"github.com/roffe/gocan/proto"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/status"
 )
 
 var (
@@ -41,7 +39,7 @@ func init() {
 }
 
 type Client struct {
-	*BaseAdapter
+	BaseAdapter
 	adapterName string
 	closeOnce   sync.Once
 	conn        *grpc.ClientConn
@@ -137,6 +135,7 @@ func (c *Client) sendManager(ctx context.Context, stream grpc.BidiStreamingClien
 	for {
 		select {
 		case <-c.close:
+			log.Println("closing client")
 			return
 		case msg := <-c.send:
 			var id uint32 = msg.Identifier()
@@ -166,29 +165,40 @@ func (c *Client) recvManager(ctx context.Context, stream grpc.BidiStreamingClien
 	for {
 		in, err := stream.Recv()
 		if err != nil {
-			if e, ok := status.FromError(err); ok {
-				switch e.Code() {
-				case codes.Canceled:
-					return
-				//case codes.PermissionDenied:
-				//	fmt.Println(e.Message()) // this will print PERMISSION_DENIED_TEST
-				//case codes.Internal:
-				//	fmt.Println("Has Internal Error")
-				//case codes.Aborted:
-				//	fmt.Println("gRPC Aborted the call")
-				default:
-					log.Println(e.Code(), e.Message())
-				}
-			}
+			//if e, ok := status.FromError(err); ok {
+			//	switch e.Code() {
+			//	case codes.Canceled:
+			//		return
+			//	//case codes.PermissionDenied:
+			//	//	fmt.Println(e.Message()) // this will print PERMISSION_DENIED_TEST
+			//	//case codes.Internal:
+			//	//	fmt.Println("Has Internal Error")
+			//	//case codes.Aborted:
+			//	//	fmt.Println("gRPC Aborted the call")
+			//	default:
+			//		log.Println(e.Code(), e.Message())
+			//	}
+			//}
 			c.err <- fmt.Errorf("could not receive: %w", err)
+			log.Println("recv error:", err)
 			return
 		}
-		frame := gocan.NewFrame(*in.Id, in.Data, gocan.Incoming)
-		select {
-		case c.recv <- frame:
+		switch in.GetId() {
+		case 0:
+			c.err <- errors.New(string(in.GetData()))
+			return
+		//case SystemMsgError:
+		//	c.cfg.OnError(errors.New(string(in.GetData())))
+		//	continue
 		default:
-			c.cfg.OnError(errors.New("recv channel full"))
+			frame := gocan.NewFrame(in.GetId(), in.GetData(), gocan.Incoming)
+			select {
+			case c.recv <- frame:
+			default:
+				c.cfg.OnError(errors.New("recv channel full"))
+			}
 		}
+
 	}
 }
 

@@ -132,16 +132,29 @@ func (s *Server) Stream(srv grpc.BidiStreamingServer[proto.CANFrame, proto.CANFr
 
 	errg, ctx := errgroup.WithContext(gctx)
 
-	cl, err := gocan.New(ctx, dev)
-	if err != nil {
+	if err := dev.Init(ctx); err != nil {
 		send(srv, 0, []byte(err.Error()))
 		return fmt.Errorf("failed to create client: %w", err)
 	}
-	defer cl.Close()
+	defer dev.Close()
 
-	canRX := cl.SubscribeChan(ctx)
+	// send mesage from canbus adapter to IPC
+	errg.Go(s.recvManager(ctx, srv, dev))
 
-	errg.Go(func() error {
+	// send message from IPC to canbus adapter
+	go s.sendManager(srv, dev)()
+
+	send(srv, 0, []byte("OK"))
+	if err := errg.Wait(); err != nil {
+		log.Println("stream error:", err)
+		return err
+	}
+	return nil
+}
+
+func (s *Server) recvManager(ctx context.Context, srv grpc.BidiStreamingServer[proto.CANFrame, proto.CANFrame], dev gocan.Adapter) func() error {
+	return func() error {
+		defer log.Println("recvManager exited")
 		for {
 			select {
 			case <-ctx.Done():
@@ -149,18 +162,13 @@ func (s *Server) Stream(srv grpc.BidiStreamingServer[proto.CANFrame, proto.CANFr
 			case err := <-dev.Err():
 				send(srv, adapter.SystemMsgError, []byte(err.Error()))
 				return fmt.Errorf("adapter error: %w", err)
-			}
-		}
-	})
-
-	// send mesage from canbus adapter to IPC
-	errg.Go(func() error {
-		defer log.Println("incoming closed")
-		for {
-			select {
-			case msg, ok := <-canRX:
+			case msg, ok := <-dev.Recv():
 				if !ok {
 					return errors.New("canRX closed")
+				}
+				if msg == nil {
+					log.Println("nil message")
+					continue
 				}
 				id := msg.Identifier()
 				frameTyp := proto.CANFrameTypeEnum(msg.Type().Type)
@@ -178,14 +186,13 @@ func (s *Server) Stream(srv grpc.BidiStreamingServer[proto.CANFrame, proto.CANFr
 				if err := srv.Send(mmsg); err != nil {
 					return fmt.Errorf("failed to send message: %w", err)
 				}
-			case <-ctx.Done():
-				return ctx.Err()
 			}
 		}
-	})
+	}
+}
 
-	// send message from IPC to canbus adapter
-	errg.Go(func() error {
+func (s *Server) sendManager(srv grpc.BidiStreamingServer[proto.CANFrame, proto.CANFrame], dev gocan.Adapter) func() error {
+	return func() error {
 		defer log.Println("outgoing closed")
 		for {
 			msg, err := srv.Recv()
@@ -202,17 +209,14 @@ func (s *Server) Stream(srv grpc.BidiStreamingServer[proto.CANFrame, proto.CANFr
 				Type:      int(t.GetFrameType()),
 				Responses: int(t.GetResponses()),
 			})
-			if err := cl.Send(frame); err != nil {
-				return fmt.Errorf("failed to send frame: %w", err)
+
+			select {
+			case dev.Send() <- frame:
+			default:
+				send(srv, adapter.SystemMsgError, []byte("adapter send buffer full"))
 			}
 		}
-	})
-	send(srv, 0, []byte("OK"))
-	if err := errg.Wait(); err != nil {
-		log.Println("stream error:", err)
-		return err
 	}
-	return nil
 }
 
 func (s *Server) GetAdapters(ctx context.Context, _ *emptypb.Empty) (*proto.Adapters, error) {

@@ -36,8 +36,10 @@ func init() {
 }
 
 type J2534 struct {
-	*BaseAdapter
-	h                                    *passthru.PassThru
+	BaseAdapter
+
+	h *passthru.PassThru
+
 	channelID, deviceID, flags, protocol uint32
 	useExtendedID                        bool
 
@@ -325,6 +327,9 @@ func (ma *J2534) sendManager() {
 		case <-ma.close:
 			return
 		case f := <-ma.send:
+			if f.Identifier() >= SystemMsg {
+				continue
+			}
 			msg := &passthru.PassThruMsg{
 				ProtocolID:     ma.protocol,
 				DataSize:       uint32(f.Length() + 4),
@@ -361,9 +366,6 @@ func (ma *J2534) sendMsg(msg *passthru.PassThruMsg) error {
 
 func (ma *J2534) Close() error {
 	ma.BaseAdapter.Close()
-	for i := 0; i < 2; i++ {
-		ma.close <- struct{}{}
-	}
 	time.Sleep(200 * time.Millisecond)
 	err := ma.h.PassThruIoctl(ma.channelID, passthru.CLEAR_MSG_FILTERS, nil, nil)
 	if err != nil {

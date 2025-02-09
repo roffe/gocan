@@ -15,7 +15,7 @@ import (
 )
 
 type SLCan struct {
-	*BaseAdapter
+	BaseAdapter
 	port   serial.Port
 	closed bool
 }

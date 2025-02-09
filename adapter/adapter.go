@@ -38,8 +38,8 @@ type BaseAdapter struct {
 	once       sync.Once
 }
 
-func NewBaseAdapter(cfg *gocan.AdapterConfig) *BaseAdapter {
-	return &BaseAdapter{
+func NewBaseAdapter(cfg *gocan.AdapterConfig) BaseAdapter {
+	return BaseAdapter{
 		cfg:   cfg,
 		send:  make(chan gocan.CANFrame, 40),
 		recv:  make(chan gocan.CANFrame, 40),

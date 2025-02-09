@@ -32,7 +32,7 @@ func init() {
 }
 
 type YACA struct {
-	*BaseAdapter
+	BaseAdapter
 	port   serial.Port
 	closed bool
 }

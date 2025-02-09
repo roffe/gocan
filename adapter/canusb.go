@@ -33,7 +33,7 @@ func init() {
 }
 
 type Canusb struct {
-	*BaseAdapter
+	BaseAdapter
 	port         serial.Port
 	canRate      string
 	filter, mask string
@@ -206,6 +206,9 @@ func (cu *Canusb) sendManager(ctx context.Context) {
 					fmt.Fprint(os.Stderr, ">> "+v.String()+"\n")
 				}
 			default:
+				if v.Identifier() >= SystemMsg {
+					continue
+				}
 				f.Reset()
 				// cu.mu.Lock()
 				idb := make([]byte, 4)

@@ -38,7 +38,7 @@ var elm327AdapterSpeeds = []int{38400, 115200, 230400, 285714, 500000, 1000000, 
 } */
 
 type ELM327 struct {
-	*BaseAdapter
+	BaseAdapter
 
 	port     serial.Port
 	canrate  string

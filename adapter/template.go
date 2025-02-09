@@ -7,7 +7,7 @@ import (
 )
 
 type Template struct {
-	*BaseAdapter
+	BaseAdapter
 }
 
 func NewTemplate(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
