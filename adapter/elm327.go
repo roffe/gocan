@@ -39,20 +39,18 @@ var elm327AdapterSpeeds = []int{38400, 115200, 230400, 285714, 500000, 1000000, 
 
 type ELM327 struct {
 	BaseAdapter
-
-	port     serial.Port
-	canrate  string
-	protocol string
-
+	port         serial.Port
+	canrate      string
+	protocol     string
 	closed       bool
 	filter, mask string
-	semChan      chan token
+	semChan      chan struct{}
 }
 
 func NewELM327(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	elm := &ELM327{
-		BaseAdapter: NewBaseAdapter(cfg),
-		semChan:     make(chan token, 1),
+		BaseAdapter: NewBaseAdapter("ELM327", cfg),
+		semChan:     make(chan struct{}, 1),
 	}
 
 	if err := elm.setCANrate(cfg.CANRate); err != nil {
@@ -75,11 +73,7 @@ func (elm *ELM327) SetFilter(filters []uint32) error {
 	return nil
 }
 
-func (elm *ELM327) Name() string {
-	return "ELM327"
-}
-
-func (elm *ELM327) Init(ctx context.Context) error {
+func (elm *ELM327) Connect(ctx context.Context) error {
 	mode := &serial.Mode{
 		BaudRate: elm.cfg.PortBaudrate,
 		Parity:   serial.NoParity,
@@ -291,7 +285,7 @@ func (elm *ELM327) sendManager(ctx context.Context) {
 				binary.BigEndian.PutUint32(idb, v.Identifier())
 
 				t := v.Type()
-				timeout := v.Timeout().Milliseconds()
+				timeout := v.GetTimeout().Milliseconds()
 
 				//a := v.Identifier()
 				// write cmd and header
@@ -307,7 +301,7 @@ func (elm *ELM327) sendManager(ctx context.Context) {
 				f.WriteString(",r:" + strconv.Itoa(t.GetResponseCount()) + "\r")
 
 			}
-			elm.semChan <- token{}
+			elm.semChan <- struct{}{}
 			if elm.cfg.Debug {
 				elm.cfg.OnMessage("<o> " + f.String())
 			}

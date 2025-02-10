@@ -10,21 +10,17 @@ type Template struct {
 	BaseAdapter
 }
 
-func NewTemplate(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
+func NewTemplate(name string, cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	return &Template{
-		BaseAdapter: NewBaseAdapter(cfg),
+		BaseAdapter: NewBaseAdapter(name, cfg),
 	}, nil
 }
 
-func (a *Template) SetFilter(filters []uint32) error {
+func (a *Template) Connect(ctx context.Context) error {
 	return nil
 }
 
-func (a *Template) Name() string {
-	return "Template"
-}
-
-func (a *Template) Init(ctx context.Context) error {
+func (a *Template) SetFilter(filters []uint32) error {
 	return nil
 }
 

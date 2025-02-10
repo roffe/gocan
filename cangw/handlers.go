@@ -64,6 +64,7 @@ func adapterConfigFromContext(ctx context.Context) (string, *gocan.AdapterConfig
 		CANFilter:              canfilters,
 		UseExtendedID:          useExtendedID,
 		MinimumFirmwareVersion: minversion,
+		PrintVersion:           true,
 	}, nil
 }
 
@@ -106,7 +107,7 @@ func (s *Server) Stream(srv grpc.BidiStreamingServer[proto.CANFrame, proto.CANFr
 	}
 
 	adapterConfig.OnError = func(err error) {
-		send(srv, adapter.SystemMsgError, []byte(err.Error()))
+		send(srv, gocan.SystemMsgError, []byte(err.Error()))
 		log.Printf("adapter error: %v", err)
 		_, file, no, ok := runtime.Caller(1)
 		if ok {
@@ -132,19 +133,18 @@ func (s *Server) Stream(srv grpc.BidiStreamingServer[proto.CANFrame, proto.CANFr
 
 	errg, ctx := errgroup.WithContext(gctx)
 
-	if err := dev.Init(ctx); err != nil {
+	if err := dev.Connect(ctx); err != nil {
 		send(srv, 0, []byte(err.Error()))
 		return fmt.Errorf("failed to create client: %w", err)
 	}
 	defer dev.Close()
 
+	send(srv, 0, []byte("OK"))
 	// send mesage from canbus adapter to IPC
 	errg.Go(s.recvManager(ctx, srv, dev))
-
 	// send message from IPC to canbus adapter
 	go s.sendManager(srv, dev)()
 
-	send(srv, 0, []byte("OK"))
 	if err := errg.Wait(); err != nil {
 		log.Println("stream error:", err)
 		return err
@@ -160,7 +160,7 @@ func (s *Server) recvManager(ctx context.Context, srv grpc.BidiStreamingServer[p
 			case <-ctx.Done():
 				return ctx.Err()
 			case err := <-dev.Err():
-				send(srv, adapter.SystemMsgError, []byte(err.Error()))
+				send(srv, gocan.SystemMsgError, []byte(err.Error()))
 				return fmt.Errorf("adapter error: %w", err)
 			case msg, ok := <-dev.Recv():
 				if !ok {
@@ -213,7 +213,7 @@ func (s *Server) sendManager(srv grpc.BidiStreamingServer[proto.CANFrame, proto.
 			select {
 			case dev.Send() <- frame:
 			default:
-				send(srv, adapter.SystemMsgError, []byte("adapter send buffer full"))
+				send(srv, gocan.SystemMsgError, []byte("adapter send buffer full"))
 			}
 		}
 	}

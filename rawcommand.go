@@ -35,6 +35,6 @@ func (f *RawCommand) SetTimeout(t time.Duration) {
 	f.timeout = t
 }
 
-func (f *RawCommand) Timeout() time.Duration {
+func (f *RawCommand) GetTimeout() time.Duration {
 	return f.timeout
 }

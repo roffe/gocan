@@ -133,7 +133,7 @@ This service allows the tester to perform the following tasks:
 func (cl *Client) InitiateDiagnosticOperation(ctx context.Context, subFunc byte) error {
 	payload := []byte{0x02, INITIATE_DIAGNOSTIC_OPERATION, subFunc}
 	frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
-	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
+	resp, err := cl.c.SendAndWait(ctx, frame, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
 		return fmt.Errorf("InitiateDiagnosticOperation: %w", err)
 	}
@@ -179,7 +179,7 @@ func (cl *Client) ReadDataByIdentifier(ctx context.Context, pid byte) ([]byte, e
 }
 
 func (cl *Client) ReadDataByIdentifierFrame(ctx context.Context, frame gocan.CANFrame) ([]byte, error) {
-	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
+	resp, err := cl.c.SendAndWait(ctx, frame, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
 		return nil, err
 	}
@@ -211,7 +211,7 @@ func (cl *Client) ReadDataByIdentifierFrame(ctx context.Context, frame gocan.CAN
 		var seq byte = 0x21
 		for framesToReceive > 0 {
 			select {
-			case response := <-cc.C():
+			case response := <-cc.Chan():
 				frameData := response.Data()
 				if frameData[0]&0x20 != 0x20 {
 					if err := CheckErr(response); err != nil {
@@ -266,7 +266,7 @@ another vehicle bus (e.g., KWP2000 or Class 2). This requirement is necessary to
 other devices on the GMLAN subnet.
 */
 func (cl *Client) ReturnToNormalMode(ctx context.Context) error {
-	resp, err := cl.c.SendAndPoll(
+	resp, err := cl.c.SendAndWait(
 		ctx,
 		gocan.NewFrame(cl.canID, []byte{0x01, RETURN_TO_NORMAL_MODE}, gocan.ResponseRequired),
 		cl.defaultTimeout,
@@ -291,7 +291,7 @@ func (cl *Client) ReadMemoryByAddress(ctx context.Context, address, length uint3
 	//log.Printf("ReadMemoryByAddress: address: %X, length: %X", address, length)
 	data := []byte{0x06, READ_MEMORY_BY_ADDRESS, byte(address >> 16), byte(address >> 8), byte(address), byte(length >> 8), byte(length)}
 	frame := gocan.NewFrame(cl.canID, data, gocan.ResponseRequired)
-	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout*2, cl.recvID...)
+	resp, err := cl.c.SendAndWait(ctx, frame, cl.defaultTimeout*2, cl.recvID...)
 	if err != nil {
 		return nil, err
 	}
@@ -320,7 +320,7 @@ func (cl *Client) ReadMemoryByAddress(ctx context.Context, address, length uint3
 		var seq byte = 0x21
 		for framesToReceive > 0 {
 			select {
-			case response := <-cc.C():
+			case response := <-cc.Chan():
 				frameData := response.Data()
 				if frameData[0]&0x20 != 0x20 {
 					if err := CheckErr(response); err != nil {
@@ -352,7 +352,7 @@ func (cl *Client) ReadMemoryByAddress(ctx context.Context, address, length uint3
 
 //func (cl *Client) sendAndReceive(ctx context.Context, payload []byte) (gocan.CANFrame, error) {
 //	frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
-//	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
+//	resp, err := cl.c.SendAndWait(ctx, frame, cl.defaultTimeout, cl.recvID...)
 //	if err != nil {
 //		return nil, err
 //	}
@@ -370,7 +370,7 @@ func (cl *Client) ReadMemoryByAddress(ctx context.Context, address, length uint3
 func (cl *Client) SecurityAccessRequestSeed(ctx context.Context, accessLevel byte) ([]byte, error) {
 	payload := []byte{0x02, SECURITY_ACCESS, accessLevel}
 	frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
-	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
+	resp, err := cl.c.SendAndWait(ctx, frame, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
 		return nil, fmt.Errorf("SecurityAccessRequestSeed: %w", err)
 	}
@@ -388,7 +388,7 @@ func (cl *Client) SecurityAccessRequestSeed(ctx context.Context, accessLevel byt
 func (cl *Client) SecurityAccessSendKey(ctx context.Context, accessLevel, high, low byte) error {
 	respPayload := []byte{0x04, SECURITY_ACCESS, accessLevel + 0x01, high, low}
 	frame := gocan.NewFrame(cl.canID, respPayload, gocan.ResponseRequired)
-	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
+	resp, err := cl.c.SendAndWait(ctx, frame, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
 		return fmt.Errorf("SecurityAccessSendKey: %w", err)
 	}
@@ -441,7 +441,7 @@ of the service is to set up a programming event. This is a required service that
 */
 func (cl *Client) DisableNormalCommunication(ctx context.Context) error {
 	frame := gocan.NewFrame(cl.canID, []byte{0x01, DISABLE_NORMAL_COMMUNICATION}, gocan.ResponseRequired)
-	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
+	resp, err := cl.c.SendAndWait(ctx, frame, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
 		return fmt.Errorf("DisableNormalCommunication: %w", err)
 	}
@@ -472,7 +472,7 @@ its diagnostic routines and bus bandwidth utilization by packing
 func (cl *Client) DynamicallyDefineMessage(ctx context.Context, ids ...uint16) error {
 	//id := 4027
 	frame := gocan.NewFrame(cl.canID, []byte{0x06, DYNAMICALLY_DEFINE_MESSAGE, 0xFE, 0x03, 0x8D, 0x01, 0x01}, gocan.ResponseRequired)
-	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
+	resp, err := cl.c.SendAndWait(ctx, frame, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
 		return fmt.Errorf("DynamicallyDefineMessage: %w", err)
 	}
@@ -492,7 +492,7 @@ func (cl *Client) RequestDownload(ctx context.Context, z22se bool) error {
 	}
 
 	f := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
-	resp, err := cl.c.SendAndPoll(ctx, f, cl.defaultTimeout, cl.recvID...)
+	resp, err := cl.c.SendAndWait(ctx, f, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
 		return err
 	}
@@ -528,7 +528,7 @@ func (cl *Client) Execute(ctx context.Context, startAddress uint32) error {
 		byte(startAddress >> 8),
 		byte(startAddress),
 	}
-	resp, err := cl.c.SendAndPoll(ctx, gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired), cl.defaultTimeout, cl.recvID...)
+	resp, err := cl.c.SendAndWait(ctx, gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired), cl.defaultTimeout, cl.recvID...)
 	if err != nil {
 		return err
 	}
@@ -550,7 +550,7 @@ func (cl *Client) TransferData(ctx context.Context, subFunc byte, length byte, s
 	}
 
 	f := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
-	resp, err := cl.c.SendAndPoll(ctx, f, cl.defaultTimeout, cl.recvID...)
+	resp, err := cl.c.SendAndWait(ctx, f, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
 		return err
 	}
@@ -596,7 +596,7 @@ func (cl *Client) WriteDataByIdentifier(ctx context.Context, pid byte, data []by
 	//	payload = append(payload, 0x00)
 	//}
 	frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
-	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
+	resp, err := cl.c.SendAndWait(ctx, frame, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
 		return fmt.Errorf("WriteDataByIdentifier: %w", err)
 	}
@@ -612,7 +612,7 @@ func (cl *Client) WriteDataByIdentifier(ctx context.Context, pid byte, data []by
 //func (cl *Client) WriteDataByAddress(ctx context.Context, address uint32, data []byte) error {
 // 	payload := []byte{0x10, WRITE_DATA_BY_IDENTIFIER, 0x15, byte(address >> 16), byte(address >> 8), byte(address)}
 // 	frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
-// 	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
+// 	resp, err := cl.c.SendAndWait(ctx, frame, cl.defaultTimeout, cl.recvID...)
 // 	if err != nil {
 // 		return err
 // 	}
@@ -633,7 +633,7 @@ func (cl *Client) WriteDataByIdentifier(ctx context.Context, pid byte, data []by
 // 	//	payload = append(payload, 0x00)
 // 	//}
 // 	frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
-// 	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
+// 	resp, err := cl.c.SendAndWait(ctx, frame, cl.defaultTimeout, cl.recvID...)
 // 	if err != nil {
 // 		return fmt.Errorf("WriteDataByIdentifier: %w", err)
 // 	}
@@ -651,7 +651,7 @@ func (cl *Client) WriteDataByAddress(ctx context.Context, address uint32, data [
 	payload := []byte{0x10, leng, WRITE_DATA_BY_IDENTIFIER, 0x15, byte(address >> 16), byte(address >> 8), byte(address), byte(len(data))}
 	frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
 	//	log.Println(frame.String())
-	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
+	resp, err := cl.c.SendAndWait(ctx, frame, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
 		return err
 	}
@@ -694,7 +694,7 @@ func (cl *Client) WriteDataByAddress(ctx context.Context, address uint32, data [
 		} else {
 			frame := gocan.NewFrame(cl.canID, pkg, gocan.ResponseRequired)
 			// log.Println(frame.String())
-			resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
+			resp, err := cl.c.SendAndWait(ctx, frame, cl.defaultTimeout, cl.recvID...)
 			if err != nil {
 				return err
 			}
@@ -728,7 +728,7 @@ func (cl *Client) writeDataByIdentifierMultiframe(ctx context.Context, pid byte,
 	payload := append([]byte{0x10, leng, WRITE_DATA_BY_IDENTIFIER, pid}, firstPart...)
 	frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
 	//	log.Println(frame.String())
-	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
+	resp, err := cl.c.SendAndWait(ctx, frame, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
 		return err
 	}
@@ -770,7 +770,7 @@ func (cl *Client) writeDataByIdentifierMultiframe(ctx context.Context, pid byte,
 		} else {
 			frame := gocan.NewFrame(cl.canID, pkg, gocan.ResponseRequired)
 			// log.Println(frame.String())
-			resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
+			resp, err := cl.c.SendAndWait(ctx, frame, cl.defaultTimeout, cl.recvID...)
 			if err != nil {
 				return err
 			}
@@ -799,7 +799,7 @@ func (cl *Client) writeDataByIdentifierMultiframe(ctx context.Context, pid byte,
 func (cl *Client) TesterPresentResponseRequired(ctx context.Context) error {
 	payload := []byte{0x01, 0x3E}
 	f := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
-	resp, err := cl.c.SendAndPoll(ctx, f, cl.defaultTimeout, cl.recvID...)
+	resp, err := cl.c.SendAndWait(ctx, f, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
 		return fmt.Errorf("TesterPresentResponseRequired: %v", err)
 	}
@@ -833,7 +833,7 @@ func (cl *Client) ReadDiagnosticInformationStatusOfDTCByStatusMask(ctx context.C
 // * The current programmed state of each programmable node.
 func (cl *Client) ReportProgrammedState(ctx context.Context) (byte, error) {
 	frame := gocan.NewFrame(cl.canID, []byte{0x01, REPORT_PROGRAMMED_STATE}, gocan.ResponseRequired)
-	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
+	resp, err := cl.c.SendAndWait(ctx, frame, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
 		return 0, fmt.Errorf("ReportProgrammedState: %w", err)
 	}
@@ -913,7 +913,7 @@ func (cl *Client) ProgrammingMode(ctx context.Context, subFunc byte) error {
 	switch subFunc {
 	case 0x01, 0x02:
 		frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
-		resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
+		resp, err := cl.c.SendAndWait(ctx, frame, cl.defaultTimeout, cl.recvID...)
 		if err != nil {
 			return err
 		}
@@ -950,7 +950,7 @@ func (cl *Client) readDiagnosticInformation(ctx context.Context, subFunc byte, p
 	}
 	header := []byte{0x03, 0xA9, subFunc}
 	frame := gocan.NewFrame(cl.canID, append(header, payload...), gocan.CANFrameType{Type: 2, Responses: 15})
-	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
+	resp, err := cl.c.SendAndWait(ctx, frame, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
 		return nil, err
 	}
@@ -963,7 +963,7 @@ func (cl *Client) readDiagnosticInformation(ctx context.Context, subFunc byte, p
 		outer:
 			for {
 				select {
-				case resp := <-ch.C():
+				case resp := <-ch.Chan():
 					d := resp.Data()
 					if d[1] == 0x00 && d[2] == 0x00 && d[3] == 0x00 { // No more DTCs
 						break outer
@@ -1013,7 +1013,7 @@ func (cl *Client) ReadDataByPacketIdentifier(ctx context.Context, subFunc byte, 
 	)
 	//	log.Println(f.String())
 
-	resp, err := cl.c.SendAndPoll(ctx, f, cl.defaultTimeout, cl.recvID...)
+	resp, err := cl.c.SendAndWait(ctx, f, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
 		return nil, fmt.Errorf("ReadDataByPacketIdentifier: %w", err)
 	}
@@ -1052,7 +1052,7 @@ func (cl *Client) ReadDataByPacketIdentifier(ctx context.Context, subFunc byte, 
 func (cl *Client) DeviceControl(ctx context.Context, command byte) error {
 	payload := []byte{0x02, DEVICE_CONTROL, command}
 	frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
-	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
+	resp, err := cl.c.SendAndWait(ctx, frame, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
 		return err
 	}
@@ -1063,7 +1063,7 @@ func (cl *Client) DeviceControlWithCode(ctx context.Context, command byte, code 
 	payload := []byte{0x07, DEVICE_CONTROL, command}
 	payload = append(payload, code...)
 	frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
-	resp, err := cl.c.SendAndPoll(ctx, frame, cl.defaultTimeout, cl.recvID...)
+	resp, err := cl.c.SendAndWait(ctx, frame, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
 		return err
 	}
@@ -1074,7 +1074,7 @@ func (cl *Client) DeviceControlWithCode(ctx context.Context, command byte, code 
 func (cl *Client) ReadDataByIdentifier(ctx context.Context, pid byte) ([]byte, error) {
 	out := bytes.NewBuffer([]byte{})
 	f := gocan.NewFrame(cl.canID, []byte{0x02, 0x1A, pid}, gocan.ResponseRequired)
-	resp, err := cl.c.SendAndPoll(ctx, f, cl.defaultTimeout, cl.recvID...)
+	resp, err := cl.c.SendAndWait(ctx, f, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
 		return nil, err
 	}

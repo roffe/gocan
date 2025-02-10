@@ -32,7 +32,6 @@ func init() {
 
 type Just4Trionic struct {
 	BaseAdapter
-
 	port    serial.Port
 	canRate string
 	closed  bool
@@ -40,7 +39,7 @@ type Just4Trionic struct {
 
 func NewJust4Trionic(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	adapter := &Just4Trionic{
-		BaseAdapter: NewBaseAdapter(cfg),
+		BaseAdapter: NewBaseAdapter("Just4Trionic", cfg),
 	}
 
 	/*
@@ -109,11 +108,7 @@ func (*Just4Trionic) calcAcceptanceFilters(idList []uint32) (string, string) {
 	return fmt.Sprintf("M%08X", code), fmt.Sprintf("m%08X", mask)
 }
 
-func (a *Just4Trionic) Name() string {
-	return "Just4Trionic"
-}
-
-func (a *Just4Trionic) Init(ctx context.Context) error {
+func (a *Just4Trionic) Connect(ctx context.Context) error {
 	mode := &serial.Mode{
 		BaudRate: 115200,
 		Parity:   serial.NoParity,

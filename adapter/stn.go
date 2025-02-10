@@ -84,7 +84,6 @@ func init() {
 
 type STN struct {
 	BaseAdapter
-	name         string
 	port         serial.Port
 	canrateCMD   string
 	protocolCMD  string
@@ -96,8 +95,7 @@ type STN struct {
 func NewSTN(name string) func(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	return func(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 		stn := &STN{
-			name:        name,
-			BaseAdapter: NewBaseAdapter(cfg),
+			BaseAdapter: NewBaseAdapter(name, cfg),
 		}
 
 		if err := stn.setCANrate(cfg.CANRate); err != nil {
@@ -136,11 +134,7 @@ func (stn *STN) SetFilter(filters []uint32) error {
 	return nil
 }
 
-func (stn *STN) Name() string {
-	return stn.name
-}
-
-func (stn *STN) Init(ctx context.Context) error {
+func (stn *STN) Connect(ctx context.Context) error {
 	mode := &serial.Mode{
 		BaudRate: stn.cfg.PortBaudrate,
 		Parity:   serial.NoParity,
@@ -347,13 +341,13 @@ func (stn *STN) sendManager(ctx context.Context) {
 			case *gocan.RawCommand:
 				f.WriteString(v.String() + "\r")
 			default:
-				if v.Identifier() >= SystemMsg {
+				if v.Identifier() >= gocan.SystemMsg {
 					continue
 				}
 				stn.sendLock.Lock()
 				binary.BigEndian.PutUint32(idb, v.Identifier())
 				f.WriteString("STPXh:" + hex.EncodeToString(idb)[5:] + ",d:" + hex.EncodeToString(v.Data()))
-				timeout = v.Timeout().Milliseconds()
+				timeout = v.GetTimeout().Milliseconds()
 				if timeout != 0 && timeout != 200 {
 					f.WriteString(",t:" + strconv.Itoa(int(timeout)))
 				}

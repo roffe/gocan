@@ -43,7 +43,7 @@ type Canusb struct {
 
 func NewCanusb(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	cu := &Canusb{
-		BaseAdapter: NewBaseAdapter(cfg),
+		BaseAdapter: NewBaseAdapter("CANUSB", cfg),
 		buff:        bytes.NewBuffer(nil),
 		//sendMutex: make(chan token, 1),
 	}
@@ -52,10 +52,6 @@ func NewCanusb(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	}
 	cu.filter, cu.mask = cu.calcAcceptanceFilters(cfg.CANFilter)
 	return cu, nil
-}
-
-func (cu *Canusb) Name() string {
-	return "CANUSB"
 }
 
 func (cu *Canusb) SetFilter(filters []uint32) error {
@@ -67,7 +63,7 @@ func (cu *Canusb) SetFilter(filters []uint32) error {
 	return nil
 }
 
-func (cu *Canusb) Init(ctx context.Context) error {
+func (cu *Canusb) Connect(ctx context.Context) error {
 	mode := &serial.Mode{
 		BaudRate: cu.cfg.PortBaudrate,
 		Parity:   serial.NoParity,
@@ -206,7 +202,7 @@ func (cu *Canusb) sendManager(ctx context.Context) {
 					fmt.Fprint(os.Stderr, ">> "+v.String()+"\n")
 				}
 			default:
-				if v.Identifier() >= SystemMsg {
+				if v.Identifier() >= gocan.SystemMsg {
 					continue
 				}
 				f.Reset()

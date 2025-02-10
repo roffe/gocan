@@ -40,9 +40,8 @@ func init() {
 
 type Client struct {
 	BaseAdapter
-	adapterName string
-	closeOnce   sync.Once
-	conn        *grpc.ClientConn
+	closeOnce sync.Once
+	conn      *grpc.ClientConn
 }
 
 func NewClient(adapterName string, cfg *gocan.AdapterConfig) (*Client, error) {
@@ -67,8 +66,7 @@ func NewClient(adapterName string, cfg *gocan.AdapterConfig) (*Client, error) {
 		}
 	}
 	return &Client{
-		adapterName: adapterName,
-		BaseAdapter: NewBaseAdapter(cfg),
+		BaseAdapter: NewBaseAdapter(adapterName, cfg),
 	}, nil
 }
 
@@ -102,14 +100,14 @@ func NewGRPCClient() (*grpc.ClientConn, proto.GocanClient, error) {
 	return conn, proto.NewGocanClient(conn), nil
 }
 
-func (c *Client) Init(gctx context.Context) error {
+func (c *Client) Connect(gctx context.Context) error {
 	conn, cl, err := NewGRPCClient()
 	if err != nil {
 		return fmt.Errorf("could not connect to GoCAN Gateway: %w", err)
 	}
 	c.conn = conn
 
-	ctx := metadata.NewOutgoingContext(gctx, createStreamMeta(c.adapterName, c.cfg))
+	ctx := metadata.NewOutgoingContext(gctx, createStreamMeta(c.name, c.cfg))
 
 	stream, err := cl.Stream(ctx)
 	if err != nil {
@@ -122,6 +120,7 @@ func (c *Client) Init(gctx context.Context) error {
 	}
 
 	if !bytes.Equal(initResp.Data, []byte("OK")) {
+		log.Printf("init response: %X", initResp.Data)
 		return fmt.Errorf("unexpected init response: %s", string(initResp.Data))
 	}
 
@@ -161,7 +160,7 @@ func (c *Client) sendManager(ctx context.Context, stream grpc.BidiStreamingClien
 
 }
 
-func (c *Client) recvManager(ctx context.Context, stream grpc.BidiStreamingClient[proto.CANFrame, proto.CANFrame]) {
+func (c *Client) recvManager(_ context.Context, stream grpc.BidiStreamingClient[proto.CANFrame, proto.CANFrame]) {
 	for {
 		in, err := stream.Recv()
 		if err != nil {
@@ -210,10 +209,6 @@ func (c *Client) Close() (err error) {
 		err = c.conn.Close()
 	}
 	return
-}
-
-func (c *Client) Name() string {
-	return c.adapterName
 }
 
 func (c *Client) SetFilter([]uint32) error {

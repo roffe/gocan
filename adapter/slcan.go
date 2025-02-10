@@ -38,12 +38,12 @@ func init() {
 
 func NewSLCan(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	sl := &SLCan{
-		BaseAdapter: NewBaseAdapter(cfg),
+		BaseAdapter: NewBaseAdapter("SLCan", cfg),
 	}
 	return sl, nil
 }
 
-func (sl *SLCan) Init(ctx context.Context) error {
+func (sl *SLCan) Connect(ctx context.Context) error {
 	mode := &serial.Mode{
 		BaudRate: sl.cfg.PortBaudrate,
 		Parity:   serial.NoParity,
@@ -98,10 +98,6 @@ func (sl *SLCan) Close() error {
 	sl.port.Write([]byte("C\r"))
 	time.Sleep(10 * time.Millisecond)
 	return sl.port.Close()
-}
-
-func (sl *SLCan) Name() string {
-	return "SLCan"
 }
 
 func (sl *SLCan) recvManager(ctx context.Context) {

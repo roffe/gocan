@@ -5,25 +5,40 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"sync"
+	"net"
 	"time"
 
 	"github.com/roffe/gocan"
+	"github.com/roffe/gocan/pkg/serialcommand"
 	"go.bug.st/serial"
 	"golang.org/x/mod/semver"
 )
 
 func init() {
 	if err := Register(&AdapterInfo{
-		Name:               "txbridge",
-		Description:        "txbridge",
-		RequiresSerialPort: true,
+		Name:               "txbridge wifi",
+		Description:        "txbridge over wifi",
+		RequiresSerialPort: false,
 		Capabilities: AdapterCapabilities{
 			HSCAN: true,
 			KLine: false,
 			SWCAN: false,
 		},
-		New: NewTxbridge,
+		New: NewTxbridge("txbridge wifi"),
+	}); err != nil {
+		panic(err)
+	}
+
+	if err := Register(&AdapterInfo{
+		Name:               "txbridge bluetooth",
+		Description:        "txbridge over bluetooth",
+		RequiresSerialPort: false,
+		Capabilities: AdapterCapabilities{
+			HSCAN: true,
+			KLine: false,
+			SWCAN: false,
+		},
+		New: NewTxbridge("txbridge bluetooth"),
 	}); err != nil {
 		panic(err)
 	}
@@ -31,93 +46,99 @@ func init() {
 
 type Txbridge struct {
 	BaseAdapter
-	port      serial.Port
-	closeOnce sync.Once
+	port io.ReadWriteCloser
 }
 
-func NewTxbridge(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
-	tx := &Txbridge{
-		BaseAdapter: NewBaseAdapter(cfg),
+func NewTxbridge(name string) func(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
+	return func(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
+		return &Txbridge{
+			BaseAdapter: NewBaseAdapter(name, cfg),
+		}, nil
 	}
-	return tx, nil
 }
 
-func (tx *Txbridge) SetFilter(filters []uint32) error {
-	return nil
-}
+func (tx *Txbridge) Connect(ctx context.Context) error {
+	switch tx.name {
+	case "txbridge wifi":
+		d := net.Dialer{Timeout: 2 * time.Second}
+		port, err := d.Dial("tcp", "192.168.4.1:1337")
+		if err != nil {
+			return err
+		}
+		if t, ok := tx.port.(*net.TCPConn); ok {
+			t.SetNoDelay(true)
+		}
+		tx.port = port
+	case "txbridge bluetooth":
+		mode := &serial.Mode{
+			BaudRate: tx.cfg.PortBaudrate,
+			Parity:   serial.NoParity,
+			DataBits: 8,
+			StopBits: serial.OneStopBit,
+		}
+		p, err := serial.Open(tx.cfg.Port, mode)
+		if err != nil {
+			return fmt.Errorf("failed to open com port %q : %v", tx.cfg.Port, err)
+		}
+		p.SetReadTimeout(10 * time.Millisecond)
+		tx.port = p
 
-func (tx *Txbridge) Name() string {
-	return "txbridge"
-}
-
-func (tx *Txbridge) Init(ctx context.Context) error {
-	mode := &serial.Mode{
-		BaudRate: tx.cfg.PortBaudrate,
-		Parity:   serial.NoParity,
-		DataBits: 8,
-		StopBits: serial.OneStopBit,
+		p.ResetOutputBuffer()
+		p.ResetInputBuffer()
+	default:
+		return fmt.Errorf("unknown txbridge type: %s", tx.name)
 	}
-	p, err := serial.Open(tx.cfg.Port, mode)
-	if err != nil {
-		return fmt.Errorf("failed to open com port %q : %v", tx.cfg.Port, err)
-	}
-	p.SetReadTimeout(10 * time.Millisecond)
-	tx.port = p
-
-	p.ResetOutputBuffer()
-	p.ResetInputBuffer()
 
 	tx.port.Write([]byte("ccc"))
 
 	if tx.cfg.MinimumFirmwareVersion != "" {
-		cmd := gocan.NewSerialCommand('v', []byte{0x10})
+		cmd := serialcommand.NewSerialCommand('v', []byte{0x10})
 		buf, err := cmd.MarshalBinary()
 		if err != nil {
-			p.Close()
+			tx.port.Close()
 			return err
 		}
 
-		if _, err := p.Write(buf); err != nil {
-			p.Close()
+		if _, err := tx.port.Write(buf); err != nil {
+			tx.port.Close()
 			return err
 		}
 
-		cmd, err = readSerialCommand(p, 5*time.Second)
+		cmd, err = readSerialCommand(tx.port, 5*time.Second)
 		if err != nil {
-			p.Close()
+			tx.port.Close()
 			return err
 		}
 
 		if err := checkErr(cmd); err != nil {
-			p.Close()
+			tx.port.Close()
 			return fmt.Errorf("version check failed: %w", err)
 		}
 
 		if cmd.Command != 'v' {
-			p.Close()
+			tx.port.Close()
 			return fmt.Errorf("unexpected response: %X %X", cmd.Command, cmd.Data)
 		}
 
 		tx.cfg.OnMessage("txbridge firmware version: " + string(cmd.Data))
 
 		if ver := semver.Compare("v"+string(cmd.Data), "v"+tx.cfg.MinimumFirmwareVersion); ver != 0 {
-			p.Close()
+			tx.port.Close()
 			return fmt.Errorf("txbridge firmware %s is required, please update the dongle", tx.cfg.MinimumFirmwareVersion)
 		}
 	}
 
 	canRate := uint16(tx.cfg.CANRate)
 
-	cmd := &gocan.SerialCommand{
+	cmd := &serialcommand.SerialCommand{
 		Command: 'o',
 		Data:    []byte{uint8(canRate), uint8(canRate >> 8)},
 	}
 	openCmd, err := cmd.MarshalBinary()
 	if err != nil {
-		p.Close()
+		tx.port.Close()
 		return err
 	}
-
 	tx.port.Write(openCmd)
 
 	go tx.recvManager(ctx)
@@ -126,46 +147,50 @@ func (tx *Txbridge) Init(ctx context.Context) error {
 	return nil
 }
 
+func (tx *Txbridge) SetFilter(filters []uint32) error {
+	return nil
+}
+
 func (tx *Txbridge) Close() error {
 	tx.BaseAdapter.Close()
-	tx.closeOnce.Do(func() {
-		time.Sleep(200 * time.Millisecond)
-		if tx.port != nil {
-			tx.port.Write([]byte("c"))
-			tx.port.Drain()
-			tx.port.Close()
+	if tx.port != nil {
+		if _, err := tx.port.Write([]byte("c")); err != nil {
+			return fmt.Errorf("failed to write txbridge: %w", err)
 		}
-	})
+		if err := tx.port.Close(); err != nil {
+			return fmt.Errorf("failed to close txbridge: %w", err)
+		}
+		tx.port = nil
+	}
 	return nil
 }
 
 func (tx *Txbridge) sendManager(_ context.Context) {
-	defer tx.Close()
 	for {
 		select {
 		case <-tx.close:
 			return
 		case frame := <-tx.send:
-			if frame.Identifier() == SystemMsg {
+			if frame.Identifier() == gocan.SystemMsg {
 				_, err := tx.port.Write(frame.Data())
 				if err != nil {
-					tx.cfg.OnError(err)
+					tx.err <- err
 				}
 				continue
 			}
 
-			cmd := &gocan.SerialCommand{
+			cmd := &serialcommand.SerialCommand{
 				Command: 't',
 				Data:    append([]byte{uint8(frame.Identifier() >> 8), uint8(frame.Identifier()), byte(frame.Length())}, frame.Data()...),
 			}
 			buf, err := cmd.MarshalBinary()
 			if err != nil {
-				tx.cfg.OnError(err)
+				tx.err <- err
 				continue
 			}
 			_, err = tx.port.Write(buf)
 			if err != nil {
-				tx.cfg.OnError(err)
+				tx.err <- err
 				continue
 			}
 		}
@@ -173,6 +198,9 @@ func (tx *Txbridge) sendManager(_ context.Context) {
 }
 
 func (tx *Txbridge) recvManager(ctx context.Context) {
+	log.Println("recvManager start")
+	defer log.Println("recvManager exited")
+
 	var parsingCommand bool
 	var command uint8
 	var commandSize uint8
@@ -181,21 +209,22 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 	cmdbuff := make([]byte, 256)
 	var cmdbuffPtr uint8
 
-	//defer tx.Close()
-
-	readbuf := make([]byte, 16)
+	readbuf := make([]byte, 256)
 	for {
 		select {
 		case <-tx.close:
+			log.Println("recvManager adapter closed")
 			return
 		case <-ctx.Done():
+			log.Println("recvManager ctx done")
 			return
 		default:
 		}
 
 		n, err := tx.port.Read(readbuf)
 		if err != nil {
-			tx.cfg.OnError(err)
+			log.Println("recvManager read error", err)
+			tx.err <- err
 			return
 		}
 		if n == 0 {
@@ -225,7 +254,7 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 			if cmdbuffPtr == commandSize {
 				db := make([]byte, len(cmdbuff[:cmdbuffPtr]))
 				copy(db, cmdbuff[:cmdbuffPtr])
-				cmd := &gocan.SerialCommand{
+				cmd := &serialcommand.SerialCommand{
 					Command: command,
 					Data:    db,
 				}
@@ -248,32 +277,32 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 					)
 				case 'e':
 					frame = gocan.NewFrame(
-						SystemMsgError,
+						gocan.SystemMsgError,
 						cmd.Data[:commandSize],
 						gocan.Incoming,
 					)
 				case 'R':
 					frame = gocan.NewFrame(
-						SystemMsgDataRequest,
+						gocan.SystemMsgDataRequest,
 						cmd.Data[:commandSize],
 						gocan.Incoming,
 					)
 				case 'r':
 					frame = gocan.NewFrame(
-						SystemMsgDataResponse,
+						gocan.SystemMsgDataResponse,
 						cmd.Data[:commandSize],
 						gocan.Incoming,
 					)
 				case 'w':
 					// log.Printf("WBLReading: % X", cmd.Data[:commandSize])
 					frame = gocan.NewFrame(
-						SystemMsgWBLReading,
+						gocan.SystemMsgWBLReading,
 						cmd.Data[:commandSize],
 						gocan.Incoming,
 					)
 				case 'W':
 					frame = gocan.NewFrame(
-						SystemMsgWriteResponse,
+						gocan.SystemMsgWriteResponse,
 						cmd.Data[:commandSize],
 						gocan.Incoming,
 					)
@@ -301,7 +330,7 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 	}
 }
 
-func checkErr(cmd *gocan.SerialCommand) error {
+func checkErr(cmd *serialcommand.SerialCommand) error {
 	if cmd.Command == 'e' {
 		return fmt.Errorf("error: %X %X", cmd.Command, cmd.Data)
 	}
@@ -309,7 +338,7 @@ func checkErr(cmd *gocan.SerialCommand) error {
 }
 
 // readSerialCommand reads a single command from the serial port with timeout
-func readSerialCommand(port io.Reader, timeout time.Duration) (*gocan.SerialCommand, error) {
+func readSerialCommand(port io.Reader, timeout time.Duration) (*serialcommand.SerialCommand, error) {
 	deadline := time.Now().Add(timeout)
 
 	var (
@@ -353,7 +382,7 @@ func readSerialCommand(port io.Reader, timeout time.Duration) (*gocan.SerialComm
 				data := make([]byte, cmdbuffPtr)
 				copy(data, cmdbuff[:cmdbuffPtr])
 
-				return &gocan.SerialCommand{
+				return &serialcommand.SerialCommand{
 					Command: command,
 					Data:    data,
 				}, nil
@@ -371,8 +400,8 @@ func readSerialCommand(port io.Reader, timeout time.Duration) (*gocan.SerialComm
 }
 
 // writeSerialCommand writes a single command to the serial port
-func writeSerialCommand(port serial.Port, command byte, data []byte) error {
-	cmd := &gocan.SerialCommand{
+func writeSerialCommand(port io.Writer, command byte, data []byte) error {
+	cmd := &serialcommand.SerialCommand{
 		Command: command,
 		Data:    data,
 	}

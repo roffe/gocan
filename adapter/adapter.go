@@ -16,21 +16,8 @@ var (
 	adapterMap = make(map[string]*AdapterInfo)
 )
 
-// We have 3 bits allowing 8 different system messages hidden in a 29bit can id stored in a uint32
-const (
-	SystemMsg uint32 = 0x80000000 + iota
-	SystemMsgError
-	SystemMsgDebug
-	SystemMsgWBLReading
-	SystemMsgDataResponse
-	SystemMsgDataRequest
-	SystemMsgWriteResponse
-	SystemMsgUnknown
-)
-
-type token struct{}
-
 type BaseAdapter struct {
+	name       string
 	cfg        *gocan.AdapterConfig
 	send, recv chan gocan.CANFrame
 	err        chan error
@@ -38,14 +25,19 @@ type BaseAdapter struct {
 	once       sync.Once
 }
 
-func NewBaseAdapter(cfg *gocan.AdapterConfig) BaseAdapter {
+func NewBaseAdapter(name string, cfg *gocan.AdapterConfig) BaseAdapter {
 	return BaseAdapter{
+		name:  name,
 		cfg:   cfg,
 		send:  make(chan gocan.CANFrame, 40),
 		recv:  make(chan gocan.CANFrame, 40),
 		err:   make(chan error, 5),
 		close: make(chan struct{}),
 	}
+}
+
+func (a *BaseAdapter) Name() string {
+	return a.name
 }
 
 func (a *BaseAdapter) Send() chan<- gocan.CANFrame {
@@ -100,6 +92,7 @@ func New(adapterName string, cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 }
 
 func Register(adapter *AdapterInfo) error {
+	log.Println("Registering adapter", adapter.Name)
 	if _, found := adapterMap[adapter.Name]; !found {
 		adapterMap[adapter.Name] = adapter
 		return nil

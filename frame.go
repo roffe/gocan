@@ -23,15 +23,16 @@ func (c *CANFrameType) GetResponseCount() int {
 }
 
 var (
-	Incoming         = CANFrameType{Type: 0, Responses: 0}
-	Outgoing         = CANFrameType{Type: 1, Responses: 0}
+	Incoming = CANFrameType{Type: 0, Responses: 0}
+	Outgoing = CANFrameType{Type: 1, Responses: 0}
+	// Used for ELM and STN adapters to signal we want the adapter to wait for a response
 	ResponseRequired = CANFrameType{Type: 2, Responses: 1}
 )
 
 type CANFrame interface {
 	// Return frame identifier
 	Identifier() uint32
-	// Return frame data length
+	// Return frame data length (DLC)
 	Length() int
 	// Return data of frame
 	Data() []byte
@@ -39,10 +40,10 @@ type CANFrame interface {
 	Type() CANFrameType
 	// Return fancy string version of frame
 	String() string
-	// Set response timeour
+	// Set response timeout
 	SetTimeout(time.Duration)
 	// Return response timeout
-	Timeout() time.Duration
+	GetTimeout() time.Duration
 }
 
 type Frame struct {
@@ -86,7 +87,7 @@ func (f *Frame) SetType(t CANFrameType) {
 	f.frameType = t
 }
 
-func (f *Frame) Timeout() time.Duration {
+func (f *Frame) GetTimeout() time.Duration {
 	return f.timeout
 }
 

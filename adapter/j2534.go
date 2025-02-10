@@ -18,9 +18,10 @@ import (
 )
 
 func init() {
-	for _, dll := range passthru.FindDLLs() {
+	for i, dll := range passthru.FindDLLs() {
+		name := fmt.Sprintf("J2534 #%d %s", i, dll.Name)
 		if err := Register(&AdapterInfo{
-			Name:               dll.Name,
+			Name:               name,
 			Description:        "J2534 Interface",
 			RequiresSerialPort: false,
 			Capabilities: AdapterCapabilities{
@@ -28,10 +29,11 @@ func init() {
 				KLine: dll.Capabilities.ISO9141 || dll.Capabilities.ISO14230,
 				SWCAN: dll.Capabilities.SWCANPS,
 			},
-			New: NewJ2534FromDLLName(dll.FunctionLibrary),
+			New: NewJ2534FromDLLName(name, dll.FunctionLibrary),
 		}); err != nil {
 			panic(err)
 		}
+
 	}
 }
 
@@ -47,16 +49,16 @@ type J2534 struct {
 	sync.Mutex
 }
 
-func NewJ2534FromDLLName(dllPath string) func(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
+func NewJ2534FromDLLName(name, dllPath string) func(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	return func(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 		cfg.Port = dllPath
-		return NewJ2534(cfg)
+		return NewJ2534(name, cfg)
 	}
 }
 
-func NewJ2534(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
+func NewJ2534(name string, cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	ma := &J2534{
-		BaseAdapter: NewBaseAdapter(cfg),
+		BaseAdapter: NewBaseAdapter(name, cfg),
 		channelID:   0,
 		deviceID:    0,
 	}
@@ -78,11 +80,7 @@ func (ma *J2534) SetFilter(filters []uint32) error {
 	return nil
 }
 
-func (ma *J2534) Name() string {
-	return "J2534"
-}
-
-func (ma *J2534) Init(ctx context.Context) error {
+func (ma *J2534) Connect(ctx context.Context) error {
 	runtime.LockOSThread()
 	var err error
 	ma.h, err = passthru.New(ma.cfg.Port)
@@ -327,7 +325,7 @@ func (ma *J2534) sendManager() {
 		case <-ma.close:
 			return
 		case f := <-ma.send:
-			if f.Identifier() >= SystemMsg {
+			if f.Identifier() >= gocan.SystemMsg {
 				continue
 			}
 			msg := &passthru.PassThruMsg{

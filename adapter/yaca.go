@@ -39,7 +39,7 @@ type YACA struct {
 
 func NewYACA(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	ya := &YACA{
-		BaseAdapter: NewBaseAdapter(cfg),
+		BaseAdapter: NewBaseAdapter("YACA", cfg),
 	}
 	return ya, nil
 }
@@ -54,11 +54,7 @@ func (ya *YACA) SetFilter(filters []uint32) error {
 	return nil
 }
 
-func (ya *YACA) Name() string {
-	return "YACA"
-}
-
-func (ya *YACA) Init(ctx context.Context) error {
+func (ya *YACA) Connect(ctx context.Context) error {
 	mode := &serial.Mode{
 		BaudRate: ya.cfg.PortBaudrate,
 		Parity:   serial.NoParity,

@@ -23,7 +23,7 @@ func (s *Sub) Close() {
 	s.c.fh.unregister <- s
 }
 
-func (s *Sub) C() chan CANFrame {
+func (s *Sub) Chan() <-chan CANFrame {
 	return s.callback
 }
 
@@ -44,10 +44,10 @@ func (s *Sub) Wait(ctx context.Context, timeout time.Duration) (CANFrame, error)
 
 // FrameHandler takes care of faning out incoming frames to any subs
 type FrameHandler struct {
+	adapter    Adapter
 	subs       map[*Sub]bool
 	register   chan *Sub
 	unregister chan *Sub
-	incoming   <-chan CANFrame
 	close      chan struct{}
 	closeOnce  sync.Once
 }
@@ -58,27 +58,25 @@ func newFrameHandler(adapter Adapter) *FrameHandler {
 		register:   make(chan *Sub, 40),
 		unregister: make(chan *Sub, 40),
 		close:      make(chan struct{}),
-		incoming:   adapter.Recv(),
+		adapter:    adapter,
 	}
 	return f
 }
 
 func (h *FrameHandler) run(ctx context.Context) {
 	defer func() {
-		log.Println("FrameHandler closed")
 		for sub := range h.subs {
 			delete(h.subs, sub)
 			close(sub.callback)
 		}
 	}()
-
 	for {
 		select {
 		case <-h.close:
-			log.Println("close channel closed")
+			//log.Println("close channel closed")
 			return
 		case <-ctx.Done():
-			log.Println("context done")
+			//log.Println("context done")
 			return
 		case sub, ok := <-h.register:
 			if !ok {
@@ -92,12 +90,12 @@ func (h *FrameHandler) run(ctx context.Context) {
 				return
 			}
 			h.unsub(sub)
-		case frame, ok := <-h.incoming:
+		case frame, ok := <-h.adapter.Recv():
 			if !ok {
 				log.Println("incoming channel closed")
 				return
 			}
-			h.fanout(frame)
+			h.processFrame(frame)
 		}
 	}
 }
@@ -112,7 +110,7 @@ func (h *FrameHandler) sub(sub *Sub) {
 	h.subs[sub] = true
 }
 
-func (h *FrameHandler) fanout(frame CANFrame) {
+func (h *FrameHandler) processFrame(frame CANFrame) {
 outer:
 	for sub := range h.subs {
 		select {

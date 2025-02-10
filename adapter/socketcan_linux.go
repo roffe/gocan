@@ -34,7 +34,7 @@ func init() {
 }
 
 type SocketCAN struct {
-	*BaseAdapter
+	BaseAdapter
 	d  *candevice.Device
 	tx *socketcan.Transmitter
 	rx *socketcan.Receiver
@@ -54,15 +54,11 @@ func NewSocketCANFromDevName(dev string) func(cfg *gocan.AdapterConfig) (gocan.A
 
 func NewSocketCAN(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	return &SocketCAN{
-		BaseAdapter: NewBaseAdapter(cfg),
+		BaseAdapter: NewBaseAdapter("SocketCAN", cfg),
 	}, nil
 }
 
-func (a *SocketCAN) Name() string {
-	return "SocketCAN"
-}
-
-func (a *SocketCAN) Init(ctx context.Context) error {
+func (a *SocketCAN) Connect(ctx context.Context) error {
 	var err error = nil
 	a.d, err = candevice.New(a.cfg.Port)
 	if err != nil {

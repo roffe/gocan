@@ -1,4 +1,4 @@
-package gocan
+package serialcommand
 
 import "fmt"
 

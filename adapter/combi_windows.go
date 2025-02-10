@@ -63,7 +63,7 @@ func init() {
 
 func NewCombi(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	return &CombiAdapter{
-		BaseAdapter: NewBaseAdapter(cfg),
+		BaseAdapter: NewBaseAdapter("CombiAdapter", cfg),
 		sendSem:     make(chan struct{}, 1),
 	}, nil
 }
@@ -72,11 +72,7 @@ func (ca *CombiAdapter) SetFilter(filters []uint32) error {
 	return nil
 }
 
-func (ca *CombiAdapter) Name() string {
-	return "CombiAdapter"
-}
-
-func (ca *CombiAdapter) Init(ctx context.Context) error {
+func (ca *CombiAdapter) Connect(ctx context.Context) error {
 	var err error
 	ca.usbCtx = gousb.NewContext()
 	ca.dev, err = ca.usbCtx.OpenDeviceWithVIDPID(combiVid, combiPid)
@@ -289,7 +285,7 @@ func (ca *CombiAdapter) sendManager() {
 		case <-ca.close:
 			return
 		case frame := <-ca.send:
-			if frame.Identifier() >= SystemMsg {
+			if frame.Identifier() >= gocan.SystemMsg {
 				continue
 			}
 			buff[0] = combiCmdtxFrame

@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/roffe/gocan"
-	"github.com/roffe/gocan/dvi"
+	"github.com/roffe/gocan/pkg/dvi"
 )
 
 func init() {
@@ -38,7 +38,7 @@ type OBDXProWifi struct {
 
 func NewOBDXProWifi(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	return &OBDXProWifi{
-		BaseAdapter: NewBaseAdapter(cfg),
+		BaseAdapter: NewBaseAdapter("OBDX Pro Wifi", cfg),
 	}, nil
 }
 
@@ -51,11 +51,7 @@ func (a *OBDXProWifi) SetFilter(filters []uint32) error {
 	return nil
 }
 
-func (a *OBDXProWifi) Name() string {
-	return "OBDX Pro Wifi"
-}
-
-func (a *OBDXProWifi) Init(ctx context.Context) error {
+func (a *OBDXProWifi) Connect(ctx context.Context) error {
 
 	if err := a.SetFilter(a.cfg.CANFilter); err != nil {
 		return err

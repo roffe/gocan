@@ -1,7 +1,7 @@
 # goCAN
 
-A Go linux/windows/osx CAN stack running in userland with low level adapter drivers written from the ground up
-J2534 support in Windows / Linux
+A Go Linux/Windows/OSX CAN library
+
 
 ## USB Serial
 
@@ -12,6 +12,12 @@ J2534 support in Windows / Linux
 * [CANUSB](https://lawicel-shop.se/elektronik/kommunikation/can/lawicel-canusb-adapter-1m-usb-cable/) adapter running in VCP mode using [Lawicel ascii api](http://www.can232.com/docs/canusb_manual.pdf)
 * CANable Nano and Pro running [slcan](https://github.com/normaldotcom/canable-fw)
 * [YACA](https://github.com/roffe/yaca)
+
+## Kvaser Canlib
+
+Tested with the following adapters
+
+* Kvaser Leaf Light V2 https://kvaser.com/
 
 ## J2534
 

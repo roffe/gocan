@@ -24,7 +24,7 @@ func main() {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	c, err := gocan.New(ctx, dev)
+	c, err := gocan.NewClient(ctx, dev)
 	if err != nil {
 		log.Fatal(err)
 	}

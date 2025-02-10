@@ -9,18 +9,26 @@ import (
 	"time"
 )
 
+// We have 3 bits allowing 8 different system messages hidden in a 29bit can id stored in a uint32
 const (
-	CR = 0x0D
+	SystemMsg uint32 = 0x80000000 + iota
+	SystemMsgError
+	SystemMsgDebug
+	SystemMsgWBLReading
+	SystemMsgDataResponse
+	SystemMsgDataRequest
+	SystemMsgWriteResponse
+	SystemMsgUnknown
 )
 
 type Adapter interface {
-	Init(context.Context) error
 	Name() string
+	Connect(context.Context) error
 	Recv() <-chan CANFrame
 	Send() chan<- CANFrame
 	Err() <-chan error
 	Close() error
-	SetFilter([]uint32) error
+	//SetFilter([]uint32) error
 }
 
 type AdapterConfig struct {
@@ -44,12 +52,12 @@ type Client struct {
 	closeOnce sync.Once
 }
 
-func New(ctx context.Context, adapter Adapter) (*Client, error) {
+func NewClient(ctx context.Context, adapter Adapter) (*Client, error) {
 	return NewWithOpts(ctx, adapter)
 }
 
 func NewWithOpts(ctx context.Context, adapter Adapter, opts ...Opts) (*Client, error) {
-	if err := adapter.Init(ctx); err != nil {
+	if err := adapter.Connect(ctx); err != nil {
 		return nil, err
 	}
 	c := &Client{
@@ -73,9 +81,9 @@ func (c *Client) Err() <-chan error {
 	return c.adapter.Err()
 }
 
-func (c *Client) SetFilter(filters []uint32) error {
-	return c.adapter.SetFilter(filters)
-}
+//func (c *Client) SetFilter(filters []uint32) error {
+//	return c.adapter.SetFilter(filters)
+//}
 
 func (c *Client) Close() (err error) {
 	c.closeOnce.Do(func() {
@@ -104,7 +112,7 @@ func (c *Client) SendFrame(identifier uint32, data []byte, f CANFrameType) error
 }
 
 // Send and wait up to <timeout> for a answer on given identifiers
-func (c *Client) SendAndPoll(ctx context.Context, frame CANFrame, timeout time.Duration, identifiers ...uint32) (CANFrame, error) {
+func (c *Client) SendAndWait(ctx context.Context, frame CANFrame, timeout time.Duration, identifiers ...uint32) (CANFrame, error) {
 	frame.SetTimeout(timeout)
 	p := c.newSub(ctx, 1, identifiers...)
 	c.fh.register <- p
@@ -117,8 +125,8 @@ func (c *Client) SendAndPoll(ctx context.Context, frame CANFrame, timeout time.D
 	return p.Wait(ctx, timeout)
 }
 
-// Poll for a certain CAN identifier for up to <timeout>
-func (c *Client) Poll(ctx context.Context, timeout time.Duration, identifiers ...uint32) (CANFrame, error) {
+// Wait for a certain CAN identifier for up to <timeout>
+func (c *Client) Wait(ctx context.Context, timeout time.Duration, identifiers ...uint32) (CANFrame, error) {
 	p := c.newSub(ctx, 1, identifiers...)
 	c.fh.register <- p
 	defer func() {

@@ -38,8 +38,7 @@ func init() {
 }
 
 type Combi struct {
-	*BaseAdapter
-
+	BaseAdapter
 	usbCtx *gousb.Context
 	dev    *gousb.Device
 	epIn   *gousb.InEndpoint
@@ -67,16 +66,12 @@ const (
 
 func NewCombi(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	return &Combi{
-		BaseAdapter: NewBaseAdapter(cfg),
+		BaseAdapter: NewBaseAdapter("CombiAdapter", cfg),
 	}, nil
 }
 
 func (a *Combi) SetFilter(filters []uint32) error {
 	return nil
-}
-
-func (a *Combi) Name() string {
-	return "Combi"
 }
 
 func FindDevice() bool {
@@ -90,7 +85,7 @@ func FindDevice() bool {
 	return true
 }
 
-func (a *Combi) Init(ctx context.Context) error {
+func (a *Combi) Connect(ctx context.Context) error {
 	a.usbCtx = gousb.NewContext()
 
 	var err error

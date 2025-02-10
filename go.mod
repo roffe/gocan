@@ -35,5 +35,5 @@ require (
 
 require (
 	github.com/creack/goselect v0.1.2 // indirect
-	golang.org/x/sys v0.27.0
+	golang.org/x/sys v0.30.0
 )
