@@ -205,14 +205,11 @@ func (k *Kvaser) recvFrame() (gocan.CANFrame, error) {
 	flags := C.uint(0)
 	time := C.ulong(0)
 	timeout := C.ulong(k.timeoutRead)
-
 	status := C.canReadWait(k.handle, &identifier, unsafe.Pointer(&data), &dlc, &flags, &time, timeout)
-	err := NewKvaserError(int(status))
-	if err != nil {
+	if err := NewKvaserError(int(status)); err != nil {
 		return nil, err
 	}
-	frame := gocan.NewFrame(uint32(identifier), data[:dlc], gocan.Incoming)
-	return frame, nil
+	return gocan.NewFrame(uint32(identifier), data[:dlc], gocan.Incoming), nil
 }
 
 func (k *Kvaser) sendManager(ctx context.Context) {
