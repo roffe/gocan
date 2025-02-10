@@ -60,6 +60,7 @@ func NewWithOpts(ctx context.Context, adapter Adapter, opts ...Opts) (*Client, e
 	if err := adapter.Connect(ctx); err != nil {
 		return nil, err
 	}
+
 	c := &Client{
 		fh:      newFrameHandler(adapter),
 		adapter: adapter,
@@ -137,23 +138,27 @@ func (c *Client) Wait(ctx context.Context, timeout time.Duration, identifiers ..
 
 // Subscribe to CAN identifiers and return a message channel
 func (c *Client) SubscribeChan(ctx context.Context, identifiers ...uint32) chan CANFrame {
-	p := c.newSub(ctx, 10, identifiers...)
+	p := c.newSub(ctx, 20, identifiers...)
 	c.fh.register <- p
 	return p.callback
 }
 
 // Subscribe to CAN identifiers and return a message channel
 func (c *Client) Subscribe(ctx context.Context, identifiers ...uint32) *Sub {
-	p := c.newSub(ctx, 10, identifiers...)
+	p := c.newSub(ctx, 20, identifiers...)
 	c.fh.register <- p
 	return p
 }
 
 func (c *Client) newSub(ctx context.Context, bufferSize int, identifiers ...uint32) *Sub {
+	idMap := make(map[uint32]struct{}, len(identifiers))
+	for _, id := range identifiers {
+		idMap[id] = struct{}{}
+	}
 	return &Sub{
 		ctx:         ctx,
 		c:           c,
-		identifiers: identifiers,
+		identifiers: idMap,
 		filterCount: len(identifiers),
 		callback:    make(chan CANFrame, bufferSize),
 	}

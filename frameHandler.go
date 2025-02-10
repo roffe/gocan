@@ -14,7 +14,7 @@ type Sub struct {
 	ctx         context.Context
 	c           *Client
 	errcount    uint32
-	identifiers []uint32
+	identifiers map[uint32]struct{}
 	filterCount int
 	callback    chan CANFrame
 }
@@ -111,7 +111,6 @@ func (h *FrameHandler) sub(sub *Sub) {
 }
 
 func (h *FrameHandler) processFrame(frame CANFrame) {
-outer:
 	for sub := range h.subs {
 		select {
 		case <-sub.ctx.Done():
@@ -122,11 +121,8 @@ outer:
 				h.deliver(sub, frame)
 				continue
 			}
-			for _, id := range sub.identifiers {
-				if id == frame.Identifier() {
-					h.deliver(sub, frame)
-					continue outer
-				}
+			if _, ok := sub.identifiers[frame.Identifier()]; ok {
+				h.deliver(sub, frame)
 			}
 		}
 	}
@@ -143,7 +139,7 @@ func (h *FrameHandler) deliver(sub *Sub, frame CANFrame) {
 	select {
 	case sub.callback <- frame:
 	default:
-		if atomic.AddUint32(&sub.errcount, 1) > 20 {
+		if atomic.AddUint32(&sub.errcount, 1) > 10 {
 			h.unregister <- sub
 		}
 	}
