@@ -92,7 +92,7 @@ func New(adapterName string, cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 }
 
 func Register(adapter *AdapterInfo) error {
-	log.Println("Registering adapter", adapter.Name)
+	//log.Println("Registering adapter", adapter.Name)
 	if _, found := adapterMap[adapter.Name]; !found {
 		adapterMap[adapter.Name] = adapter
 		return nil

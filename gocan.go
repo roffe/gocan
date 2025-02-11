@@ -115,39 +115,62 @@ func (c *Client) SendFrame(identifier uint32, data []byte, f CANFrameType) error
 // Send and wait up to <timeout> for a answer on given identifiers
 func (c *Client) SendAndWait(ctx context.Context, frame CANFrame, timeout time.Duration, identifiers ...uint32) (CANFrame, error) {
 	frame.SetTimeout(timeout)
-	p := c.newSub(ctx, 1, identifiers...)
-	c.fh.register <- p
+	sub := c.newSub(ctx, 1, identifiers...)
+	c.fh.register <- sub
 	defer func() {
-		c.fh.unregister <- p
+		c.fh.unregister <- sub
 	}()
 	if err := c.Send(frame); err != nil {
 		return nil, err
 	}
-	return p.Wait(ctx, timeout)
+	return sub.Wait(ctx, timeout)
 }
 
 // Wait for a certain CAN identifier for up to <timeout>
 func (c *Client) Wait(ctx context.Context, timeout time.Duration, identifiers ...uint32) (CANFrame, error) {
-	p := c.newSub(ctx, 1, identifiers...)
-	c.fh.register <- p
+	sub := c.newSub(ctx, 1, identifiers...)
+	c.fh.register <- sub
 	defer func() {
-		c.fh.unregister <- p
+		c.fh.unregister <- sub
 	}()
-	return p.Wait(ctx, timeout)
+	return sub.Wait(ctx, timeout)
+}
+
+func (c *Client) SubscribeFunc(ctx context.Context, f func(CANFrame), identifiers ...uint32) *Sub {
+	sub := c.newSub(ctx, 20, identifiers...)
+	c.fh.register <- sub
+	go func() {
+		defer func() {
+			c.fh.unregister <- sub
+		}()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case frame, ok := <-sub.callback:
+				if !ok {
+					return
+				}
+				f(frame)
+			}
+		}
+	}()
+	return sub
 }
 
 // Subscribe to CAN identifiers and return a message channel
-func (c *Client) SubscribeChan(ctx context.Context, identifiers ...uint32) chan CANFrame {
-	p := c.newSub(ctx, 20, identifiers...)
-	c.fh.register <- p
-	return p.callback
+func (c *Client) SubscribeChan(ctx context.Context, channel chan CANFrame, identifiers ...uint32) *Sub {
+	sub := c.newSub(ctx, 20, identifiers...)
+	sub.callback = channel
+	c.fh.register <- sub
+	return sub
 }
 
 // Subscribe to CAN identifiers and return a message channel
 func (c *Client) Subscribe(ctx context.Context, identifiers ...uint32) *Sub {
-	p := c.newSub(ctx, 20, identifiers...)
-	c.fh.register <- p
-	return p
+	sub := c.newSub(ctx, 20, identifiers...)
+	c.fh.register <- sub
+	return sub
 }
 
 func (c *Client) newSub(ctx context.Context, bufferSize int, identifiers ...uint32) *Sub {

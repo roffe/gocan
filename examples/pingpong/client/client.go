@@ -14,8 +14,6 @@ import (
 
 func init() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
-
-	log.Println(adapter.List())
 }
 
 func main() {
@@ -26,7 +24,7 @@ func main() {
 	sigChan := make(chan os.Signal, 2)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
-	dev, err := adapter.New("Canlib #0 Kvaser Leaf Light v2", &gocan.AdapterConfig{
+	dev, err := adapter.New("CANlib #0 Kvaser Leaf Light v2", &gocan.AdapterConfig{
 		CANRate: 500,
 	})
 	if err != nil {
@@ -41,6 +39,13 @@ func main() {
 
 	t := time.NewTicker(1 * time.Second)
 	defer t.Stop()
+
+	onMsg := func(f gocan.CANFrame) {
+		log.Println("Got frame: ", f.String())
+	}
+
+	subFunc := cl.SubscribeFunc(ctx, onMsg, 0x124)
+	defer subFunc.Close()
 
 	for {
 		select {

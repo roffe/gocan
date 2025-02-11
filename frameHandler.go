@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -37,7 +38,12 @@ func (s *Sub) Wait(ctx context.Context, timeout time.Duration) (CANFrame, error)
 		}
 		return f, nil
 	case <-time.After(timeout):
-		return nil, fmt.Errorf("timeout waiting for frame 0x%03X", s.identifiers)
+		identifiers := make([]uint32, 0, len(s.identifiers))
+		for id := range s.identifiers {
+			identifiers = append(identifiers, id)
+		}
+		slices.Sort(identifiers)
+		return nil, fmt.Errorf("timeout waiting for frame 0x%03X", identifiers)
 
 	}
 }
@@ -130,8 +136,8 @@ func (h *FrameHandler) processFrame(frame CANFrame) {
 
 func (h *FrameHandler) unsub(sub *Sub) {
 	if _, ok := h.subs[sub]; ok {
-		delete(h.subs, sub)
 		close(sub.callback)
+		delete(h.subs, sub)
 	}
 }
 
