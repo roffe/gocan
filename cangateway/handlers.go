@@ -22,50 +22,49 @@ import (
 )
 
 func adapterConfigFromContext(ctx context.Context) (string, *gocan.AdapterConfig, error) {
-	md, _ := metadata.FromIncomingContext(ctx)
-	for k, v := range md {
-		log.Printf("metadata: %s: %v", k, v)
+	md, exists := metadata.FromIncomingContext(ctx)
+	if !exists {
+		return "", nil, errors.New("connect metadata not found")
 	}
-
-	adaptername := md["adapter"][0]
-	adapterPort := md["port"][0]
+	dbg, err := strconv.ParseBool(md["debug"][0])
+	if err != nil {
+		return "", nil, fmt.Errorf("invalid debug: %w", err)
+	}
 	portBaudrate, err := strconv.Atoi(md["port_baudrate"][0])
 	if err != nil {
 		return "", nil, fmt.Errorf("invalid port_baudrate: %w", err)
 	}
-
 	canrate, err := strconv.ParseFloat(md["canrate"][0], 64)
 	if err != nil {
 		return "", nil, fmt.Errorf("invalid canrate: %w", err)
 	}
-
-	filterIDs := strings.Split(md["canfilter"][0], ",")
-
-	var canfilters []uint32
-	for _, id := range filterIDs {
-		i, err := strconv.ParseUint(id, 10, 32)
-		if err != nil {
-			return "", nil, fmt.Errorf("invalid canfilter: %w", err)
-		}
-		canfilters = append(canfilters, uint32(i))
-	}
-
 	useExtendedID, err := strconv.ParseBool(md["useextendedid"][0])
 	if err != nil {
 		return "", nil, fmt.Errorf("invalid useextendedid: %w", err)
 	}
-
-	minversion := md["minversion"][0]
-
-	return adaptername, &gocan.AdapterConfig{
-		Port:                   adapterPort,
+	return md["adapter"][0], &gocan.AdapterConfig{
+		Debug:                  dbg,
+		Port:                   md["port"][0],
 		PortBaudrate:           portBaudrate,
 		CANRate:                canrate,
-		CANFilter:              canfilters,
+		CANFilter:              parseFilters(strings.Split(md["canfilter"][0], ",")),
 		UseExtendedID:          useExtendedID,
-		MinimumFirmwareVersion: minversion,
+		MinimumFirmwareVersion: md["minversion"][0],
 		PrintVersion:           true,
 	}, nil
+}
+
+func parseFilters(filters []string) []uint32 {
+	var canfilters []uint32
+	for _, id := range filters {
+		i, err := strconv.ParseUint(id, 10, 32)
+		if err != nil {
+			log.Printf("invalid canfilter: %v", err)
+			continue
+		}
+		canfilters = append(canfilters, uint32(i))
+	}
+	return canfilters
 }
 
 func send(srv grpc.BidiStreamingServer[proto.CANFrame, proto.CANFrame], id uint32, data []byte) error {
@@ -138,6 +137,8 @@ func (s *Server) Stream(srv grpc.BidiStreamingServer[proto.CANFrame, proto.CANFr
 		return fmt.Errorf("failed to create client: %w", err)
 	}
 	defer dev.Close()
+	log.Printf("%s connected @ %g kbp/s", adaptername, adapterConfig.CANRate)
+	defer log.Printf("%s disconnected", adaptername)
 
 	send(srv, 0, []byte("OK"))
 	// send mesage from canbus adapter to IPC
@@ -146,6 +147,9 @@ func (s *Server) Stream(srv grpc.BidiStreamingServer[proto.CANFrame, proto.CANFr
 	go s.sendManager(srv, dev)()
 
 	if err := errg.Wait(); err != nil {
+		if err == context.Canceled {
+			return nil
+		}
 		log.Println("stream error:", err)
 		return err
 	}
@@ -154,7 +158,6 @@ func (s *Server) Stream(srv grpc.BidiStreamingServer[proto.CANFrame, proto.CANFr
 
 func (s *Server) recvManager(ctx context.Context, srv grpc.BidiStreamingServer[proto.CANFrame, proto.CANFrame], dev gocan.Adapter) func() error {
 	return func() error {
-		defer log.Println("recvManager exited")
 		for {
 			select {
 			case <-ctx.Done():
@@ -164,36 +167,42 @@ func (s *Server) recvManager(ctx context.Context, srv grpc.BidiStreamingServer[p
 				return fmt.Errorf("adapter error: %w", err)
 			case msg, ok := <-dev.Recv():
 				if !ok {
-					return errors.New("canRX closed")
+					return errors.New("adapter recv channel closed")
 				}
 				if msg == nil {
-					log.Println("nil message")
+					log.Println("adapter nil message")
 					continue
 				}
-				id := msg.Identifier()
-				frameTyp := proto.CANFrameTypeEnum(msg.Type().Type)
-				//log.Println("frameTyp:", frameTyp)
-				responses := uint32(msg.Type().Responses)
-				//log.Println("responses:", responses)
-				mmsg := &proto.CANFrame{
-					Id:   &id,
-					Data: msg.Data(),
-					FrameType: &proto.CANFrameType{
-						FrameType: &frameTyp,
-						Responses: &responses,
-					},
-				}
-				if err := srv.Send(mmsg); err != nil {
-					return fmt.Errorf("failed to send message: %w", err)
+				if err := s.recvMessage(srv, msg); err != nil {
+					return err
 				}
 			}
 		}
 	}
 }
 
+func (s *Server) recvMessage(srv grpc.BidiStreamingServer[proto.CANFrame, proto.CANFrame], msg gocan.CANFrame) error {
+	id := msg.Identifier()
+	frameType := proto.CANFrameTypeEnum(msg.Type().Type)
+	responseCount := uint32(msg.Type().Responses)
+	//log.Println("frameTyp:", frameTyp)
+	//log.Println("responses:", responses)
+	mmsg := &proto.CANFrame{
+		Id:   &id,
+		Data: msg.Data(),
+		FrameType: &proto.CANFrameType{
+			FrameType: &frameType,
+			Responses: &responseCount,
+		},
+	}
+	if err := srv.Send(mmsg); err != nil {
+		return fmt.Errorf("failed to send message: %w", err)
+	}
+	return nil
+}
+
 func (s *Server) sendManager(srv grpc.BidiStreamingServer[proto.CANFrame, proto.CANFrame], dev gocan.Adapter) func() error {
 	return func() error {
-		defer log.Println("outgoing closed")
 		for {
 			msg, err := srv.Recv()
 			if err != nil {
@@ -203,19 +212,21 @@ func (s *Server) sendManager(srv grpc.BidiStreamingServer[proto.CANFrame, proto.
 				}
 				return fmt.Errorf("failed to receive outgoing %w", err) // Something unexpected happened
 			}
-
-			t := msg.GetFrameType()
-			frame := gocan.NewFrame(*msg.Id, msg.Data, gocan.CANFrameType{
-				Type:      int(t.GetFrameType()),
-				Responses: int(t.GetResponses()),
-			})
-
-			select {
-			case dev.Send() <- frame:
-			default:
-				send(srv, gocan.SystemMsgError, []byte("adapter send buffer full"))
-			}
+			s.sendMessage(srv, dev, msg)
 		}
+	}
+}
+
+func (s *Server) sendMessage(srv grpc.BidiStreamingServer[proto.CANFrame, proto.CANFrame], dev gocan.Adapter, msg *proto.CANFrame) {
+	t := msg.GetFrameType()
+	frame := gocan.NewFrame(*msg.Id, msg.Data, gocan.CANFrameType{
+		Type:      int(t.GetFrameType()),
+		Responses: int(t.GetResponses()),
+	})
+	select {
+	case dev.Send() <- frame:
+	default:
+		send(srv, gocan.SystemMsgError, []byte("adapter send buffer full"))
 	}
 }
 

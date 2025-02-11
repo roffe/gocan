@@ -17,9 +17,11 @@ import (
 	"github.com/roffe/gocan"
 	"github.com/roffe/gocan/proto"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 var (
@@ -131,73 +133,90 @@ func (c *Client) Connect(gctx context.Context) error {
 }
 
 func (c *Client) sendManager(ctx context.Context, stream grpc.BidiStreamingClient[proto.CANFrame, proto.CANFrame]) {
+	if c.cfg.Debug {
+		log.Println("sendManager started")
+		defer log.Println("sendManager done")
+	}
 	for {
 		select {
-		case <-c.close:
-			log.Println("closing client")
-			return
-		case msg := <-c.send:
-			var id uint32 = msg.Identifier()
-			typ := proto.CANFrameTypeEnum(msg.Type().Type)
-			resps := uint32(msg.Type().Responses)
-			frame := &proto.CANFrame{
-				Id:   &id,
-				Data: msg.Data(),
-				FrameType: &proto.CANFrameType{
-					FrameType: &typ,
-					Responses: &resps,
-				},
-			}
-			if err := stream.Send(frame); err != nil {
-				c.err <- fmt.Errorf("could not send: %w", err)
-				return
-			}
 		case <-ctx.Done():
 			close(c.send)
 			return
+		case <-c.close:
+			return
+		case msg := <-c.send:
+			if err := c.sendMessage(stream, msg); err != nil {
+				c.err <- fmt.Errorf("sendManager: %w", err)
+				return
+			}
 		}
 	}
+}
 
+func (c *Client) sendMessage(stream grpc.BidiStreamingClient[proto.CANFrame, proto.CANFrame], msg gocan.CANFrame) error {
+	var id uint32 = msg.Identifier()
+	typ := proto.CANFrameTypeEnum(msg.Type().Type)
+	resps := uint32(msg.Type().Responses)
+	frame := &proto.CANFrame{
+		Id:   &id,
+		Data: msg.Data(),
+		FrameType: &proto.CANFrameType{
+			FrameType: &typ,
+			Responses: &resps,
+		},
+	}
+	return stream.Send(frame)
 }
 
 func (c *Client) recvManager(_ context.Context, stream grpc.BidiStreamingClient[proto.CANFrame, proto.CANFrame]) {
 	for {
 		in, err := stream.Recv()
-		if err != nil {
-			//if e, ok := status.FromError(err); ok {
-			//	switch e.Code() {
-			//	case codes.Canceled:
-			//		return
-			//	//case codes.PermissionDenied:
-			//	//	fmt.Println(e.Message()) // this will print PERMISSION_DENIED_TEST
-			//	//case codes.Internal:
-			//	//	fmt.Println("Has Internal Error")
-			//	//case codes.Aborted:
-			//	//	fmt.Println("gRPC Aborted the call")
-			//	default:
-			//		log.Println(e.Code(), e.Message())
-			//	}
-			//}
-			c.err <- fmt.Errorf("could not receive: %w", err)
-			log.Println("recv error:", err)
+		if c.isrecvError(err) {
 			return
 		}
-		switch in.GetId() {
-		case 0:
+		if in.GetId() == 0 {
 			c.err <- errors.New(string(in.GetData()))
 			return
-		//case SystemMsgError:
-		//	c.cfg.OnError(errors.New(string(in.GetData())))
-		//	continue
-		default:
-			frame := gocan.NewFrame(in.GetId(), in.GetData(), gocan.Incoming)
-			select {
-			case c.recv <- frame:
-			default:
-				c.cfg.OnError(errors.New("recv channel full"))
-			}
 		}
 
+		c.recvMessage(in.GetId(), in.GetData())
+	}
+}
+
+func (c *Client) isrecvError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if e, ok := status.FromError(err); ok {
+		if e.Code() == codes.Canceled {
+			return true
+		}
+		//switch e.Code() {
+		//case codes.Canceled:
+		//	return
+		//case codes.PermissionDenied:
+		//	fmt.Println(e.Message()) // this will print PERMISSION_DENIED_TEST
+		//case codes.Internal:
+		//	fmt.Println("Has Internal Error")
+		//case codes.Aborted:
+		//	fmt.Println("gRPC Aborted the call")
+		//default:
+		//	log.Println(e.Code(), e.Message())
+		//}
+	}
+
+	c.err <- fmt.Errorf("could not receive: %w", err)
+	log.Println("recv error:", err)
+	return true
+
+}
+
+func (c *Client) recvMessage(identifier uint32, data []byte) {
+	frame := gocan.NewFrame(identifier, data, gocan.Incoming)
+	select {
+	case c.recv <- frame:
+	default:
+		c.cfg.OnError(errors.New("recv channel full"))
 	}
 }
 

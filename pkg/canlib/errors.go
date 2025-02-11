@@ -17,73 +17,179 @@ func (ke *Error) Error() string {
 	return fmt.Sprintf("%v (%v)", ke.Description, ke.Code)
 }
 
-func NewError(code int) error {
-	if code >= int(StatusOK) {
+func createError(code int) error {
+	if code >= int(OK) {
 		return nil
 	}
 	err := [64]C.char{}
 	status := int(C.canGetErrorText(C.canStatus(code), &err[0], C.uint(unsafe.Sizeof(err))))
-	if status < int(StatusOK) {
+	if status < int(OK) {
 		return fmt.Errorf("unable to get description for error code %v (%v)", code, status)
 	}
 	return &Error{Code: code, Description: C.GoString(&err[0])}
 }
 
+func NewError[T ~int | ~int32 | int64](code T) error {
+	if code >= T(OK) {
+		return nil
+	}
+	switch code {
+	case T(ERR_PARAM):
+		return ErrParam
+	case T(ERR_NOMSG):
+		return ErrNoMsg
+	case T(ERR_NOTFOUND):
+		return ErrNotFound
+	case T(ERR_NOCHANNELS):
+		return ErrNoChannels
+	case T(ERR_INTERRUPTED):
+		return ErrInterrupted
+	case T(ERR_TIMEOUT):
+		return ErrTimeout
+	case T(ERR_NOTINITIALIZED):
+		return ErrNotInitialized
+	case T(ERR_NOHANDLES):
+		return ErrNoHandles
+	case T(ERR_INVHANDLE):
+		return ErrInvHandle
+	case T(ERR_INIFILE):
+		return ErrIniFile
+	case T(ERR_DRIVER):
+		return ErrDriver
+	case T(ERR_TXBUFOFL):
+		return ErrTxBufOfl
+	case T(ERR_RESERVED_1):
+		return ErrReserved1
+	case T(ERR_HARDWARE):
+		return ErrHardware
+	case T(ERR_DYNALOAD):
+		return ErrDynaLoad
+	case T(ERR_DYNALIB):
+		return ErrDynaLib
+	case T(ERR_DYNAINIT):
+		return ErrDynaInit
+	case T(ERR_NOT_SUPPORTED):
+		return ErrNotSupported
+	case T(ERR_RESERVED_5):
+		return ErrReserved5
+	case T(ERR_RESERVED_6):
+		return ErrReserved6
+	case T(ERR_RESERVED_2):
+		return ErrReserved2
+	case T(ERR_DRIVERLOAD):
+		return ErrDriverLoad
+	case T(ERR_DRIVERFAILED):
+		return ErrDriverFailed
+	case T(ERR_NOCONFIGMGR):
+		return ErrNoConfigMgr
+	case T(ERR_NOCARD):
+		return ErrNoCard
+	case T(ERR_RESERVED_7):
+		return ErrReserved7
+	case T(ERR_REGISTRY):
+		return ErrRegistry
+	case T(ERR_LICENSE):
+		return ErrLicense
+	case T(ERR_INTERNAL):
+		return ErrInternal
+	case T(ERR_NO_ACCESS):
+		return ErrNoAccess
+	case T(ERR_NOT_IMPLEMENTED):
+		return ErrNotImplemented
+	case T(ERR_DEVICE_FILE):
+		return ErrDeviceFile
+	case T(ERR_HOST_FILE):
+		return ErrHostFile
+	case T(ERR_DISK):
+		return ErrDisk
+	case T(ERR_CRC):
+		return ErrCrc
+	case T(ERR_CONFIG):
+		return ErrConfig
+	case T(ERR_MEMO_FAIL):
+		return ErrMemoFail
+	case T(ERR_SCRIPT_FAIL):
+		return ErrScriptFail
+	case T(ERR_SCRIPT_WRONG_VERSION):
+		return ErrScriptWrongVersion
+	case T(ERR_SCRIPT_TXE_CONTAINER_VERSION):
+		return ErrScriptTxeContainerVersion
+	case T(ERR_SCRIPT_TXE_CONTAINER_FORMAT):
+		return ErrScriptTxeContainerFormat
+	case T(ERR_BUFFER_TOO_SMALL):
+		return ErrBufferTooSmall
+	case T(ERR_IO_WRONG_PIN_TYPE):
+		return ErrIoWrongPinType
+	case T(ERR_IO_NOT_CONFIRMED):
+		return ErrIoNotConfirmed
+	case T(ERR_IO_CONFIG_CHANGED):
+		return ErrIoConfigChanged
+	case T(ERR_IO_PENDING):
+		return ErrIoPending
+	case T(ERR_IO_NO_VALID_CONFIG):
+		return ErrIoNoValidConfig
+	case T(ERR__RESERVED):
+		return ErrReserved
+	default:
+		return &Error{Code: int(code), Description: "Unknown error"}
+	}
+}
+
 var (
-	ErrParam                     error = NewError(int(ERR_PARAM))
-	ErrNoMsg                     error = NewError(int(ERR_NOMSG))
-	ErrNotFound                  error = NewError(int(ERR_NOTFOUND))
-	ErrNoChannels                error = NewError(int(ERR_NOCHANNELS))
-	ErrInterrupted               error = NewError(int(ERR_INTERRUPTED))
-	ErrTimeout                   error = NewError(int(ERR_TIMEOUT))
-	ErrNotInitialized            error = NewError(int(ERR_NOTINITIALIZED))
-	ErrNoHandles                 error = NewError(int(ERR_NOHANDLES))
-	ErrInvHandle                 error = NewError(int(ERR_INVHANDLE))
-	ErrIniFile                   error = NewError(int(ERR_INIFILE))
-	ErrDriver                    error = NewError(int(ERR_DRIVER))
-	ErrTxBufOfl                  error = NewError(int(ERR_TXBUFOFL))
-	ErrReserved1                 error = NewError(int(ERR_RESERVED_1))
-	ErrHardware                  error = NewError(int(ERR_HARDWARE))
-	ErrDynaLoad                  error = NewError(int(ERR_DYNALOAD))
-	ErrDynaLib                   error = NewError(int(ERR_DYNALIB))
-	ErrDynaInit                  error = NewError(int(ERR_DYNAINIT))
-	ErrNotSupported              error = NewError(int(ERR_NOT_SUPPORTED))
-	ErrReserved5                 error = NewError(int(ERR_RESERVED_5))
-	ErrReserved6                 error = NewError(int(ERR_RESERVED_6))
-	ErrReserved2                 error = NewError(int(ERR_RESERVED_2))
-	ErrDriverLoad                error = NewError(int(ERR_DRIVERLOAD))
-	ErrDriverFailed              error = NewError(int(ERR_DRIVERFAILED))
-	ErrNoConfigMgr               error = NewError(int(ERR_NOCONFIGMGR))
-	ErrNoCard                    error = NewError(int(ERR_NOCARD))
-	ErrReserved7                 error = NewError(int(ERR_RESERVED_7))
-	ErrRegistry                  error = NewError(int(ERR_REGISTRY))
-	ErrLicense                   error = NewError(int(ERR_LICENSE))
-	ErrInternal                  error = NewError(int(ERR_INTERNAL))
-	ErrNoAccess                  error = NewError(int(ERR_NO_ACCESS))
-	ErrNotImplemented            error = NewError(int(ERR_NOT_IMPLEMENTED))
-	ErrDeviceFile                error = NewError(int(ERR_DEVICE_FILE))
-	ErrHostFile                  error = NewError(int(ERR_HOST_FILE))
-	ErrDisk                      error = NewError(int(ERR_DISK))
-	ErrCrc                       error = NewError(int(ERR_CRC))
-	ErrConfig                    error = NewError(int(ERR_CONFIG))
-	ErrMemoFail                  error = NewError(int(ERR_MEMO_FAIL))
-	ErrScriptFail                error = NewError(int(ERR_SCRIPT_FAIL))
-	ErrScriptWrongVersion        error = NewError(int(ERR_SCRIPT_WRONG_VERSION))
-	ErrScriptTxeContainerVersion error = NewError(int(ERR_SCRIPT_TXE_CONTAINER_VERSION))
-	ErrScriptTxeContainerFormat  error = NewError(int(ERR_SCRIPT_TXE_CONTAINER_FORMAT))
-	ErrBufferTooSmall            error = NewError(int(ERR_BUFFER_TOO_SMALL))
-	ErrIoWrongPinType            error = NewError(int(ERR_IO_WRONG_PIN_TYPE))
-	ErrIoNotConfirmed            error = NewError(int(ERR_IO_NOT_CONFIRMED))
-	ErrIoConfigChanged           error = NewError(int(ERR_IO_CONFIG_CHANGED))
-	ErrIoPending                 error = NewError(int(ERR_IO_PENDING))
-	ErrIoNoValidConfig           error = NewError(int(ERR_IO_NO_VALID_CONFIG))
-	ErrReserved                  error = NewError(int(ERR__RESERVED))
+	ErrParam                     error = createError(int(ERR_PARAM))
+	ErrNoMsg                     error = createError(int(ERR_NOMSG))
+	ErrNotFound                  error = createError(int(ERR_NOTFOUND))
+	ErrNoChannels                error = createError(int(ERR_NOCHANNELS))
+	ErrInterrupted               error = createError(int(ERR_INTERRUPTED))
+	ErrTimeout                   error = createError(int(ERR_TIMEOUT))
+	ErrNotInitialized            error = createError(int(ERR_NOTINITIALIZED))
+	ErrNoHandles                 error = createError(int(ERR_NOHANDLES))
+	ErrInvHandle                 error = createError(int(ERR_INVHANDLE))
+	ErrIniFile                   error = createError(int(ERR_INIFILE))
+	ErrDriver                    error = createError(int(ERR_DRIVER))
+	ErrTxBufOfl                  error = createError(int(ERR_TXBUFOFL))
+	ErrReserved1                 error = createError(int(ERR_RESERVED_1))
+	ErrHardware                  error = createError(int(ERR_HARDWARE))
+	ErrDynaLoad                  error = createError(int(ERR_DYNALOAD))
+	ErrDynaLib                   error = createError(int(ERR_DYNALIB))
+	ErrDynaInit                  error = createError(int(ERR_DYNAINIT))
+	ErrNotSupported              error = createError(int(ERR_NOT_SUPPORTED))
+	ErrReserved5                 error = createError(int(ERR_RESERVED_5))
+	ErrReserved6                 error = createError(int(ERR_RESERVED_6))
+	ErrReserved2                 error = createError(int(ERR_RESERVED_2))
+	ErrDriverLoad                error = createError(int(ERR_DRIVERLOAD))
+	ErrDriverFailed              error = createError(int(ERR_DRIVERFAILED))
+	ErrNoConfigMgr               error = createError(int(ERR_NOCONFIGMGR))
+	ErrNoCard                    error = createError(int(ERR_NOCARD))
+	ErrReserved7                 error = createError(int(ERR_RESERVED_7))
+	ErrRegistry                  error = createError(int(ERR_REGISTRY))
+	ErrLicense                   error = createError(int(ERR_LICENSE))
+	ErrInternal                  error = createError(int(ERR_INTERNAL))
+	ErrNoAccess                  error = createError(int(ERR_NO_ACCESS))
+	ErrNotImplemented            error = createError(int(ERR_NOT_IMPLEMENTED))
+	ErrDeviceFile                error = createError(int(ERR_DEVICE_FILE))
+	ErrHostFile                  error = createError(int(ERR_HOST_FILE))
+	ErrDisk                      error = createError(int(ERR_DISK))
+	ErrCrc                       error = createError(int(ERR_CRC))
+	ErrConfig                    error = createError(int(ERR_CONFIG))
+	ErrMemoFail                  error = createError(int(ERR_MEMO_FAIL))
+	ErrScriptFail                error = createError(int(ERR_SCRIPT_FAIL))
+	ErrScriptWrongVersion        error = createError(int(ERR_SCRIPT_WRONG_VERSION))
+	ErrScriptTxeContainerVersion error = createError(int(ERR_SCRIPT_TXE_CONTAINER_VERSION))
+	ErrScriptTxeContainerFormat  error = createError(int(ERR_SCRIPT_TXE_CONTAINER_FORMAT))
+	ErrBufferTooSmall            error = createError(int(ERR_BUFFER_TOO_SMALL))
+	ErrIoWrongPinType            error = createError(int(ERR_IO_WRONG_PIN_TYPE))
+	ErrIoNotConfirmed            error = createError(int(ERR_IO_NOT_CONFIRMED))
+	ErrIoConfigChanged           error = createError(int(ERR_IO_CONFIG_CHANGED))
+	ErrIoPending                 error = createError(int(ERR_IO_PENDING))
+	ErrIoNoValidConfig           error = createError(int(ERR_IO_NO_VALID_CONFIG))
+	ErrReserved                  error = createError(int(ERR__RESERVED))
 )
 
 type CANStatus int
 
 const (
-	StatusOK                         CANStatus = C.canOK
+	OK                               CANStatus = C.canOK
 	ERR_PARAM                        CANStatus = C.canERR_PARAM
 	ERR_NOMSG                        CANStatus = C.canERR_NOMSG
 	ERR_NOTFOUND                     CANStatus = C.canERR_NOTFOUND

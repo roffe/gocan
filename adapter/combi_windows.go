@@ -83,7 +83,7 @@ func (ca *CombiAdapter) Connect(ctx context.Context) error {
 				return errors.New("CombiAdapter not found")
 			}
 			return err
-		} else if ca.dev != nil {
+		} else {
 			ca.closeAdapter(false, false, false, true, true)
 			return err
 		}
@@ -204,13 +204,15 @@ func (ca *CombiAdapter) closeAdapter(sendCloseCMD, closeIface, closeDevCfg, clos
 }
 
 func (ca *CombiAdapter) recvManager() {
-	defer log.Println("recvManager exited")
+	if ca.cfg.Debug {
+		defer log.Println("recvManager exited")
+	}
 	for {
 		select {
 		case <-ca.close:
 			return
 		default:
-			buff := make([]byte, 8)
+			buff := make([]byte, 16)
 			n, err := ca.in.Read(buff)
 			if err != nil {
 				ca.err <- fmt.Errorf("failed to read from usb device: %w", err)
@@ -277,7 +279,9 @@ func (ca *CombiAdapter) parseCMD(data []byte) error {
 }
 
 func (ca *CombiAdapter) sendManager() {
-	defer log.Println("sendManager exited")
+	if ca.cfg.Debug {
+		defer log.Println("sendManager exited")
+	}
 	buff := make([]byte, 19)
 	zeros := make([]byte, 19)
 	for {
@@ -317,9 +321,9 @@ func (ca *CombiAdapter) setBitrate(ctx context.Context) error {
 
 	payload := []byte{combiCmdSetCanBitrate, 0x00, 0x04, byte(canrate >> 24), byte(canrate >> 16), byte(canrate >> 8), byte(canrate), 0x00}
 
-	ctx2, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	wctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
 	defer cancel()
-	if _, err := ca.out.WriteContext(ctx2, payload); err != nil {
+	if _, err := ca.out.WriteContext(wctx, payload); err != nil {
 		ca.cfg.OnError(fmt.Errorf("failed to set bitrate: %w", err))
 		return err
 	}
@@ -327,9 +331,9 @@ func (ca *CombiAdapter) setBitrate(ctx context.Context) error {
 }
 
 func (ca *CombiAdapter) ReadVersion(ctx context.Context) (string, error) {
-	ctx2, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	rctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
 	defer cancel()
-	if _, err := ca.out.WriteContext(ctx2, []byte{combiCmdVersion, 0x00, 0x00, 0x00}); err != nil {
+	if _, err := ca.out.WriteContext(rctx, []byte{combiCmdVersion, 0x00, 0x00, 0x00}); err != nil {
 		return "", err
 	}
 	vers := make([]byte, ca.in.Desc.MaxPacketSize)

@@ -13,7 +13,7 @@ import (
 type CANMessage struct {
 	Identifier uint32
 	Data       []byte
-	DLC        uint32
+	Dlc        uint32
 	Flags      uint
 	Time       uint
 }
@@ -23,12 +23,12 @@ func InitializeLibrary() {
 }
 
 func UnloadLibrary() error {
-	return NewError(int(C.canUnloadLibrary()))
+	return NewError(C.canUnloadLibrary())
 }
 
 func GetNumberOfChannels() (int, error) {
 	noChannels := C.int(0)
-	status := int(C.canGetNumberOfChannels(&noChannels))
+	status := C.canGetNumberOfChannels(&noChannels)
 	return int(noChannels), NewError(status)
 }
 
@@ -86,42 +86,42 @@ const (
 
 // This function can be used to retrieve certain pieces of information about a channel.
 func GetChannelDataString(channel int, item ChannelDataItem) (string, error) {
-	msg := [256]C.char{}
-	err := NewError(int(C.canGetChannelData(C.int(channel), C.int(item), unsafe.Pointer(&msg[0]), C.size_t(unsafe.Sizeof(msg)))))
+	msg := make([]byte, 256, 256)
+	err := NewError(C.canGetChannelData(C.int(channel), C.int(item), unsafe.Pointer(&msg[0]), C.size_t(len(msg))))
 	if err != nil {
 		return "", err
 	}
-	return C.GoString(&msg[0]), nil
+	return C.GoString((*C.char)(unsafe.Pointer(&msg[0]))), nil
 }
 
 func GetChannelByte(channel int, item ChannelDataItem) ([]byte, error) {
 	msg := make([]byte, 256, 256)
-	status := int(C.canGetChannelData(C.int(channel), C.int(item), unsafe.Pointer(&msg[0]), C.size_t(len(msg))))
+	status := C.canGetChannelData(C.int(channel), C.int(item), unsafe.Pointer(&msg[0]), C.size_t(len(msg)))
 	if err := NewError(status); err != nil {
 		return nil, err
 	}
 	return msg, nil
 }
 
-type OpenChannelFlag int
+type OpenFlag int
 
 const (
-	OPEN_EXCLUSIVE           OpenChannelFlag = C.canOPEN_EXCLUSIVE           // Exclusive access
-	OPEN_REQUIRE_EXTENDED    OpenChannelFlag = C.canOPEN_REQUIRE_EXTENDED    // Fail if can't use extended mode
-	OPEN_ACCEPT_VIRTUAL      OpenChannelFlag = C.canOPEN_ACCEPT_VIRTUAL      // Allow use of virtual CAN
-	OPEN_OVERRIDE_EXCLUSIVE  OpenChannelFlag = C.canOPEN_OVERRIDE_EXCLUSIVE  // Open, even if in exclusive access
-	OPEN_REQUIRE_INIT_ACCESS OpenChannelFlag = C.canOPEN_REQUIRE_INIT_ACCESS // Init access to bus
-	OPEN_NO_INIT_ACCESS      OpenChannelFlag = C.canOPEN_NO_INIT_ACCESS
-	OPEN_ACCEPT_LARGE_DLC    OpenChannelFlag = C.canOPEN_ACCEPT_LARGE_DLC
-	OPEN_CAN_FD              OpenChannelFlag = C.canOPEN_CAN_FD
-	OPEN_CAN_FD_NONISO       OpenChannelFlag = C.canOPEN_CAN_FD_NONISO
-	OPEN_INTERNAL_L          OpenChannelFlag = C.canOPEN_INTERNAL_L
+	OPEN_EXCLUSIVE           OpenFlag = C.canOPEN_EXCLUSIVE           // Exclusive access
+	OPEN_REQUIRE_EXTENDED    OpenFlag = C.canOPEN_REQUIRE_EXTENDED    // Fail if can't use extended mode
+	OPEN_ACCEPT_VIRTUAL      OpenFlag = C.canOPEN_ACCEPT_VIRTUAL      // Allow use of virtual CAN
+	OPEN_OVERRIDE_EXCLUSIVE  OpenFlag = C.canOPEN_OVERRIDE_EXCLUSIVE  // Open, even if in exclusive access
+	OPEN_REQUIRE_INIT_ACCESS OpenFlag = C.canOPEN_REQUIRE_INIT_ACCESS // Init access to bus
+	OPEN_NO_INIT_ACCESS      OpenFlag = C.canOPEN_NO_INIT_ACCESS
+	OPEN_ACCEPT_LARGE_DLC    OpenFlag = C.canOPEN_ACCEPT_LARGE_DLC
+	OPEN_CAN_FD              OpenFlag = C.canOPEN_CAN_FD
+	OPEN_CAN_FD_NONISO       OpenFlag = C.canOPEN_CAN_FD_NONISO
+	OPEN_INTERNAL_L          OpenFlag = C.canOPEN_INTERNAL_L
 )
 
 // Opens a CAN channel (circuit) and returns a handle which is used in subsequent calls to CANlib.
-func OpenChannel(channel int, flags OpenChannelFlag) (Handle, error) {
+func OpenChannel(channel int, flags OpenFlag) (Handle, error) {
 	handle := C.canOpenChannel(C.int(channel), C.int(flags))
-	return Handle(handle), NewError(int(handle))
+	return Handle(handle), NewError(handle)
 }
 
 // This API call returns the version of the CANlib API DLL (canlib32.dll).
@@ -131,7 +131,7 @@ func GetVersion() string {
 }
 
 // Handle is a handle to a CAN channel (circuit).
-type Handle int
+type Handle C.int
 
 type AcceptFlag uint
 
@@ -151,14 +151,14 @@ const (
 // If you want to remove a filter, call canAccept() with the mask set to 0.
 
 func (hnd Handle) Accept(envelope int, flag AcceptFlag) error {
-	status := int(C.canAccept(C.int(hnd), C.long(envelope), C.uint(flag)))
+	status := C.canAccept(C.int(hnd), C.long(envelope), C.uint(flag))
 	return NewError(status)
 }
 
 // Closes the channel associated with the handle. If no other threads are using the CAN circuit, it is taken off bus. The handle can not be used for further references to the channel, so any variable containing it should be zeroed.
 // Close() will almost always return canOK; the specified handle is closed on an best-effort basis.
 func (hnd Handle) Close() error {
-	status := int(C.canClose(C.int(hnd)))
+	status := C.canClose(C.int(hnd))
 	hnd = -1
 	return NewError(status)
 }
@@ -166,71 +166,66 @@ func (hnd Handle) Close() error {
 // Takes the specified channel on-bus.
 // If you are using multiple handles to the same physical channel, for example if you are writing a threaded application, you must call canBusOn() once for each handle. The same applies to canBusOff() - the physical channel will not go off bus until the last handle to the channel goes off bus.
 func (hnd Handle) BusOn() error {
-	status := int(C.canBusOn(C.int(hnd)))
-	return NewError(status)
+	return NewError(C.canBusOn(C.int(hnd)))
 }
 
 // Takes the specified handle off-bus. If no other handle is active on the same channel, the channel will also be taken off-bus
 func (hnd Handle) BusOff() error {
-	status := int(C.canBusOff(C.int(hnd)))
-	return NewError(status)
+	return NewError(C.canBusOff(C.int(hnd)))
 }
 
 // This function removes all received messages from the handle's receive queue. Other handles open to the same channel are not affected by this operation. That is, only the messages belonging to the handle you are passing to canFlushReceiveQueue are discarded.
 func (hnd Handle) FlushReceiveQueue() error {
-	status := int(C.canFlushReceiveQueue(C.int(hnd)))
-	return NewError(status)
+	return NewError(C.canFlushReceiveQueue(C.int(hnd)))
 }
 
 // This function removes all messages pending transmission from the transmit queue of the circuit.
 func (hnd Handle) FlushTransmitQueue() error {
-	status := int(C.canFlushTransmitQueue(C.int(hnd)))
-	return NewError(status)
+	return NewError(C.canFlushTransmitQueue(C.int(hnd)))
 }
 
+// Allocates an object buffer associated with a handle to a CAN circuit.
 func (hnd Handle) ObjBufAllocate(typ int) (int, error) {
-	idx := int(C.canObjBufAllocate(C.int(hnd), C.int(typ)))
+	idx := C.canObjBufAllocate(C.int(hnd), C.int(typ))
 	if idx < 0 {
 		return -1, NewError(idx)
 	}
-	return idx, nil
+	return int(idx), nil
 }
 
-type MSG_FLAG uint
+type MsgFlag uint
 
 const (
-	MSG_MASK        MSG_FLAG = C.canMSG_MASK
-	MSG_RTR         MSG_FLAG = C.canMSG_RTR
-	MSG_STD         MSG_FLAG = C.canMSG_STD
-	MSG_EXT         MSG_FLAG = C.canMSG_EXT
-	MSG_WAKEUP      MSG_FLAG = C.canMSG_WAKEUP
-	MSG_NERR        MSG_FLAG = C.canMSG_NERR
-	MSG_ERROR_FRAME MSG_FLAG = C.canMSG_ERROR_FRAME
-	MSG_TXACK       MSG_FLAG = C.canMSG_TXACK
-	MSG_TXRQ        MSG_FLAG = C.canMSG_TXRQ
-	MSG_DELAY_MSG   MSG_FLAG = C.canMSG_DELAY_MSG
-	MSG_LOCAL_TXACK MSG_FLAG = C.canMSG_LOCAL_TXACK
-	MSG_SINGLE_SHOT MSG_FLAG = C.canMSG_SINGLE_SHOT
-	MSG_TXNACK      MSG_FLAG = C.canMSG_TXNACK
-	MSG_ABL         MSG_FLAG = C.canMSG_ABL
+	MSG_MASK        MsgFlag = C.canMSG_MASK
+	MSG_RTR         MsgFlag = C.canMSG_RTR
+	MSG_STD         MsgFlag = C.canMSG_STD
+	MSG_EXT         MsgFlag = C.canMSG_EXT
+	MSG_WAKEUP      MsgFlag = C.canMSG_WAKEUP
+	MSG_NERR        MsgFlag = C.canMSG_NERR
+	MSG_ERROR_FRAME MsgFlag = C.canMSG_ERROR_FRAME
+	MSG_TXACK       MsgFlag = C.canMSG_TXACK
+	MSG_TXRQ        MsgFlag = C.canMSG_TXRQ
+	MSG_DELAY_MSG   MsgFlag = C.canMSG_DELAY_MSG
+	MSG_LOCAL_TXACK MsgFlag = C.canMSG_LOCAL_TXACK
+	MSG_SINGLE_SHOT MsgFlag = C.canMSG_SINGLE_SHOT
+	MSG_TXNACK      MsgFlag = C.canMSG_TXNACK
+	MSG_ABL         MsgFlag = C.canMSG_ABL
 
-	FDMSG_MASK MSG_FLAG = C.canFDMSG_MASK
-	FDMSG_EDL  MSG_FLAG = C.canFDMSG_EDL
-	FDMSG_FDF  MSG_FLAG = C.canFDMSG_FDF
-	FDMSG_BRS  MSG_FLAG = C.canFDMSG_BRS
-	FDMSG_ESI  MSG_FLAG = C.canFDMSG_ESI
+	FDMSG_MASK MsgFlag = C.canFDMSG_MASK
+	FDMSG_EDL  MsgFlag = C.canFDMSG_EDL
+	FDMSG_FDF  MsgFlag = C.canFDMSG_FDF
+	FDMSG_BRS  MsgFlag = C.canFDMSG_BRS
+	FDMSG_ESI  MsgFlag = C.canFDMSG_ESI
 )
 
-func (hnd Handle) ObjBufWrite(idx, id int, message []byte, flags MSG_FLAG) error {
-	status := int(C.canObjBufWrite(C.int(hnd), C.int(idx), C.int(id), unsafe.Pointer(&message[0]), C.uint(len(message)), C.uint(flags)))
-	return NewError(status)
+func (hnd Handle) ObjBufWrite(idx, id int, message []byte, flags MsgFlag) error {
+	return NewError(C.canObjBufWrite(C.int(hnd), C.int(idx), C.int(id), unsafe.Pointer(&message[0]), C.uint(len(message)), C.uint(flags)))
 }
 
 // This function tries to reset a CAN bus controller by taking the channel off bus and then on bus again (if it was on bus before the call to canResetBus().)
 // This function will affect the hardware (and cause a real reset of the CAN chip) only if hnd is the only handle open on the channel. If there are other open handles, this operation will not affect the hardware.
 func (hnd Handle) ResetBus() error {
-	status := int(C.canResetBus(C.int(hnd)))
-	return NewError(status)
+	return NewError(C.canResetBus(C.int(hnd)))
 }
 
 type BusParamsFreq int
@@ -268,12 +263,13 @@ const (
 // On some boards the acceptance filtering is done by the CAN hardware; on other boards (typically those with an embedded CPU,) the acceptance filtering is done by software. canSetAcceptanceFilter() behaves in the same way for all boards, however.
 // canSetAcceptanceFilter() and canAccept() both serve the same purpose but the former can set the code and mask in just one call.
 func (hnd Handle) SetAcceptanceFilter(code, mask uint, extended bool) error {
-	ext := C.int(0)
+	var ext int
 	if extended {
 		ext = 1
+	} else {
+		ext = 0
 	}
-	status := int(C.canSetAcceptanceFilter(C.int(hnd), C.uint(code), C.uint(mask), ext))
-	return NewError(status)
+	return NewError(C.canSetAcceptanceFilter(C.int(hnd), C.uint(code), C.uint(mask), C.int(ext)))
 }
 
 // The canSetBitrate() function sets the nominal bit rate of the specified CAN channel. The sampling point is recalculated and kept as close as possible to the value before the call.
@@ -282,8 +278,7 @@ func (hnd Handle) SetAcceptanceFilter(code, mask uint, extended bool) error {
 //
 //	[bitrate]	bitrate	The new bit rate, in bits/second.
 func (hnd Handle) SetBitrate(bitrate int) error {
-	status := int(C.canSetBitrate(C.int(hnd), C.int(bitrate)))
-	return NewError(status)
+	return NewError(C.canSetBitrate(C.int(hnd), C.int(bitrate)))
 }
 
 // This function sets the nominal bus timing parameters for the specified CAN controller.
@@ -291,32 +286,29 @@ func (hnd Handle) SetBitrate(bitrate int) error {
 // If freq is any other value, no default values are supplied by the library.
 // If you are using multiple handles to the same physical channel, for example if you are writing a threaded application, you must call canBusOff() once for each handle. The same applies to canBusOn() - the physical channel will not go off bus until the last handle to the channel goes off bus.
 func (hnd Handle) SetBusParams(freq BusParamsFreq, tseg1, tseg2, sjw, noSamp, syncmode uint) error {
-	status := int(C.canSetBusParams(C.int(hnd), C.long(freq), C.uint(tseg1), C.uint(tseg2), C.uint(sjw), C.uint(noSamp), C.uint(syncmode)))
-	return NewError(status)
+	return NewError(C.canSetBusParams(C.int(hnd), C.long(freq), C.uint(tseg1), C.uint(tseg2), C.uint(sjw), C.uint(noSamp), C.uint(syncmode)))
 }
 
 // This function sets the bus timing parameters using the same convention as the 82c200 CAN controller (which is the same as many other CAN controllers, for example, the 82527.)
 // To calculate the bit timing parameters, you can use the bit timing calculator that is included with CANlib SDK. Look in the BIN directory.
 func (hnd Handle) SetBusParamsC200(btr0, btr1 uint8) error {
-	status := int(C.canSetBusParamsC200(C.int(hnd), C.uchar(btr0), C.uchar(btr1)))
-	return NewError(status)
+	return NewError(C.canSetBusParamsC200(C.int(hnd), C.uchar(btr0), C.uchar(btr1)))
 }
 
-type BusControlDriverType uint
+type DriverType uint
 
 const (
-	DRIVER_NORMAL        BusControlDriverType = C.canDRIVER_NORMAL
-	DRIVER_SILENT        BusControlDriverType = C.canDRIVER_SILENT
-	DRIVER_SELFRECEPTION BusControlDriverType = C.canDRIVER_SELFRECEPTION
-	DRIVER_OFF           BusControlDriverType = C.canDRIVER_OFF
+	DRIVER_NORMAL        DriverType = C.canDRIVER_NORMAL
+	DRIVER_SILENT        DriverType = C.canDRIVER_SILENT
+	DRIVER_SELFRECEPTION DriverType = C.canDRIVER_SELFRECEPTION
+	DRIVER_OFF           DriverType = C.canDRIVER_OFF
 )
 
 // This function sets the driver type for a CAN controller.
 // This corresponds loosely to the bus output control register in the CAN controller, hence the name of this function.
 // CANlib does not allow for direct manipulation of the bus output control register; instead, symbolic constants are used to select the desired driver type.
-func SetBusOutputControl(hnd Handle, drivertype BusControlDriverType) error {
-	status := int(C.canSetBusOutputControl(C.int(hnd), C.uint(drivertype)))
-	return NewError(status)
+func SetBusOutputControl(hnd Handle, drivertype DriverType) error {
+	return NewError(C.canSetBusOutputControl(C.int(hnd), C.uint(drivertype)))
 }
 
 // Reads the error counters of the CAN controller
@@ -324,7 +316,7 @@ func SetBusOutputControl(hnd Handle, drivertype BusControlDriverType) error {
 // returns: tx error counter, rx error counter, overrun error counter
 func (hnd Handle) ReadErrorCounters() (uint, uint, uint, error) {
 	var tec, rec, ovr C.uint
-	status := int(C.canReadErrorCounters(C.int(hnd), &tec, &rec, &ovr))
+	status := C.canReadErrorCounters(C.int(hnd), &tec, &rec, &ovr)
 	return uint(tec), uint(rec), uint(ovr), NewError(status)
 }
 
@@ -336,34 +328,31 @@ func (hnd Handle) ReadWait(timeout int) (*CANMessage, error) {
 	flags := C.uint(0)
 	time := C.ulong(0)
 	timeOut := C.ulong(timeout)
-	status := int(C.canReadWait(C.int(hnd), &identifier, unsafe.Pointer(&data), &dlc, &flags, &time, timeOut))
+	status := C.canReadWait(C.int(hnd), &identifier, unsafe.Pointer(&data), &dlc, &flags, &time, timeOut)
 	if err := NewError(status); err != nil {
 		return nil, err
 	}
 	return &CANMessage{
 		Identifier: uint32(identifier),
 		Data:       data[:dlc],
-		DLC:        uint32(dlc),
+		Dlc:        uint32(dlc),
 		Flags:      uint(flags),
 		Time:       uint(time),
 	}, nil
 }
 
 // This function sends a CAN message. The call returns immediately after queuing the message to the driver so the message has not necessarily been transmitted.
-func (hnd Handle) Write(identifier uint32, data []byte, flags MSG_FLAG) error {
-	status := int(C.canWrite(C.int(hnd), C.long(identifier), unsafe.Pointer(&data[0]), C.uint(len(data)), C.uint(flags)))
-	return NewError(status)
+func (hnd Handle) Write(identifier uint32, data []byte, flags MsgFlag) error {
+	return NewError(C.canWrite(C.int(hnd), C.long(identifier), unsafe.Pointer(&data[0]), C.uint(len(data)), C.uint(flags)))
 }
 
 // Waits until all CAN messages for the specified handle are sent, or the timeout period expires.
 func (hnd Handle) WriteSync(timeoutMS int) error {
-	status := C.canWriteSync(C.int(hnd), C.ulong(timeoutMS))
-	return NewError(int(status))
+	return NewError(C.canWriteSync(C.int(hnd), C.ulong(timeoutMS)))
 }
 
 // This function sends a CAN message and returns when the message has been successfully transmitted, or the timeout expires.
-func (hnd Handle) WriteWait(identifier uint32, data []byte, flags MSG_FLAG, timeoutMS int) error {
-	status := int(C.canWriteWait(C.int(hnd), C.long(identifier), unsafe.Pointer(&data[0]), C.uint(len(data)), C.uint(flags), C.ulong(timeoutMS)))
-	return NewError(status)
+func (hnd Handle) WriteWait(identifier uint32, data []byte, flags MsgFlag, timeoutMS int) error {
+	return NewError(C.canWriteWait(C.int(hnd), C.long(identifier), unsafe.Pointer(&data[0]), C.uint(len(data)), C.uint(flags), C.ulong(timeoutMS)))
 
 }
