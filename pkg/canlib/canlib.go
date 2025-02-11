@@ -10,151 +10,27 @@ import (
 	"unsafe"
 )
 
-type BusControlDriverType uint
-
-const (
-	DRIVER_NORMAL        BusControlDriverType = C.canDRIVER_NORMAL
-	DRIVER_SILENT        BusControlDriverType = C.canDRIVER_SILENT
-	DRIVER_SELFRECEPTION BusControlDriverType = C.canDRIVER_SELFRECEPTION
-	DRIVER_OFF           BusControlDriverType = C.canDRIVER_OFF
-)
-
-type BusParamsFreq int
-
-const (
-	BITRATE_1M   BusParamsFreq = C.canBITRATE_1M
-	BITRATE_500K BusParamsFreq = C.canBITRATE_500K
-	BITRATE_250K BusParamsFreq = C.canBITRATE_250K
-	BITRATE_125K BusParamsFreq = C.canBITRATE_125K
-	BITRATE_100K BusParamsFreq = C.canBITRATE_100K
-	BITRATE_62K  BusParamsFreq = C.canBITRATE_62K
-	BITRATE_50K  BusParamsFreq = C.canBITRATE_50K
-	BITRATE_83K  BusParamsFreq = C.canBITRATE_83K
-	BITRATE_10K  BusParamsFreq = C.canBITRATE_10K
-)
-
 type CANMessage struct {
 	Identifier uint32
 	Data       []byte
 	DLC        uint32
-	Flags      uint32
-	Time       uint32
+	Flags      uint
+	Time       uint
 }
 
-type CANMessageFlag uint
+func InitializeLibrary() {
+	C.canInitializeLibrary()
+}
 
-const (
-	MSG_STD   CANMessageFlag = C.canMSG_STD
-	MSG_EXT   CANMessageFlag = C.canMSG_EXT
-	FDMSG_FDF CANMessageFlag = C.canFDMSG_FDF
-	FDMSG_BRS CANMessageFlag = C.canFDMSG_BRS
-)
+func UnloadLibrary() error {
+	return NewError(int(C.canUnloadLibrary()))
+}
 
-type CANStatus int
-
-var (
-	ErrParam                     error = NewError(int(ERR_PARAM))
-	ErrNoMsg                     error = NewError(int(ERR_NOMSG))
-	ErrNotFound                  error = NewError(int(ERR_NOTFOUND))
-	ErrNoChannels                error = NewError(int(ERR_NOCHANNELS))
-	ErrInterrupted               error = NewError(int(ERR_INTERRUPTED))
-	ErrTimeout                   error = NewError(int(ERR_TIMEOUT))
-	ErrNotInitialized            error = NewError(int(ERR_NOTINITIALIZED))
-	ErrNoHandles                 error = NewError(int(ERR_NOHANDLES))
-	ErrInvHandle                 error = NewError(int(ERR_INVHANDLE))
-	ErrIniFile                   error = NewError(int(ERR_INIFILE))
-	ErrDriver                    error = NewError(int(ERR_DRIVER))
-	ErrTxBufOfl                  error = NewError(int(ERR_TXBUFOFL))
-	ErrReserved1                 error = NewError(int(ERR_RESERVED_1))
-	ErrHardware                  error = NewError(int(ERR_HARDWARE))
-	ErrDynaLoad                  error = NewError(int(ERR_DYNALOAD))
-	ErrDynaLib                   error = NewError(int(ERR_DYNALIB))
-	ErrDynaInit                  error = NewError(int(ERR_DYNAINIT))
-	ErrNotSupported              error = NewError(int(ERR_NOT_SUPPORTED))
-	ErrReserved5                 error = NewError(int(ERR_RESERVED_5))
-	ErrReserved6                 error = NewError(int(ERR_RESERVED_6))
-	ErrReserved2                 error = NewError(int(ERR_RESERVED_2))
-	ErrDriverLoad                error = NewError(int(ERR_DRIVERLOAD))
-	ErrDriverFailed              error = NewError(int(ERR_DRIVERFAILED))
-	ErrNoConfigMgr               error = NewError(int(ERR_NOCONFIGMGR))
-	ErrNoCard                    error = NewError(int(ERR_NOCARD))
-	ErrReserved7                 error = NewError(int(ERR_RESERVED_7))
-	ErrRegistry                  error = NewError(int(ERR_REGISTRY))
-	ErrLicense                   error = NewError(int(ERR_LICENSE))
-	ErrInternal                  error = NewError(int(ERR_INTERNAL))
-	ErrNoAccess                  error = NewError(int(ERR_NO_ACCESS))
-	ErrNotImplemented            error = NewError(int(ERR_NOT_IMPLEMENTED))
-	ErrDeviceFile                error = NewError(int(ERR_DEVICE_FILE))
-	ErrHostFile                  error = NewError(int(ERR_HOST_FILE))
-	ErrDisk                      error = NewError(int(ERR_DISK))
-	ErrCrc                       error = NewError(int(ERR_CRC))
-	ErrConfig                    error = NewError(int(ERR_CONFIG))
-	ErrMemoFail                  error = NewError(int(ERR_MEMO_FAIL))
-	ErrScriptFail                error = NewError(int(ERR_SCRIPT_FAIL))
-	ErrScriptWrongVersion        error = NewError(int(ERR_SCRIPT_WRONG_VERSION))
-	ErrScriptTxeContainerVersion error = NewError(int(ERR_SCRIPT_TXE_CONTAINER_VERSION))
-	ErrScriptTxeContainerFormat  error = NewError(int(ERR_SCRIPT_TXE_CONTAINER_FORMAT))
-	ErrBufferTooSmall            error = NewError(int(ERR_BUFFER_TOO_SMALL))
-	ErrIoWrongPinType            error = NewError(int(ERR_IO_WRONG_PIN_TYPE))
-	ErrIoNotConfirmed            error = NewError(int(ERR_IO_NOT_CONFIRMED))
-	ErrIoConfigChanged           error = NewError(int(ERR_IO_CONFIG_CHANGED))
-	ErrIoPending                 error = NewError(int(ERR_IO_PENDING))
-	ErrIoNoValidConfig           error = NewError(int(ERR_IO_NO_VALID_CONFIG))
-	ErrReserved                  error = NewError(int(ERR__RESERVED))
-)
-
-const (
-	StatusOK                         CANStatus = C.canOK
-	ERR_PARAM                        CANStatus = C.canERR_PARAM
-	ERR_NOMSG                        CANStatus = C.canERR_NOMSG
-	ERR_NOTFOUND                     CANStatus = C.canERR_NOTFOUND
-	ERR_NOMEM                        CANStatus = C.canERR_NOMEM
-	ERR_NOCHANNELS                   CANStatus = C.canERR_NOCHANNELS
-	ERR_INTERRUPTED                  CANStatus = C.canERR_INTERRUPTED
-	ERR_TIMEOUT                      CANStatus = C.canERR_TIMEOUT
-	ERR_NOTINITIALIZED               CANStatus = C.canERR_NOTINITIALIZED
-	ERR_NOHANDLES                    CANStatus = C.canERR_NOHANDLES
-	ERR_INVHANDLE                    CANStatus = C.canERR_INVHANDLE
-	ERR_INIFILE                      CANStatus = C.canERR_INIFILE
-	ERR_DRIVER                       CANStatus = C.canERR_DRIVER
-	ERR_TXBUFOFL                     CANStatus = C.canERR_TXBUFOFL
-	ERR_RESERVED_1                   CANStatus = C.canERR_RESERVED_1
-	ERR_HARDWARE                     CANStatus = C.canERR_HARDWARE
-	ERR_DYNALOAD                     CANStatus = C.canERR_DYNALOAD
-	ERR_DYNALIB                      CANStatus = C.canERR_DYNALIB
-	ERR_DYNAINIT                     CANStatus = C.canERR_DYNAINIT
-	ERR_NOT_SUPPORTED                CANStatus = C.canERR_NOT_SUPPORTED
-	ERR_RESERVED_5                   CANStatus = C.canERR_RESERVED_5
-	ERR_RESERVED_6                   CANStatus = C.canERR_RESERVED_6
-	ERR_RESERVED_2                   CANStatus = C.canERR_RESERVED_2
-	ERR_DRIVERLOAD                   CANStatus = C.canERR_DRIVERLOAD
-	ERR_DRIVERFAILED                 CANStatus = C.canERR_DRIVERFAILED
-	ERR_NOCONFIGMGR                  CANStatus = C.canERR_NOCONFIGMGR
-	ERR_NOCARD                       CANStatus = C.canERR_NOCARD
-	ERR_RESERVED_7                   CANStatus = C.canERR_RESERVED_7
-	ERR_REGISTRY                     CANStatus = C.canERR_REGISTRY
-	ERR_LICENSE                      CANStatus = C.canERR_LICENSE
-	ERR_INTERNAL                     CANStatus = C.canERR_INTERNAL
-	ERR_NO_ACCESS                    CANStatus = C.canERR_NO_ACCESS
-	ERR_NOT_IMPLEMENTED              CANStatus = C.canERR_NOT_IMPLEMENTED
-	ERR_DEVICE_FILE                  CANStatus = C.canERR_DEVICE_FILE
-	ERR_HOST_FILE                    CANStatus = C.canERR_HOST_FILE
-	ERR_DISK                         CANStatus = C.canERR_DISK
-	ERR_CRC                          CANStatus = C.canERR_CRC
-	ERR_CONFIG                       CANStatus = C.canERR_CONFIG
-	ERR_MEMO_FAIL                    CANStatus = C.canERR_MEMO_FAIL
-	ERR_SCRIPT_FAIL                  CANStatus = C.canERR_SCRIPT_FAIL
-	ERR_SCRIPT_WRONG_VERSION         CANStatus = C.canERR_SCRIPT_WRONG_VERSION
-	ERR_SCRIPT_TXE_CONTAINER_VERSION CANStatus = C.canERR_SCRIPT_TXE_CONTAINER_VERSION
-	ERR_SCRIPT_TXE_CONTAINER_FORMAT  CANStatus = C.canERR_SCRIPT_TXE_CONTAINER_FORMAT
-	ERR_BUFFER_TOO_SMALL             CANStatus = C.canERR_BUFFER_TOO_SMALL
-	ERR_IO_WRONG_PIN_TYPE            CANStatus = C.canERR_IO_WRONG_PIN_TYPE
-	ERR_IO_NOT_CONFIRMED             CANStatus = C.canERR_IO_NOT_CONFIRMED
-	ERR_IO_CONFIG_CHANGED            CANStatus = C.canERR_IO_CONFIG_CHANGED
-	ERR_IO_PENDING                   CANStatus = C.canERR_IO_PENDING
-	ERR_IO_NO_VALID_CONFIG           CANStatus = C.canERR_IO_NO_VALID_CONFIG
-	ERR__RESERVED                    CANStatus = C.canERR__RESERVED
-)
+func GetNumberOfChannels() (int, error) {
+	noChannels := C.int(0)
+	status := int(C.canGetNumberOfChannels(&noChannels))
+	return int(noChannels), NewError(status)
+}
 
 type ChannelDataItem int
 
@@ -208,56 +84,6 @@ const (
 	CHANNELDATA_CHANNEL_CAP_EX           ChannelDataItem = C.canCHANNELDATA_CHANNEL_CAP_EX
 )
 
-type OpenChannelFlag int
-
-const (
-	OPEN_EXCLUSIVE           OpenChannelFlag = C.canOPEN_EXCLUSIVE           // Exclusive access
-	OPEN_REQUIRE_EXTENDED    OpenChannelFlag = C.canOPEN_REQUIRE_EXTENDED    // Fail if can't use extended mode
-	OPEN_ACCEPT_VIRTUAL      OpenChannelFlag = C.canOPEN_ACCEPT_VIRTUAL      // Allow use of virtual CAN
-	OPEN_OVERRIDE_EXCLUSIVE  OpenChannelFlag = C.canOPEN_OVERRIDE_EXCLUSIVE  // Open, even if in exclusive access
-	OPEN_REQUIRE_INIT_ACCESS OpenChannelFlag = C.canOPEN_REQUIRE_INIT_ACCESS // Init access to bus
-	OPEN_NO_INIT_ACCESS      OpenChannelFlag = C.canOPEN_NO_INIT_ACCESS
-	OPEN_ACCEPT_LARGE_DLC    OpenChannelFlag = C.canOPEN_ACCEPT_LARGE_DLC
-	OPEN_CAN_FD              OpenChannelFlag = C.canOPEN_CAN_FD
-	OPEN_CAN_FD_NONISO       OpenChannelFlag = C.canOPEN_CAN_FD_NONISO
-	OPEN_INTERNAL_L          OpenChannelFlag = C.canOPEN_INTERNAL_L
-)
-
-type CanlibError struct {
-	Code        int
-	Description string
-}
-
-func (ke *CanlibError) Error() string {
-	return fmt.Sprintf("%v (%v)", ke.Description, ke.Code)
-}
-
-func NewError(code int) error {
-	if code >= int(StatusOK) {
-		return nil
-	}
-	err := [64]C.char{}
-	status := int(C.canGetErrorText(C.canStatus(code), &err[0], C.uint(unsafe.Sizeof(err))))
-	if status < int(StatusOK) {
-		return fmt.Errorf("unable to get description for error code %v (%v)", code, status)
-	}
-	return &CanlibError{Code: code, Description: C.GoString(&err[0])}
-}
-
-func InitializeLibrary() {
-	C.canInitializeLibrary()
-}
-
-func UnloadLibrary() error {
-	return NewError(int(C.canUnloadLibrary()))
-}
-
-func GetNumberOfChannels() (int, error) {
-	noChannels := C.int(0)
-	status := int(C.canGetNumberOfChannels(&noChannels))
-	return int(noChannels), NewError(status)
-}
-
 // This function can be used to retrieve certain pieces of information about a channel.
 func GetChannelDataString(channel int, item ChannelDataItem) (string, error) {
 	msg := [256]C.char{}
@@ -277,6 +103,21 @@ func GetChannelByte(channel int, item ChannelDataItem) ([]byte, error) {
 	return msg, nil
 }
 
+type OpenChannelFlag int
+
+const (
+	OPEN_EXCLUSIVE           OpenChannelFlag = C.canOPEN_EXCLUSIVE           // Exclusive access
+	OPEN_REQUIRE_EXTENDED    OpenChannelFlag = C.canOPEN_REQUIRE_EXTENDED    // Fail if can't use extended mode
+	OPEN_ACCEPT_VIRTUAL      OpenChannelFlag = C.canOPEN_ACCEPT_VIRTUAL      // Allow use of virtual CAN
+	OPEN_OVERRIDE_EXCLUSIVE  OpenChannelFlag = C.canOPEN_OVERRIDE_EXCLUSIVE  // Open, even if in exclusive access
+	OPEN_REQUIRE_INIT_ACCESS OpenChannelFlag = C.canOPEN_REQUIRE_INIT_ACCESS // Init access to bus
+	OPEN_NO_INIT_ACCESS      OpenChannelFlag = C.canOPEN_NO_INIT_ACCESS
+	OPEN_ACCEPT_LARGE_DLC    OpenChannelFlag = C.canOPEN_ACCEPT_LARGE_DLC
+	OPEN_CAN_FD              OpenChannelFlag = C.canOPEN_CAN_FD
+	OPEN_CAN_FD_NONISO       OpenChannelFlag = C.canOPEN_CAN_FD_NONISO
+	OPEN_INTERNAL_L          OpenChannelFlag = C.canOPEN_INTERNAL_L
+)
+
 // Opens a CAN channel (circuit) and returns a handle which is used in subsequent calls to CANlib.
 func OpenChannel(channel int, flags OpenChannelFlag) (Handle, error) {
 	handle := C.canOpenChannel(C.int(channel), C.int(flags))
@@ -290,8 +131,37 @@ func GetVersion() string {
 }
 
 // Handle is a handle to a CAN channel (circuit).
-
 type Handle int
+
+type AcceptFlag uint
+
+const (
+	FILTER_ACCEPT       AcceptFlag = C.canFILTER_ACCEPT
+	FILTER_REJECT       AcceptFlag = C.canFILTER_REJECT
+	FILTER_SET_CODE_STD AcceptFlag = C.canFILTER_SET_CODE_STD
+	FILTER_SET_MASK_STD AcceptFlag = C.canFILTER_SET_MASK_STD
+	FILTER_SET_CODE_EXT AcceptFlag = C.canFILTER_SET_CODE_EXT
+	FILTER_SET_MASK_EXT AcceptFlag = C.canFILTER_SET_MASK_EXT
+	FILTER_NULL_MASK    AcceptFlag = C.canFILTER_NULL_MASK
+)
+
+// This routine sets the message acceptance filters on a CAN channel.
+// On some boards the acceptance filtering is done by the CAN hardware; on other boards (typically those with an embedded CPU,) the acceptance filtering is done by software. canAccept() behaves in the same way for all boards, however.
+// SetAcceptanceFilter() and Accept() both serve the same purpose but the former can set the code and mask in just one call.
+// If you want to remove a filter, call canAccept() with the mask set to 0.
+
+func (hnd Handle) Accept(envelope int, flag AcceptFlag) error {
+	status := int(C.canAccept(C.int(hnd), C.long(envelope), C.uint(flag)))
+	return NewError(status)
+}
+
+// Closes the channel associated with the handle. If no other threads are using the CAN circuit, it is taken off bus. The handle can not be used for further references to the channel, so any variable containing it should be zeroed.
+// Close() will almost always return canOK; the specified handle is closed on an best-effort basis.
+func (hnd Handle) Close() error {
+	status := int(C.canClose(C.int(hnd)))
+	hnd = -1
+	return NewError(status)
+}
 
 // Takes the specified channel on-bus.
 // If you are using multiple handles to the same physical channel, for example if you are writing a threaded application, you must call canBusOn() once for each handle. The same applies to canBusOff() - the physical channel will not go off bus until the last handle to the channel goes off bus.
@@ -306,23 +176,140 @@ func (hnd Handle) BusOff() error {
 	return NewError(status)
 }
 
-// Closes the channel associated with the handle. If no other threads are using the CAN circuit, it is taken off bus. The handle can not be used for further references to the channel, so any variable containing it should be zeroed.
-// Close() will almost always return canOK; the specified handle is closed on an best-effort basis.
-func (hnd Handle) Close() error {
-	status := int(C.canClose(C.int(hnd)))
-	hnd = -1
+// This function removes all received messages from the handle's receive queue. Other handles open to the same channel are not affected by this operation. That is, only the messages belonging to the handle you are passing to canFlushReceiveQueue are discarded.
+func (hnd Handle) FlushReceiveQueue() error {
+	status := int(C.canFlushReceiveQueue(C.int(hnd)))
 	return NewError(status)
 }
 
+// This function removes all messages pending transmission from the transmit queue of the circuit.
+func (hnd Handle) FlushTransmitQueue() error {
+	status := int(C.canFlushTransmitQueue(C.int(hnd)))
+	return NewError(status)
+}
+
+func (hnd Handle) ObjBufAllocate(typ int) (int, error) {
+	idx := int(C.canObjBufAllocate(C.int(hnd), C.int(typ)))
+	if idx < 0 {
+		return -1, NewError(idx)
+	}
+	return idx, nil
+}
+
+type MSG_FLAG uint
+
+const (
+	MSG_MASK        MSG_FLAG = C.canMSG_MASK
+	MSG_RTR         MSG_FLAG = C.canMSG_RTR
+	MSG_STD         MSG_FLAG = C.canMSG_STD
+	MSG_EXT         MSG_FLAG = C.canMSG_EXT
+	MSG_WAKEUP      MSG_FLAG = C.canMSG_WAKEUP
+	MSG_NERR        MSG_FLAG = C.canMSG_NERR
+	MSG_ERROR_FRAME MSG_FLAG = C.canMSG_ERROR_FRAME
+	MSG_TXACK       MSG_FLAG = C.canMSG_TXACK
+	MSG_TXRQ        MSG_FLAG = C.canMSG_TXRQ
+	MSG_DELAY_MSG   MSG_FLAG = C.canMSG_DELAY_MSG
+	MSG_LOCAL_TXACK MSG_FLAG = C.canMSG_LOCAL_TXACK
+	MSG_SINGLE_SHOT MSG_FLAG = C.canMSG_SINGLE_SHOT
+	MSG_TXNACK      MSG_FLAG = C.canMSG_TXNACK
+	MSG_ABL         MSG_FLAG = C.canMSG_ABL
+
+	FDMSG_MASK MSG_FLAG = C.canFDMSG_MASK
+	FDMSG_EDL  MSG_FLAG = C.canFDMSG_EDL
+	FDMSG_FDF  MSG_FLAG = C.canFDMSG_FDF
+	FDMSG_BRS  MSG_FLAG = C.canFDMSG_BRS
+	FDMSG_ESI  MSG_FLAG = C.canFDMSG_ESI
+)
+
+func (hnd Handle) ObjBufWrite(idx, id int, message []byte, flags MSG_FLAG) error {
+	status := int(C.canObjBufWrite(C.int(hnd), C.int(idx), C.int(id), unsafe.Pointer(&message[0]), C.uint(len(message)), C.uint(flags)))
+	return NewError(status)
+}
+
+// This function tries to reset a CAN bus controller by taking the channel off bus and then on bus again (if it was on bus before the call to canResetBus().)
+// This function will affect the hardware (and cause a real reset of the CAN chip) only if hnd is the only handle open on the channel. If there are other open handles, this operation will not affect the hardware.
+func (hnd Handle) ResetBus() error {
+	status := int(C.canResetBus(C.int(hnd)))
+	return NewError(status)
+}
+
+type BusParamsFreq int
+
+const (
+	BITRATE_1M   BusParamsFreq = C.canBITRATE_1M
+	BITRATE_500K BusParamsFreq = C.canBITRATE_500K
+	BITRATE_250K BusParamsFreq = C.canBITRATE_250K
+	BITRATE_125K BusParamsFreq = C.canBITRATE_125K
+	BITRATE_100K BusParamsFreq = C.canBITRATE_100K
+	BITRATE_62K  BusParamsFreq = C.canBITRATE_62K
+	BITRATE_50K  BusParamsFreq = C.canBITRATE_50K
+	BITRATE_83K  BusParamsFreq = C.canBITRATE_83K
+	BITRATE_10K  BusParamsFreq = C.canBITRATE_10K
+)
+
+// This routine sets the message acceptance filters on a CAN channel.
+//
+// Format of code and mask:
+//
+//   - A binary 1 in a mask means "the corresponding bit in the code is relevant"
+//   - A binary 0 in a mask means "the corresponding bit in the code is not relevant"
+//   - A relevant binary 1 in a code means "the corresponding bit in the identifier must be 1"
+//   - A relevant binary 0 in a code means "the corresponding bit in the identifier must be 0"
+//
+// In other words, the message is accepted if ((code XOR id) AND mask) == 0.
+//
+// extended should be set to:
+//
+//  0. (FALSE): if the code and mask shall apply to 11-bit CAN identifiers.
+//  1. (TRUE): if the code and mask shall apply to 29-bit CAN identifiers.
+//
+// If you want to remove a filter, call canSetAcceptanceFilter() with the mask set to 0.
+//
+// On some boards the acceptance filtering is done by the CAN hardware; on other boards (typically those with an embedded CPU,) the acceptance filtering is done by software. canSetAcceptanceFilter() behaves in the same way for all boards, however.
+// canSetAcceptanceFilter() and canAccept() both serve the same purpose but the former can set the code and mask in just one call.
+func (hnd Handle) SetAcceptanceFilter(code, mask uint, extended bool) error {
+	ext := C.int(0)
+	if extended {
+		ext = 1
+	}
+	status := int(C.canSetAcceptanceFilter(C.int(hnd), C.uint(code), C.uint(mask), ext))
+	return NewError(status)
+}
+
+// The canSetBitrate() function sets the nominal bit rate of the specified CAN channel. The sampling point is recalculated and kept as close as possible to the value before the call.
+//
+// Parameters:
+//
+//	[bitrate]	bitrate	The new bit rate, in bits/second.
+func (hnd Handle) SetBitrate(bitrate int) error {
+	status := int(C.canSetBitrate(C.int(hnd), C.int(bitrate)))
+	return NewError(status)
+}
+
+// This function sets the nominal bus timing parameters for the specified CAN controller.
+// The library provides default values for tseg1, tseg2, sjw and noSamp when freq is specified to one of the pre-defined constants, canBITRATE_xxx for classic CAN and canFD_BITRATE_xxx for CAN FD.
+// If freq is any other value, no default values are supplied by the library.
+// If you are using multiple handles to the same physical channel, for example if you are writing a threaded application, you must call canBusOff() once for each handle. The same applies to canBusOn() - the physical channel will not go off bus until the last handle to the channel goes off bus.
 func (hnd Handle) SetBusParams(freq BusParamsFreq, tseg1, tseg2, sjw, noSamp, syncmode uint) error {
 	status := int(C.canSetBusParams(C.int(hnd), C.long(freq), C.uint(tseg1), C.uint(tseg2), C.uint(sjw), C.uint(noSamp), C.uint(syncmode)))
 	return NewError(status)
 }
 
-func (hnd Handle) SetBusParamsC200(btr0, btr1 byte) error {
+// This function sets the bus timing parameters using the same convention as the 82c200 CAN controller (which is the same as many other CAN controllers, for example, the 82527.)
+// To calculate the bit timing parameters, you can use the bit timing calculator that is included with CANlib SDK. Look in the BIN directory.
+func (hnd Handle) SetBusParamsC200(btr0, btr1 uint8) error {
 	status := int(C.canSetBusParamsC200(C.int(hnd), C.uchar(btr0), C.uchar(btr1)))
 	return NewError(status)
 }
+
+type BusControlDriverType uint
+
+const (
+	DRIVER_NORMAL        BusControlDriverType = C.canDRIVER_NORMAL
+	DRIVER_SILENT        BusControlDriverType = C.canDRIVER_SILENT
+	DRIVER_SELFRECEPTION BusControlDriverType = C.canDRIVER_SELFRECEPTION
+	DRIVER_OFF           BusControlDriverType = C.canDRIVER_OFF
+)
 
 // This function sets the driver type for a CAN controller.
 // This corresponds loosely to the bus output control register in the CAN controller, hence the name of this function.
@@ -335,10 +322,10 @@ func SetBusOutputControl(hnd Handle, drivertype BusControlDriverType) error {
 // Reads the error counters of the CAN controller
 //
 // returns: tx error counter, rx error counter, overrun error counter
-func (hnd Handle) ReadErrorCounters() (uint32, uint32, uint32, error) {
+func (hnd Handle) ReadErrorCounters() (uint, uint, uint, error) {
 	var tec, rec, ovr C.uint
 	status := int(C.canReadErrorCounters(C.int(hnd), &tec, &rec, &ovr))
-	return uint32(tec), uint32(rec), uint32(ovr), NewError(status)
+	return uint(tec), uint(rec), uint(ovr), NewError(status)
 }
 
 // Reads a message from the receive buffer. If no message is available, the function waits until a message arrives or a timeout occurs.
@@ -357,13 +344,13 @@ func (hnd Handle) ReadWait(timeout int) (*CANMessage, error) {
 		Identifier: uint32(identifier),
 		Data:       data[:dlc],
 		DLC:        uint32(dlc),
-		Flags:      uint32(flags),
-		Time:       uint32(time),
+		Flags:      uint(flags),
+		Time:       uint(time),
 	}, nil
 }
 
 // This function sends a CAN message. The call returns immediately after queuing the message to the driver so the message has not necessarily been transmitted.
-func (hnd Handle) Write(identifier uint32, data []byte, flags CANMessageFlag) error {
+func (hnd Handle) Write(identifier uint32, data []byte, flags MSG_FLAG) error {
 	status := int(C.canWrite(C.int(hnd), C.long(identifier), unsafe.Pointer(&data[0]), C.uint(len(data)), C.uint(flags)))
 	return NewError(status)
 }
@@ -375,7 +362,7 @@ func (hnd Handle) WriteSync(timeoutMS int) error {
 }
 
 // This function sends a CAN message and returns when the message has been successfully transmitted, or the timeout expires.
-func (hnd Handle) WriteWait(identifier uint32, data []byte, flags CANMessageFlag, timeoutMS int) error {
+func (hnd Handle) WriteWait(identifier uint32, data []byte, flags MSG_FLAG, timeoutMS int) error {
 	status := int(C.canWriteWait(C.int(hnd), C.long(identifier), unsafe.Pointer(&data[0]), C.uint(len(data)), C.uint(flags), C.ulong(timeoutMS)))
 	return NewError(status)
 

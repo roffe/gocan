@@ -102,7 +102,8 @@ func (k *Kvaser) Connect(ctx context.Context) error {
 	case 500:
 		err = k.handle.SetBusParams(canlib.BITRATE_500K, 0, 0, 0, 0, 0)
 	case 615.384:
-		err = k.handle.SetBusParamsC200(0x40, 0x37)
+		//err = k.handle.SetBusParamsC200(0x40, 0x37)
+		err = k.handle.SetBitrate(615384)
 	case 1000:
 		err = k.handle.SetBusParams(canlib.BITRATE_1M, 0, 0, 0, 0, 0)
 	default:
@@ -167,9 +168,15 @@ func (k *Kvaser) sendManager(ctx context.Context) {
 
 func (k *Kvaser) Close() error {
 	log.Println("Kvaser.Close()")
-	k.BaseAdapter.Close()
 	if err := k.handle.BusOff(); err != nil {
 		log.Println("Kvaser.Close() off error:", err)
 	}
+	if err := k.handle.FlushReceiveQueue(); err != nil {
+		log.Println("Kvaser.Close() flush error:", err)
+	}
+	if err := k.handle.FlushTransmitQueue(); err != nil {
+		log.Println("Kvaser.Close() flush error:", err)
+	}
+	k.BaseAdapter.Close()
 	return k.handle.Close()
 }
