@@ -149,8 +149,8 @@ func (elm *ELM327) Connect(ctx context.Context) error {
 	}
 	elm.port.ResetInputBuffer()
 
-	go elm.recvManager(ctx)
 	go elm.sendManager(ctx)
+	go elm.recvManager(ctx)
 
 	return nil
 }
@@ -281,6 +281,9 @@ func (elm *ELM327) sendManager(ctx context.Context) {
 			case *gocan.RawCommand:
 				f.WriteString(v.String() + "\r")
 			default:
+				if v.Identifier() >= gocan.SystemMsg {
+					continue
+				}
 				idb := make([]byte, 4)
 				binary.BigEndian.PutUint32(idb, v.Identifier())
 

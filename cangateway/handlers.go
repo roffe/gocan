@@ -231,10 +231,10 @@ func (s *Server) sendMessage(srv grpc.BidiStreamingServer[proto.CANFrame, proto.
 }
 
 func (s *Server) GetAdapters(ctx context.Context, _ *emptypb.Empty) (*proto.Adapters, error) {
-	md, _ := metadata.FromIncomingContext(ctx)
-	for k, v := range md {
-		log.Printf("metadata: %s: %v", k, v)
-	}
+	//md, _ := metadata.FromIncomingContext(ctx)
+	//for k, v := range md {
+	//	log.Printf("metadata: %s: %v", k, v)
+	//}
 	var adapters []*proto.AdapterInfo
 	for _, a := range adapter.GetAdapterMap() {
 		adapter := &proto.AdapterInfo{

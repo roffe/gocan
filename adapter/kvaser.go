@@ -157,6 +157,9 @@ func (k *Kvaser) sendManager(ctx context.Context) {
 		case <-k.close:
 			return
 		case frame := <-k.send:
+			if frame.Identifier() >= gocan.SystemMsg {
+				continue
+			}
 			k.sendMessage(frame)
 		}
 	}

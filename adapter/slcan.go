@@ -127,8 +127,11 @@ func (sl *SLCan) sendManager(ctx context.Context) {
 	f := bytes.NewBuffer(nil)
 	for {
 		select {
-		case v := <-sl.send:
-			if err := sl.handleSend(v, f); err != nil {
+		case frame := <-sl.send:
+			if frame.Identifier() >= gocan.SystemMsg {
+				continue
+			}
+			if err := sl.handleSend(frame, f); err != nil {
 				sl.cfg.OnError(fmt.Errorf("send error: %w", err))
 			}
 		case <-ctx.Done():

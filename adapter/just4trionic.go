@@ -153,8 +153,8 @@ func (a *Just4Trionic) Connect(ctx context.Context) error {
 		time.Sleep(delay)
 	}
 
-	go a.recvManager(ctx)
 	go a.sendManager(ctx)
+	go a.recvManager(ctx)
 
 	return nil
 }
@@ -277,6 +277,9 @@ func (a *Just4Trionic) sendManager(ctx context.Context) {
 	for {
 		select {
 		case v := <-a.send:
+			if v.Identifier() >= gocan.SystemMsg {
+				continue
+			}
 			switch v.(type) {
 			case *gocan.RawCommand:
 				if _, err := a.port.Write(append(v.Data(), '\r')); err != nil {

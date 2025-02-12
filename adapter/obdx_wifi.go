@@ -124,6 +124,9 @@ func (a *OBDXProWifi) sendManager() {
 			return
 		case frame := <-a.send:
 			id := frame.Identifier()
+			if id >= gocan.SystemMsg {
+				continue
+			}
 			sendCmd := dvi.New(dvi.CMD_SEND_TO_NETWORK_NORMAL, append([]byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)}, frame.Data()...))
 			if a.cfg.Debug {
 				log.Println("dvi out:", sendCmd.String())

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -85,7 +86,7 @@ func main() {
 		}
 	}()
 
-	if err := srv.Run(); err != nil {
+	if err := srv.Run(); err != nil && !errors.Is(err, net.ErrClosed) {
 		log.Fatalf("server: %v", err)
 	}
 

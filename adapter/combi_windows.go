@@ -155,8 +155,8 @@ func (ca *CombiAdapter) Connect(ctx context.Context) error {
 		return fmt.Errorf("failed to open can-bus: %w", err)
 	}
 
-	go ca.recvManager()
 	go ca.sendManager()
+	go ca.recvManager()
 
 	return nil
 }
@@ -288,7 +288,6 @@ func (ca *CombiAdapter) sendManager() {
 	if ca.cfg.Debug {
 		defer log.Println("sendManager exited")
 	}
-
 	for {
 		select {
 		case <-ca.close:

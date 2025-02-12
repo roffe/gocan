@@ -186,8 +186,8 @@ func (ma *J2534) Connect(ctx context.Context) error {
 	} else {
 		ma.allowAll()
 	}
-	go ma.recvManager()
 	go ma.sendManager()
+	go ma.recvManager()
 
 	return nil
 }

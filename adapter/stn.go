@@ -212,8 +212,8 @@ func (stn *STN) Connect(ctx context.Context) error {
 	}
 	stn.port.ResetInputBuffer()
 
-	go stn.recvManager(ctx)
 	go stn.sendManager(ctx)
+	go stn.recvManager(ctx)
 
 	return nil
 }
@@ -322,7 +322,7 @@ func (stn *STN) setCANfilter(ids []uint32) {
 func (stn *STN) Close() error {
 	stn.BaseAdapter.Close()
 	stn.closed = true
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 	stn.port.ResetOutputBuffer()
 	stn.port.Write([]byte("ATZ\r"))
 	time.Sleep(50 * time.Millisecond)

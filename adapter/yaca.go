@@ -71,9 +71,6 @@ func (ya *YACA) Connect(ctx context.Context) error {
 	p.ResetOutputBuffer()
 	p.ResetInputBuffer()
 
-	go ya.recvManager(ctx)
-	go ya.sendManager(ctx)
-
 	switch ya.cfg.CANRate {
 	case 33.3:
 		p.Write([]byte("S0\r"))
@@ -95,6 +92,9 @@ func (ya *YACA) Connect(ctx context.Context) error {
 	time.Sleep(5 * time.Millisecond)
 
 	p.Write([]byte("O\r"))
+
+	go ya.recvManager(ctx)
+	go ya.sendManager(ctx)
 
 	return nil
 }
