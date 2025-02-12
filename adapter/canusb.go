@@ -195,7 +195,7 @@ func (cu *Canusb) sendManager(ctx context.Context) {
 			case *gocan.RawCommand:
 				// cu.mu.Lock()
 				if _, err := cu.port.Write(append(v.Data(), '\r')); err != nil {
-					cu.err <- fmt.Errorf("failed to write to com port: %s, %w", f.String(), err)
+					cu.SetError(fmt.Errorf("failed to write to com port: %s, %w", f.String(), err))
 					return
 				}
 				if cu.cfg.Debug {
@@ -213,7 +213,7 @@ func (cu *Canusb) sendManager(ctx context.Context) {
 					strconv.Itoa(v.Length()) +
 					hex.EncodeToString(v.Data()) + "\r")
 				if _, err := cu.port.Write(f.Bytes()); err != nil {
-					cu.err <- fmt.Errorf("failed to write to com port: %s, %w", f.String(), err)
+					cu.SetError(fmt.Errorf("failed to write to com port: %s, %w", f.String(), err))
 					return
 				}
 				if cu.cfg.Debug {
@@ -244,7 +244,7 @@ func (cu *Canusb) recvManager(ctx context.Context) {
 			//	log.Println(portError.EncodedErrorString())
 			//	return
 			//}
-			cu.err <- fmt.Errorf("failed to read com port: %w", err)
+			cu.SetError(fmt.Errorf("failed to read com port: %w", err))
 			return
 		}
 		select {

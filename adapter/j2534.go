@@ -271,14 +271,14 @@ func (ma *J2534) recvManager() {
 		default:
 			msg, err := ma.readMsg()
 			if err != nil {
-				ma.err <- err
+				ma.SetError(err)
 				continue
 			}
 			if msg == nil {
 				continue
 			}
 			if msg.DataSize == 0 {
-				ma.err <- errors.New("empty message")
+				ma.SetError(errors.New("empty message"))
 				continue
 			}
 			select {
@@ -341,7 +341,7 @@ func (ma *J2534) sendManager() {
 			binary.BigEndian.PutUint32(msg.Data[:], f.Identifier())
 			copy(msg.Data[4:], f.Data())
 			if err := ma.sendMsg(msg); err != nil {
-				ma.err <- fmt.Errorf("send error: %w", err)
+				ma.SetError(fmt.Errorf("send error: %w", err))
 			}
 		}
 	}

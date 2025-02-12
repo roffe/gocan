@@ -363,7 +363,7 @@ func (stn *STN) sendManager(ctx context.Context) {
 				stn.cfg.OnMessage("<o> " + f.String())
 			}
 			if _, err := stn.port.Write(f.Bytes()); err != nil {
-				stn.err <- fmt.Errorf("failed to write: %q %w", f.String(), err)
+				stn.SetError(fmt.Errorf("failed to write: %q %w", f.String(), err))
 				return
 			}
 			f.Reset()
@@ -389,7 +389,7 @@ func (stn *STN) recvManager(ctx context.Context) {
 			if stn.closed {
 				return
 			}
-			stn.err <- fmt.Errorf("failed to read: %w", err)
+			stn.SetError(fmt.Errorf("failed to read: %w", err))
 			return
 		}
 		if n == 0 {

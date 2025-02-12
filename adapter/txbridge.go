@@ -174,7 +174,7 @@ func (tx *Txbridge) sendManager(_ context.Context) {
 			if frame.Identifier() == gocan.SystemMsg {
 				_, err := tx.port.Write(frame.Data())
 				if err != nil {
-					tx.err <- err
+					tx.SetError(err)
 				}
 				continue
 			}
@@ -185,12 +185,12 @@ func (tx *Txbridge) sendManager(_ context.Context) {
 			}
 			buf, err := cmd.MarshalBinary()
 			if err != nil {
-				tx.err <- err
+				tx.SetError(err)
 				continue
 			}
 			_, err = tx.port.Write(buf)
 			if err != nil {
-				tx.err <- err
+				tx.SetError(err)
 				continue
 			}
 		}
@@ -224,7 +224,7 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 		n, err := tx.port.Read(readbuf)
 		if err != nil {
 			log.Println("recvManager read error", err)
-			tx.err <- err
+			tx.SetError(err)
 			return
 		}
 		if n == 0 {

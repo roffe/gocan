@@ -281,7 +281,7 @@ func (a *Combi) readPacket(ctx context.Context, rx *Packet) error {
 }
 
 func (a *Combi) recvManager(ctx context.Context) {
-	runtime.LockOSThread()
+	//runtime.LockOSThread()
 	for {
 		select {
 		case <-a.close:
@@ -290,13 +290,13 @@ func (a *Combi) recvManager(ctx context.Context) {
 			var rx Packet
 			err := a.readPacket(ctx, &rx)
 			if err != nil {
-				a.err <- fmt.Errorf("read error: %w", err)
+				a.SetError(fmt.Errorf("read error: %w", err))
 				continue
 			}
 			switch rx.cmd {
 			case rxFrame:
 				if rx.len != 15 {
-					a.err <- errors.New("woops")
+					a.SetError(errors.New("woops"))
 					return
 				}
 				frame := gocan.NewFrame(

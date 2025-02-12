@@ -146,7 +146,7 @@ func (ya *YACA) recvManager(ctx context.Context) {
 		}
 		n, err := ya.port.Read(readBuffer)
 		if err != nil {
-			ya.err <- fmt.Errorf("failed to read from com port: %w", err)
+			ya.SetError(fmt.Errorf("failed to read from com port: %w", err))
 			return
 		}
 		if n == 0 {

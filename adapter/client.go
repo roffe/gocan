@@ -51,7 +51,7 @@ func NewClient(adapterName string, cfg *gocan.AdapterConfig) (*Client, error) {
 		cfg.OnError = func(err error) {
 			_, file, no, ok := runtime.Caller(1)
 			if ok {
-				fmt.Printf("%s#%d %v\n", file, no, err)
+				fmt.Printf("%s#%d %v\n", filepath.Base(file), no, err)
 			} else {
 				log.Println(err)
 			}
@@ -61,7 +61,7 @@ func NewClient(adapterName string, cfg *gocan.AdapterConfig) (*Client, error) {
 		cfg.OnMessage = func(msg string) {
 			_, file, no, ok := runtime.Caller(1)
 			if ok {
-				fmt.Printf("%s#%d %v\n", file, no, msg)
+				fmt.Printf("%s#%d %v\n", filepath.Base(file), no, msg)
 			} else {
 				log.Println(msg)
 			}
@@ -146,7 +146,7 @@ func (c *Client) sendManager(ctx context.Context, stream grpc.BidiStreamingClien
 			return
 		case msg := <-c.send:
 			if err := c.sendMessage(stream, msg); err != nil {
-				c.err <- fmt.Errorf("sendManager: %w", err)
+				c.SetError(fmt.Errorf("sendManager: %w", err))
 				return
 			}
 		}
@@ -175,7 +175,7 @@ func (c *Client) recvManager(_ context.Context, stream grpc.BidiStreamingClient[
 			return
 		}
 		if in.GetId() == 0 {
-			c.err <- errors.New(string(in.GetData()))
+			c.SetError(errors.New(string(in.GetData())))
 			return
 		}
 
@@ -205,7 +205,7 @@ func (c *Client) isrecvError(err error) bool {
 		//}
 	}
 
-	c.err <- fmt.Errorf("could not receive: %w", err)
+	c.SetError(fmt.Errorf("could not receive: %w", err))
 	log.Println("recv error:", err)
 	return true
 

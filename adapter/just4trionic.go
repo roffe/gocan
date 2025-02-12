@@ -208,7 +208,7 @@ func (a *Just4Trionic) recvManager(ctx context.Context) {
 		n, err := a.port.Read(readBuffer)
 		if err != nil {
 			if !a.closed {
-				a.err <- fmt.Errorf("failed to read com port: %w", err)
+				a.SetError(fmt.Errorf("failed to read com port: %w", err))
 			}
 			return
 		}
@@ -280,7 +280,7 @@ func (a *Just4Trionic) sendManager(ctx context.Context) {
 			switch v.(type) {
 			case *gocan.RawCommand:
 				if _, err := a.port.Write(append(v.Data(), '\r')); err != nil {
-					a.err <- fmt.Errorf("failed to write to com port: %q, %w", f, err)
+					a.SetError(fmt.Errorf("failed to write to com port: %q, %w", f, err))
 				}
 				if a.cfg.Debug {
 					fmt.Fprint(os.Stderr, ">> "+v.String()+"\n")

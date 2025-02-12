@@ -164,7 +164,7 @@ func (k *Kvaser) sendManager(ctx context.Context) {
 
 func (k *Kvaser) sendMessage(frame gocan.CANFrame) {
 	if err := k.handle.Write(frame.Identifier(), frame.Data(), canlib.MSG_STD); err != nil {
-		k.err <- fmt.Errorf("kvaser.sendManager error: %v", err)
+		k.SetError(fmt.Errorf("kvaser.sendManager error: %v", err))
 	}
 }
 
@@ -181,7 +181,7 @@ func (k *Kvaser) recvManager(ctx context.Context) {
 		default:
 			msg, err := k.handle.ReadWait(k.timeoutRead)
 			if err != nil && err != canlib.ErrNoMsg {
-				k.err <- fmt.Errorf("kvaser.recvManager() error: %v", err)
+				k.SetError(fmt.Errorf("kvaser.recvManager() error: %v", err))
 				return
 			}
 			if msg == nil {

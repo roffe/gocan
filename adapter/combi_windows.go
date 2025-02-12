@@ -27,15 +27,16 @@ const (
 
 type CombiAdapter struct {
 	BaseAdapter
-	usbCtx          *gousb.Context
-	dev             *gousb.Device
-	devCfg          *gousb.Config
-	iface           *gousb.Interface
-	in              *gousb.InEndpoint
-	out             *gousb.OutEndpoint
-	sendSem         chan struct{}
-	partialTransfer []byte
-	closeOnce       sync.Once
+	usbCtx    *gousb.Context
+	dev       *gousb.Device
+	devCfg    *gousb.Config
+	iface     *gousb.Interface
+	in        *gousb.InEndpoint
+	out       *gousb.OutEndpoint
+	sendSem   chan struct{}
+	cmdBuffer []byte
+	closeOnce sync.Once
+	buffPool  sync.Pool
 }
 
 func init() {
@@ -65,6 +66,11 @@ func NewCombi(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	return &CombiAdapter{
 		BaseAdapter: NewBaseAdapter("CombiAdapter", cfg),
 		sendSem:     make(chan struct{}, 1),
+		buffPool: sync.Pool{
+			New: func() any {
+				return make([]byte, 19)
+			},
+		},
 	}, nil
 }
 
@@ -129,7 +135,7 @@ func (ca *CombiAdapter) Connect(ctx context.Context) error {
 		return fmt.Errorf("failed to close can-bus: %w", err)
 	}
 
-	dump := make([]byte, 32)
+	dump := make([]byte, 38)
 	ca.in.Read(dump)
 
 	if ca.cfg.PrintVersion {
@@ -212,10 +218,10 @@ func (ca *CombiAdapter) recvManager() {
 		case <-ca.close:
 			return
 		default:
-			buff := make([]byte, 16)
+			buff := make([]byte, 19)
 			n, err := ca.in.Read(buff)
 			if err != nil {
-				ca.err <- fmt.Errorf("failed to read from usb device: %w", err)
+				ca.SetError(fmt.Errorf("failed to read from usb device: %w", err))
 				//ca.cfg.OnError(fmt.Errorf("failed to read from usb device: %w", err))
 				if n == 0 {
 					continue
@@ -231,15 +237,15 @@ func (ca *CombiAdapter) recvManager() {
 
 func (ca *CombiAdapter) parseCMD(data []byte) error {
 	// If there's a partial transfer from previous call, concatenate it with the new data
-	if len(ca.partialTransfer) > 0 {
-		data = append(ca.partialTransfer, data...)
-		ca.partialTransfer = nil
+	if len(ca.cmdBuffer) > 0 {
+		data = append(ca.cmdBuffer, data...)
+		ca.cmdBuffer = nil
 	}
 
 	for len(data) > 0 {
 		// Check if there's enough data to form a complete command
 		if data[0] == combiCmdrxFrame && len(data) < 19 || len(data) < 4 {
-			ca.partialTransfer = data
+			ca.cmdBuffer = data
 			break
 		}
 
@@ -248,7 +254,7 @@ func (ca *CombiAdapter) parseCMD(data []byte) error {
 
 		// Check if there's enough data to form the complete command including data and terminator
 		if len(data) < int(size+4) { // cmd ID(1) + size(2) + terminator(1)
-			ca.partialTransfer = data
+			ca.cmdBuffer = data
 			break
 		}
 
@@ -259,13 +265,13 @@ func (ca *CombiAdapter) parseCMD(data []byte) error {
 			default:
 			}
 		case combiCmdrxFrame:
-			f := gocan.NewFrame(
+			frame := gocan.NewFrame(
 				binary.LittleEndian.Uint32(data[3:7]),
 				data[7:data[15]+7],
 				gocan.Incoming,
 			)
 			select {
-			case ca.recv <- f:
+			case ca.recv <- frame:
 			default:
 				ca.cfg.OnError(ErrDroppedFrame)
 			}
@@ -282,8 +288,7 @@ func (ca *CombiAdapter) sendManager() {
 	if ca.cfg.Debug {
 		defer log.Println("sendManager exited")
 	}
-	buff := make([]byte, 19)
-	zeros := make([]byte, 19)
+
 	for {
 		select {
 		case <-ca.close:
@@ -292,22 +297,28 @@ func (ca *CombiAdapter) sendManager() {
 			if frame.Identifier() >= gocan.SystemMsg {
 				continue
 			}
-			buff[0] = combiCmdtxFrame
-			//buff[1] = 15 >> 8
-			//buff[2] = 15 & 0xff
-			buff[2] = 0x0F
-			binary.LittleEndian.PutUint32(buff[3:], frame.Identifier())
-			copy(buff[7:], frame.Data())
-			buff[15] = uint8(frame.Length())
-			//buff[16] = 0x00 // is extended
-			//buff[17] = 0x00 // is remote
-			//buff[18] = 0x00 // terminator
-			ca.sendSem <- struct{}{}
-			if _, err := ca.out.Write(buff); err != nil {
-				ca.err <- fmt.Errorf("failed to send frame: %w", err)
-			}
-			copy(buff, zeros)
+			ca.sendMessage(frame)
 		}
+	}
+}
+
+func (ca *CombiAdapter) sendMessage(frame gocan.CANFrame) {
+	buff := ca.buffPool.Get().([]byte)
+	defer ca.buffPool.Put(buff)
+	buff[0] = combiCmdtxFrame
+	//buff[1] = 15 >> 8
+	//buff[2] = 15 & 0xff
+	buff[1] = 0x00
+	buff[2] = 0x0F
+	binary.LittleEndian.PutUint32(buff[3:], frame.Identifier())
+	copy(buff[7:], frame.Data())
+	buff[15] = uint8(frame.Length())
+	buff[16] = 0x00 // is extended
+	buff[17] = 0x00 // is remote
+	buff[18] = 0x00 // terminator
+	ca.sendSem <- struct{}{}
+	if _, err := ca.out.Write(buff); err != nil {
+		ca.SetError(fmt.Errorf("failed to send frame: %w", err))
 	}
 }
 

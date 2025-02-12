@@ -3,6 +3,8 @@ package adapter
 import (
 	"fmt"
 	"log"
+	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -31,13 +33,23 @@ type AdapterCapabilities struct {
 
 func New(adapterName string, cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	if cfg.OnMessage == nil {
-		cfg.OnMessage = func(s string) {
-			log.Println(s)
+		cfg.OnMessage = func(msg string) {
+			_, file, no, ok := runtime.Caller(1)
+			if ok {
+				fmt.Printf("%s#%d %v\n", filepath.Base(file), no, msg)
+			} else {
+				log.Println(msg)
+			}
 		}
 	}
 	if cfg.OnError == nil {
 		cfg.OnError = func(err error) {
-			log.Println(err)
+			_, file, no, ok := runtime.Caller(1)
+			if ok {
+				fmt.Printf("%s#%d %v\n", filepath.Base(file), no, err)
+			} else {
+				log.Println(err)
+			}
 		}
 	}
 	if adapter, found := adapterMap[adapterName]; found {

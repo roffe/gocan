@@ -26,24 +26,31 @@ func NewBaseAdapter(name string, cfg *gocan.AdapterConfig) BaseAdapter {
 	}
 }
 
-func (a *BaseAdapter) Name() string {
-	return a.name
+func (base *BaseAdapter) Name() string {
+	return base.name
 }
 
-func (a *BaseAdapter) Send() chan<- gocan.CANFrame {
-	return a.send
+func (base *BaseAdapter) Send() chan<- gocan.CANFrame {
+	return base.send
 }
 
-func (a *BaseAdapter) Recv() <-chan gocan.CANFrame {
-	return a.recv
+func (base *BaseAdapter) Recv() <-chan gocan.CANFrame {
+	return base.recv
 }
 
-func (a *BaseAdapter) Err() <-chan error {
-	return a.err
+func (base *BaseAdapter) Err() <-chan error {
+	return base.err
 }
 
-func (a *BaseAdapter) Close() {
-	a.once.Do(func() {
-		close(a.close)
+func (base *BaseAdapter) Close() {
+	base.once.Do(func() {
+		close(base.close)
 	})
+}
+
+func (base *BaseAdapter) SetError(err error) {
+	select {
+	case base.err <- err:
+	default:
+	}
 }
