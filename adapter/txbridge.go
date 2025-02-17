@@ -65,9 +65,9 @@ func (tx *Txbridge) Connect(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if t, ok := tx.port.(*net.TCPConn); ok {
-			t.SetNoDelay(true)
-		}
+		//if t, ok := tx.port.(*net.TCPConn); ok {
+		//	t.SetNoDelay(true)
+		//}
 		tx.port = port
 	case "txbridge bluetooth":
 		mode := &serial.Mode{
@@ -166,6 +166,10 @@ func (tx *Txbridge) Close() error {
 }
 
 func (tx *Txbridge) sendManager(_ context.Context) {
+	if tx.cfg.Debug {
+		log.Println("sendManager start")
+		defer log.Println("sendManager exited")
+	}
 	for {
 		select {
 		case <-tx.close:
@@ -198,9 +202,10 @@ func (tx *Txbridge) sendManager(_ context.Context) {
 }
 
 func (tx *Txbridge) recvManager(ctx context.Context) {
-	log.Println("recvManager start")
-	defer log.Println("recvManager exited")
-
+	if tx.cfg.Debug {
+		log.Println("recvManager start")
+		defer log.Println("recvManager exited")
+	}
 	var parsingCommand bool
 	var command uint8
 	var commandSize uint8

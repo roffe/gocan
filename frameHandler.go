@@ -43,7 +43,7 @@ func (s *Sub) Wait(ctx context.Context, timeout time.Duration) (CANFrame, error)
 			identifiers = append(identifiers, id)
 		}
 		slices.Sort(identifiers)
-		return nil, fmt.Errorf("timeout waiting for frame 0x%03X", identifiers)
+		return nil, fmt.Errorf("wait timeout (%dms) waiting for frame 0x%03X", timeout.Milliseconds(), identifiers)
 
 	}
 }

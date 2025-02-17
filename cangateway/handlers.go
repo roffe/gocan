@@ -139,7 +139,6 @@ func (s *Server) Stream(srv grpc.BidiStreamingServer[proto.CANFrame, proto.CANFr
 	defer dev.Close()
 	log.Printf("%s connected @ %g kbp/s", adaptername, adapterConfig.CANRate)
 	defer log.Printf("%s disconnected", adaptername)
-
 	send(srv, 0, []byte("OK"))
 	// send mesage from canbus adapter to IPC
 	errg.Go(s.recvManager(ctx, srv, dev))

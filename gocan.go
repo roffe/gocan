@@ -115,7 +115,7 @@ func (c *Client) SendFrame(identifier uint32, data []byte, f CANFrameType) error
 // Send and wait up to <timeout> for a answer on given identifiers
 func (c *Client) SendAndWait(ctx context.Context, frame CANFrame, timeout time.Duration, identifiers ...uint32) (CANFrame, error) {
 	frame.SetTimeout(timeout)
-	sub := c.newSub(ctx, 1, identifiers...)
+	sub := c.newSub(ctx, 2, identifiers...)
 	c.fh.register <- sub
 	defer func() {
 		c.fh.unregister <- sub

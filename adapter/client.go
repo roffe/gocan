@@ -188,25 +188,21 @@ func (c *Client) isrecvError(err error) bool {
 		return false
 	}
 	if e, ok := status.FromError(err); ok {
-		if e.Code() == codes.Canceled {
-			return true
+		switch e.Code() {
+		case codes.Canceled:
+			return false
+			//case codes.PermissionDenied:
+			//	fmt.Println(e.Message()) // this will print PERMISSION_DENIED_TEST
+			//case codes.Internal:
+			//	fmt.Println("Has Internal Error")
+			//case codes.Aborted:
+			//	fmt.Println("gRPC Aborted the call")
+			//default:
+			//	log.Println(e.Code(), e.Message())
 		}
-		//switch e.Code() {
-		//case codes.Canceled:
-		//	return
-		//case codes.PermissionDenied:
-		//	fmt.Println(e.Message()) // this will print PERMISSION_DENIED_TEST
-		//case codes.Internal:
-		//	fmt.Println("Has Internal Error")
-		//case codes.Aborted:
-		//	fmt.Println("gRPC Aborted the call")
-		//default:
-		//	log.Println(e.Code(), e.Message())
-		//}
 	}
 
-	c.SetError(fmt.Errorf("could not receive: %w", err))
-	log.Println("recv error:", err)
+	c.SetError(fmt.Errorf("client recv error: %w", err))
 	return true
 
 }

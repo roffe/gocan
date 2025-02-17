@@ -93,10 +93,10 @@ This service allows the tester to perform the following tasks:
 * Allow ECU DTC algorithms to continue to execute while the DeviceControl ($AE) service is active.
 * Request a gateway ECU to issue a wake-up request.
 
-02 disableAllDTCs
+- 02 disableAllDTCs
    This level shall disable setting of all DTCs.
 
-03 enableDTCsDuringDevCntrl
+- 03 enableDTCsDuringDevCntrl
    This level shall be used to allow DTC algorithms to continue to execute while the
    DeviceControl ($AE) service is active. This request shall have to be made prior to
    activating DeviceControl or the request shall be rejected. If this service and level are not
@@ -107,7 +107,7 @@ This service allows the tester to perform the following tasks:
    and remain inhibited until after a TesterPresent timeout occurs or a $20 service is
    requested.
 
-04 wakeUpLinks
+- 04 wakeUpLinks
    This level shall cause a gateway ECU to initiate the appropriate wake-up sequence on all
    GMLAN subnets that it is connected to (provided that a given subnet has a wake-up
    mechanism defined).
@@ -406,7 +406,7 @@ func (cl *Client) SecurityAccessSendKey(ctx context.Context, accessLevel, high, 
 }
 
 func (cl *Client) RequestSecurityAccess(ctx context.Context, accesslevel byte, delay time.Duration, seedfunc func([]byte, byte) (byte, byte)) error {
-	//time.Sleep(50 * time.Millisecond)
+	log.Println("SecurityAccessRequestSeed")
 	seed, err := cl.SecurityAccessRequestSeed(ctx, accesslevel)
 	if err != nil {
 		return err
@@ -426,6 +426,7 @@ func (cl *Client) RequestSecurityAccess(ctx context.Context, accesslevel byte, d
 
 	high, low := seedfunc(seed, accesslevel)
 
+	log.Println("SecurityAccessSendKey")
 	if err := cl.SecurityAccessSendKey(ctx, accesslevel, high, low); err != nil {
 		return err
 	}
@@ -494,7 +495,7 @@ func (cl *Client) RequestDownload(ctx context.Context, z22se bool) error {
 	f := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
 	resp, err := cl.c.SendAndWait(ctx, f, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
-		return err
+		return fmt.Errorf("RequestDownload: %w", err)
 	}
 
 	if err := CheckErr(resp); err != nil {
@@ -528,10 +529,12 @@ func (cl *Client) Execute(ctx context.Context, startAddress uint32) error {
 		byte(startAddress >> 8),
 		byte(startAddress),
 	}
-	resp, err := cl.c.SendAndWait(ctx, gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired), cl.defaultTimeout, cl.recvID...)
+	ti := time.Now()
+	resp, err := cl.c.SendAndWait(ctx, gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired), cl.defaultTimeout*10, cl.recvID...)
 	if err != nil {
-		return err
+		return fmt.Errorf("Execute: %w", err)
 	}
+	log.Println("Execute took", time.Since(ti).Milliseconds())
 	return CheckErr(resp)
 }
 
@@ -913,9 +916,9 @@ func (cl *Client) ProgrammingMode(ctx context.Context, subFunc byte) error {
 	switch subFunc {
 	case 0x01, 0x02:
 		frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
-		resp, err := cl.c.SendAndWait(ctx, frame, cl.defaultTimeout, cl.recvID...)
+		resp, err := cl.c.SendAndWait(ctx, frame, cl.defaultTimeout*4, cl.recvID...)
 		if err != nil {
-			return err
+			return fmt.Errorf("ProgrammingMode: %X %w", subFunc, err)
 		}
 		d := resp.Data()
 		if d[0] != 0x01 || d[1] != 0xE5 {
