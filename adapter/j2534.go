@@ -186,8 +186,8 @@ func (ma *J2534) Connect(ctx context.Context) error {
 	} else {
 		ma.allowAll()
 	}
-	go ma.sendManager()
-	go ma.recvManager()
+	go ma.sendManager(ctx)
+	go ma.recvManager(ctx)
 
 	return nil
 }
@@ -262,11 +262,13 @@ func (ma *J2534) setupFilters() error {
 	return nil
 }
 
-func (ma *J2534) recvManager() {
+func (ma *J2534) recvManager(ctx context.Context) {
 	runtime.LockOSThread()
 	for {
 		select {
-		case <-ma.close:
+		case <-ctx.Done():
+			return
+		case <-ma.closeChan:
 			return
 		default:
 			msg, err := ma.readMsg()
@@ -282,7 +284,7 @@ func (ma *J2534) recvManager() {
 				continue
 			}
 			select {
-			case ma.recv <- gocan.NewFrame(
+			case ma.recvChan <- gocan.NewFrame(
 				binary.BigEndian.Uint32(msg.Data[0:4]),
 				msg.Data[4:4+msg.DataSize],
 				gocan.Incoming,
@@ -318,13 +320,15 @@ func (ma *J2534) readMsg() (*passthru.PassThruMsg, error) {
 	return msg, nil
 }
 
-func (ma *J2534) sendManager() {
+func (ma *J2534) sendManager(ctx context.Context) {
 	runtime.LockOSThread()
 	for {
 		select {
-		case <-ma.close:
+		case <-ctx.Done():
 			return
-		case f := <-ma.send:
+		case <-ma.closeChan:
+			return
+		case f := <-ma.sendChan:
 			if f.Identifier() >= gocan.SystemMsg {
 				continue
 			}

@@ -170,6 +170,7 @@ func (s *Server) recvManager(ctx context.Context, srv grpc.BidiStreamingServer[p
 			case <-ctx.Done():
 				return ctx.Err()
 			case err := <-dev.Err():
+				log.Println("adapter error:", err)
 				if gocan.IsRecoverable(err) {
 					send(srv, gocan.SystemMsgError, []byte(err.Error()))
 					continue

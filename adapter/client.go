@@ -131,9 +131,9 @@ func (c *Client) sendManager(ctx context.Context, stream grpc.BidiStreamingClien
 		select {
 		case <-ctx.Done():
 			return
-		case <-c.close:
+		case <-c.closeChan:
 			return
-		case msg := <-c.send:
+		case msg := <-c.sendChan:
 			if err := c.sendMessage(stream, msg); err != nil {
 				c.SetError(fmt.Errorf("sendManager: %w", err))
 				return
@@ -160,35 +160,29 @@ func (c *Client) sendMessage(stream grpc.BidiStreamingClient[proto.CANFrame, pro
 func (c *Client) recvManager(_ context.Context, stream grpc.BidiStreamingClient[proto.CANFrame, proto.CANFrame]) {
 	for {
 		in, err := stream.Recv()
-		if c.isrecvError(err) {
+		if err != nil {
+			if e, ok := status.FromError(err); ok {
+				switch e.Code() {
+				case codes.Canceled:
+					log.Println("client recv canceled")
+					return
+					//case codes.PermissionDenied:
+					//	fmt.Println(e.Message()) // this will print PERMISSION_DENIED_TEST
+					//case codes.Internal:
+					//	fmt.Println("Has Internal Error")
+					//case codes.Aborted:
+					//	fmt.Println("gRPC Aborted the call")
+					//default:
+					//	log.Println(e.Code(), e.Message())
+				}
+			}
+
+			c.SetError(gocan.Unrecoverable(err))
 			return
 		}
+
 		c.recvMessage(in.GetId(), in.GetData())
 	}
-}
-
-func (c *Client) isrecvError(err error) bool {
-	if err == nil {
-		return false
-	}
-	if e, ok := status.FromError(err); ok {
-		switch e.Code() {
-		case codes.Canceled:
-			return true
-			//case codes.PermissionDenied:
-			//	fmt.Println(e.Message()) // this will print PERMISSION_DENIED_TEST
-			//case codes.Internal:
-			//	fmt.Println("Has Internal Error")
-			//case codes.Aborted:
-			//	fmt.Println("gRPC Aborted the call")
-			//default:
-			//	log.Println(e.Code(), e.Message())
-		}
-	}
-
-	c.SetError(fmt.Errorf("client recv error: %w", err))
-	return true
-
 }
 
 func (c *Client) recvMessage(identifier uint32, data []byte) {
@@ -201,7 +195,7 @@ func (c *Client) recvMessage(identifier uint32, data []byte) {
 	}
 	frame := gocan.NewFrame(identifier, data, gocan.Incoming)
 	select {
-	case c.recv <- frame:
+	case c.recvChan <- frame:
 	default:
 		c.cfg.OnMessage("client recv channel full")
 	}
@@ -209,7 +203,7 @@ func (c *Client) recvMessage(identifier uint32, data []byte) {
 
 func (c *Client) Close() (err error) {
 	c.closeOnce.Do(func() {
-		close(c.close)
+		close(c.closeChan)
 	})
 	if c.conn != nil {
 		err = c.conn.Close()

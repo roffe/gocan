@@ -127,49 +127,48 @@ func (sl *SLCan) sendManager(ctx context.Context) {
 	f := bytes.NewBuffer(nil)
 	for {
 		select {
-		case frame := <-sl.send:
-			if frame.Identifier() >= gocan.SystemMsg {
-				continue
-			}
+		case frame := <-sl.sendChan:
 			if err := sl.handleSend(frame, f); err != nil {
 				sl.cfg.OnMessage(fmt.Sprintf("send error: %v", err))
 			}
 		case <-ctx.Done():
 			return
-		case <-sl.close:
+		case <-sl.closeChan:
 			return
 		}
 	}
 }
 
 // handleSend processes a single send operation.
-func (sl *SLCan) handleSend(v gocan.CANFrame, f *bytes.Buffer) error {
-	switch frame := v.(type) {
-	case *gocan.RawCommand:
-		data := append(frame.Data(), '\r')
-		if _, err := sl.port.Write(data); err != nil {
-			sl.cfg.OnMessage(fmt.Sprintf("failed to write to com port: %s, %v", f.String(), err))
+func (sl *SLCan) handleSend(frame gocan.CANFrame, f *bytes.Buffer) error {
+	if id := frame.Identifier(); id >= gocan.SystemMsg {
+		if id == gocan.SystemMsg {
+			if sl.cfg.Debug {
+				log.Println(">> " + string(frame.Data()))
+			}
+			if _, err := sl.port.Write(append(frame.Data(), '\r')); err != nil {
+				return gocan.Unrecoverable(fmt.Errorf("failed to write to com port: %w", err))
+			}
 		}
-		if sl.cfg.Debug {
-			log.Println(">> " + frame.String())
-		}
-	default:
-		f.Reset()
-		f.WriteByte('t')
-		idb := make([]byte, 4)
-		binary.BigEndian.PutUint32(idb, frame.Identifier())
-		f.WriteString(hex.EncodeToString(idb)[5:]) // Skip the first byte
-		f.WriteString(strconv.Itoa(frame.Length()))
-		f.WriteString(hex.EncodeToString(frame.Data()))
-		f.WriteByte(0x0D)
-
-		if _, err := sl.port.Write(f.Bytes()); err != nil {
-			sl.cfg.OnMessage(fmt.Sprintf("failed to write to com port: %s, %v", f.String(), err))
-		}
-		if sl.cfg.Debug {
-			log.Println(">> " + f.String())
-		}
+		return nil
 	}
+
+	f.Reset()
+	f.WriteByte('t')
+	idb := make([]byte, 4)
+	binary.BigEndian.PutUint32(idb, frame.Identifier())
+	f.WriteString(hex.EncodeToString(idb)[5:]) // Skip the first byte
+	f.WriteString(strconv.Itoa(frame.Length()))
+	f.WriteString(hex.EncodeToString(frame.Data()))
+	f.WriteByte(0x0D)
+
+	if _, err := sl.port.Write(f.Bytes()); err != nil {
+		sl.cfg.OnMessage(fmt.Sprintf("failed to write to com port: %s, %v", f.String(), err))
+	}
+	if sl.cfg.Debug {
+		log.Println(">> " + f.String())
+	}
+
 	return nil
 }
 
@@ -191,7 +190,7 @@ func (sl *SLCan) parse(ctx context.Context, buff *bytes.Buffer, readBuffer []byt
 					continue
 				}
 				select {
-				case sl.recv <- f:
+				case sl.recvChan <- f:
 				case <-ctx.Done():
 					return
 				default:

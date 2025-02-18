@@ -1,7 +1,5 @@
 package gocan
 
-import "errors"
-
 type unrecoverableError struct {
 	error
 }
@@ -24,5 +22,8 @@ func Unrecoverable(err error) error {
 
 // IsRecoverable checks if error is an instance of `unrecoverableError`
 func IsRecoverable(err error) bool {
-	return !errors.Is(err, unrecoverableError{})
+	if _, ok := err.(unrecoverableError); ok {
+		return false
+	}
+	return true
 }

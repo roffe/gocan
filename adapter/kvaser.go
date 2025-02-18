@@ -154,9 +154,9 @@ func (k *Kvaser) sendManager(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-k.close:
+		case <-k.closeChan:
 			return
-		case frame := <-k.send:
+		case frame := <-k.sendChan:
 			if frame.Identifier() >= gocan.SystemMsg {
 				continue
 			}
@@ -179,7 +179,7 @@ func (k *Kvaser) recvManager(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-k.close:
+		case <-k.closeChan:
 			return
 		default:
 			msg, err := k.handle.ReadWait(k.timeoutRead)
@@ -202,7 +202,7 @@ func (k *Kvaser) recvMessage(identifier uint32, data []byte, dlc uint32) {
 	}
 	frame := gocan.NewFrame(identifier, data[:dlc], gocan.Incoming)
 	select {
-	case k.recv <- frame:
+	case k.recvChan <- frame:
 	default:
 		log.Println("kvaser.recvManager() dropped frame")
 	}

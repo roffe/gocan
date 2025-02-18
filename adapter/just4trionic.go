@@ -2,7 +2,7 @@ package adapter
 
 import (
 	"context"
-	"os"
+	"log"
 
 	"bytes"
 	"encoding/hex"
@@ -78,10 +78,10 @@ func NewJust4Trionic(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 
 func (a *Just4Trionic) SetFilter(filters []uint32) error {
 	filter, mask := a.calcAcceptanceFilters(filters)
-	a.send <- gocan.NewRawCommand("C")
-	a.send <- gocan.NewRawCommand(filter)
-	a.send <- gocan.NewRawCommand(mask)
-	a.send <- gocan.NewRawCommand("O")
+	a.Send() <- gocan.NewFrame(gocan.SystemMsg, []byte{'C'}, gocan.Outgoing)
+	a.Send() <- gocan.NewFrame(gocan.SystemMsg, []byte(filter), gocan.Outgoing)
+	a.Send() <- gocan.NewFrame(gocan.SystemMsg, []byte(mask), gocan.Outgoing)
+	a.Send() <- gocan.NewFrame(gocan.SystemMsg, []byte{'O'}, gocan.Outgoing)
 	return nil
 }
 
@@ -241,7 +241,7 @@ func (a *Just4Trionic) parse(ctx context.Context, readBuffer []byte, buff *bytes
 					continue
 				}
 				select {
-				case a.recv <- f:
+				case a.recvChan <- f:
 				default:
 					a.cfg.OnMessage(ErrDroppedFrame.Error())
 				}
@@ -276,39 +276,39 @@ func (a *Just4Trionic) sendManager(ctx context.Context) {
 	var f string
 	for {
 		select {
-		case v := <-a.send:
-			if v.Identifier() >= gocan.SystemMsg {
+		case v := <-a.sendChan:
+			if id := v.Identifier(); id >= gocan.SystemMsg {
+				if id == gocan.SystemMsg {
+					if a.cfg.Debug {
+						log.Println(">> " + string(v.Data()))
+					}
+					if _, err := a.port.Write(append(v.Data(), '\r')); err != nil {
+						a.SetError(gocan.Unrecoverable(fmt.Errorf("failed to write to com port: %w", err)))
+						return
+					}
+				}
 				continue
 			}
-			switch v.(type) {
-			case *gocan.RawCommand:
-				if _, err := a.port.Write(append(v.Data(), '\r')); err != nil {
-					a.SetError(fmt.Errorf("failed to write to com port: %q, %w", f, err))
-				}
-				if a.cfg.Debug {
-					fmt.Fprint(os.Stderr, ">> "+v.String()+"\n")
-				}
-			default:
-				f = "t" + strconv.FormatUint(uint64(v.Identifier()), 16) +
-					strconv.Itoa(v.Length()) +
-					hex.EncodeToString(v.Data())
 
-				for i := v.Length(); i < 8; i++ {
-					f += "00"
-				}
-				f += "\r"
-				if _, err := a.port.Write([]byte(f)); err != nil {
-					a.cfg.OnMessage(fmt.Sprintf("failed to write to com port: %q, %v", f, err))
-				}
-				if a.cfg.Debug {
-					a.cfg.OnMessage(">> " + f)
-				}
-				f = ""
+			f = "t" + strconv.FormatUint(uint64(v.Identifier()), 16) +
+				strconv.Itoa(v.Length()) +
+				hex.EncodeToString(v.Data())
+
+			for i := v.Length(); i < 8; i++ {
+				f += "00"
 			}
+			f += "\r"
+			if _, err := a.port.Write([]byte(f)); err != nil {
+				a.cfg.OnMessage(fmt.Sprintf("failed to write to com port: %q, %v", f, err))
+			}
+			if a.cfg.Debug {
+				a.cfg.OnMessage(">> " + f)
+			}
+			f = ""
 
 		case <-ctx.Done():
 			return
-		case <-a.close:
+		case <-a.closeChan:
 			return
 		}
 	}

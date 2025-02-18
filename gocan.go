@@ -98,8 +98,9 @@ func (c *Client) Send(msg CANFrame) error {
 	select {
 	case c.adapter.Send() <- msg:
 		return nil
-	default:
-		return errors.New("canbus adapter transmit queue full")
+	case <-time.After(5 * time.Second):
+		// default:
+		return errors.New("timeout sending frame (5s)")
 	}
 }
 
@@ -146,7 +147,7 @@ func (c *Client) SubscribeFunc(ctx context.Context, f func(CANFrame), identifier
 			select {
 			case <-ctx.Done():
 				return
-			case frame, ok := <-sub.callback:
+			case frame, ok := <-sub.responseChan:
 				if !ok {
 					return
 				}
@@ -160,7 +161,7 @@ func (c *Client) SubscribeFunc(ctx context.Context, f func(CANFrame), identifier
 // Subscribe to CAN identifiers and return a message channel
 func (c *Client) SubscribeChan(ctx context.Context, channel chan CANFrame, identifiers ...uint32) *Sub {
 	sub := c.newSub(ctx, 20, identifiers...)
-	sub.callback = channel
+	sub.responseChan = channel
 	c.fh.register <- sub
 	return sub
 }
@@ -178,10 +179,10 @@ func (c *Client) newSub(ctx context.Context, bufferSize int, identifiers ...uint
 		idMap[id] = struct{}{}
 	}
 	return &Sub{
-		ctx:         ctx,
-		c:           c,
-		identifiers: idMap,
-		filterCount: len(identifiers),
-		callback:    make(chan CANFrame, bufferSize),
+		ctx:          ctx,
+		c:            c,
+		identifiers:  idMap,
+		filterCount:  len(identifiers),
+		responseChan: make(chan CANFrame, bufferSize),
 	}
 }

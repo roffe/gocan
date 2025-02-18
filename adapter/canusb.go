@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"os"
 	"strconv"
 	"time"
 
@@ -56,10 +55,10 @@ func NewCanusb(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 
 func (cu *Canusb) SetFilter(filters []uint32) error {
 	filter, mask := cu.calcAcceptanceFilters(filters)
-	cu.send <- gocan.NewRawCommand("C")
-	cu.send <- gocan.NewRawCommand(filter)
-	cu.send <- gocan.NewRawCommand(mask)
-	cu.send <- gocan.NewRawCommand("O")
+	cu.Send() <- gocan.NewFrame(gocan.SystemMsg, []byte{'C'}, gocan.Outgoing)
+	cu.Send() <- gocan.NewFrame(gocan.SystemMsg, []byte(filter), gocan.Outgoing)
+	cu.Send() <- gocan.NewFrame(gocan.SystemMsg, []byte(mask), gocan.Outgoing)
+	cu.Send() <- gocan.NewFrame(gocan.SystemMsg, []byte{'O'}, gocan.Outgoing)
 	return nil
 }
 
@@ -88,18 +87,13 @@ func (cu *Canusb) Connect(ctx context.Context) error {
 		"O", // Open the CAN channel
 	}
 
-	delay := time.Duration(2147483647 / mode.BaudRate)
-	if delay > (100 * time.Millisecond) {
-		delay = 100 * time.Millisecond
-	}
-
 	for _, c := range cmds {
 		_, err := p.Write([]byte(c + "\r"))
 		if err != nil {
 			p.Close()
 			return err
 		}
-		time.Sleep(delay)
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	p.ResetOutputBuffer()
@@ -182,49 +176,46 @@ func (*Canusb) calcAcceptanceFilters(idList []uint32) (string, string) {
 }
 
 func (cu *Canusb) sendManager(ctx context.Context) {
-	t := time.NewTicker(800 * time.Millisecond)
-	defer t.Stop()
-	f := bytes.NewBuffer(nil)
+	ticker := time.NewTicker(800 * time.Millisecond)
+	defer ticker.Stop()
+	fb := bytes.NewBuffer(nil)
 	for {
 		select {
-		case <-t.C:
-			// cu.mu.Lock()
-			cu.port.Write([]byte{'F', '\r'})
-		case v := <-cu.send:
-			switch v.(type) {
-			case *gocan.RawCommand:
-				// cu.mu.Lock()
-				if _, err := cu.port.Write(append(v.Data(), '\r')); err != nil {
-					cu.SetError(fmt.Errorf("failed to write to com port: %s, %w", f.String(), err))
-					return
-				}
-				if cu.cfg.Debug {
-					fmt.Fprint(os.Stderr, ">> "+v.String()+"\n")
-				}
-			default:
-				if v.Identifier() >= gocan.SystemMsg {
-					continue
-				}
-				f.Reset()
-				// cu.mu.Lock()
-				idb := make([]byte, 4)
-				binary.BigEndian.PutUint32(idb, v.Identifier())
-				f.WriteString("t" + hex.EncodeToString(idb)[5:] +
-					strconv.Itoa(v.Length()) +
-					hex.EncodeToString(v.Data()) + "\r")
-				if _, err := cu.port.Write(f.Bytes()); err != nil {
-					cu.SetError(gocan.Unrecoverable(fmt.Errorf("failed to write to com port: %s, %w", f.String(), err)))
-					return
-				}
-				if cu.cfg.Debug {
-					cu.cfg.OnMessage(">> " + f.String())
-				}
-			}
-
 		case <-ctx.Done():
 			return
-		case <-cu.close:
+		case <-cu.closeChan:
 			return
+		case <-ticker.C:
+			// cu.mu.Lock()
+			cu.port.Write([]byte{'F', '\r'})
+		case v := <-cu.sendChan:
+			if id := v.Identifier(); id >= gocan.SystemMsg {
+				if id == gocan.SystemMsg {
+					if cu.cfg.Debug {
+						cu.cfg.OnMessage(">> " + string(v.Data()))
+					}
+					if _, err := cu.port.Write(append(v.Data(), '\r')); err != nil {
+						cu.SetError(gocan.Unrecoverable(fmt.Errorf("failed to write to com port: %w", err)))
+						return
+					}
+				}
+				continue
+			}
+			fb.Reset()
+			// cu.mu.Lock()
+			idb := make([]byte, 4)
+			binary.BigEndian.PutUint32(idb, v.Identifier())
+			fb.WriteString("t" + hex.EncodeToString(idb)[5:] +
+				strconv.Itoa(v.Length()) +
+				hex.EncodeToString(v.Data()) + "\r")
+			if _, err := cu.port.Write(fb.Bytes()); err != nil {
+				cu.SetError(gocan.Unrecoverable(fmt.Errorf("failed to write to com port: %s, %w", fb.String(), err)))
+				return
+			}
+			if cu.cfg.Debug {
+				cu.cfg.OnMessage(">> " + fb.String())
+			}
+
 		}
 	}
 }
@@ -248,7 +239,7 @@ func (cu *Canusb) recvManager(ctx context.Context) {
 			return
 		}
 		select {
-		case <-cu.close:
+		case <-cu.closeChan:
 			return
 		default:
 			if n == 0 {
@@ -292,7 +283,7 @@ func (cu *Canusb) parse(data []byte) {
 				continue
 			}
 			select {
-			case cu.recv <- f:
+			case cu.recvChan <- f:
 			default:
 				cu.SetError(ErrDroppedFrame)
 			}
@@ -305,7 +296,7 @@ func (cu *Canusb) parse(data []byte) {
 				continue
 			}
 			select {
-			case cu.recv <- f:
+			case cu.recvChan <- f:
 			default:
 				cu.cfg.OnMessage(ErrDroppedFrame.Error())
 			}

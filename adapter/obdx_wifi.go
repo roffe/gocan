@@ -119,10 +119,10 @@ func (a *OBDXProWifi) Connect(ctx context.Context) error {
 func (a *OBDXProWifi) sendManager() {
 	for {
 		select {
-		case <-a.close:
+		case <-a.closeChan:
 			log.Println("sendManager closed")
 			return
-		case frame := <-a.send:
+		case frame := <-a.sendChan:
 			id := frame.Identifier()
 			if id >= gocan.SystemMsg {
 				continue
@@ -153,7 +153,7 @@ func (a *OBDXProWifi) recvManager() {
 				gocan.Incoming,
 			)
 			select {
-			case a.recv <- frame:
+			case a.recvChan <- frame:
 			default:
 				log.Printf("dropped frame: %s", frame.String())
 			}
@@ -163,7 +163,7 @@ func (a *OBDXProWifi) recvManager() {
 	buf := make([]byte, 16)
 	for {
 		select {
-		case <-a.close:
+		case <-a.closeChan:
 			log.Println("recvManager closed")
 			return
 		default:

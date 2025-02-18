@@ -173,9 +173,9 @@ func (tx *Txbridge) sendManager(_ context.Context) {
 	}
 	for {
 		select {
-		case <-tx.close:
+		case <-tx.closeChan:
 			return
-		case frame := <-tx.send:
+		case frame := <-tx.sendChan:
 			if frame.Identifier() == gocan.SystemMsg {
 				_, err := tx.port.Write(frame.Data())
 				if err != nil {
@@ -218,7 +218,7 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 	readbuf := make([]byte, 256)
 	for {
 		select {
-		case <-tx.close:
+		case <-tx.closeChan:
 			log.Println("recvManager adapter closed")
 			return
 		case <-ctx.Done():
@@ -289,8 +289,13 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 					case 0x06:
 						tx.SetError(fmt.Errorf("invalid sequence"))
 					default:
-						tx.SetError(fmt.Errorf("terror: %X", cmd.Data))
+						tx.SetError(fmt.Errorf("xerror: %X", cmd.Data))
 					}
+					cmdbuffPtr = 0
+					commandChecksum = 0
+					commandSize = 0
+					parsingCommand = false
+					continue
 
 				case 'R':
 					frame = gocan.NewFrame(
@@ -326,7 +331,7 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 					continue
 				}
 				select {
-				case tx.recv <- frame:
+				case tx.recvChan <- frame:
 				default:
 					tx.cfg.OnMessage(ErrDroppedFrame.Error())
 				}

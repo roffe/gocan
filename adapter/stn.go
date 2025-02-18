@@ -127,10 +127,10 @@ func NewSTN(name string) func(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 
 func (stn *STN) SetFilter(filters []uint32) error {
 	stn.setCANfilter(filters)
-	stn.send <- gocan.NewRawCommand("STPC")
-	stn.send <- gocan.NewRawCommand(stn.mask)
-	stn.send <- gocan.NewRawCommand(stn.filter)
-	stn.send <- gocan.NewRawCommand("STPO")
+	stn.Send() <- gocan.NewFrame(gocan.SystemMsg, []byte("STPC"), gocan.Outgoing)
+	stn.Send() <- gocan.NewFrame(gocan.SystemMsg, []byte(stn.mask), gocan.Outgoing)
+	stn.Send() <- gocan.NewFrame(gocan.SystemMsg, []byte(stn.filter), gocan.Outgoing)
+	stn.Send() <- gocan.NewFrame(gocan.SystemMsg, []byte("STPO"), gocan.Outgoing)
 	return nil
 }
 
@@ -336,40 +336,46 @@ func (stn *STN) sendManager(ctx context.Context) {
 	var timeout int64
 	for {
 		select {
-		case v := <-stn.send:
-			switch v.(type) {
-			case *gocan.RawCommand:
-				f.WriteString(v.String() + "\r")
-			default:
-				if v.Identifier() >= gocan.SystemMsg {
-					continue
+		case v := <-stn.sendChan:
+			if id := v.Identifier(); id >= gocan.SystemMsg {
+				if id == gocan.SystemMsg {
+					if stn.cfg.Debug {
+						stn.cfg.OnMessage("<o> " + f.String())
+					}
+					stn.sendLock.Lock()
+					if _, err := stn.port.Write(append(v.Data(), '\r')); err != nil {
+						stn.SetError(gocan.Unrecoverable(fmt.Errorf("failed to write: %q %w", f.String(), err)))
+						return
+					}
 				}
-				stn.sendLock.Lock()
-				binary.BigEndian.PutUint32(idb, v.Identifier())
-				f.WriteString("STPXh:" + hex.EncodeToString(idb)[5:] + ",d:" + hex.EncodeToString(v.Data()))
-				timeout = v.GetTimeout().Milliseconds()
-				if timeout != 0 && timeout != 200 {
-					f.WriteString(",t:" + strconv.Itoa(int(timeout)))
-				}
-				timeout = 0
-
-				respCount := v.Type().Responses
-				if respCount > 0 {
-					f.WriteString(",r:" + strconv.Itoa(respCount))
-				}
-				f.WriteString("\r")
+				continue
 			}
+			binary.BigEndian.PutUint32(idb, v.Identifier())
+			f.WriteString("STPXh:" + hex.EncodeToString(idb)[5:] + ",d:" + hex.EncodeToString(v.Data()))
+			timeout = v.GetTimeout().Milliseconds()
+			if timeout != 0 && timeout != 200 {
+				f.WriteString(",t:" + strconv.Itoa(int(timeout)))
+			}
+			timeout = 0
+
+			respCount := v.Type().Responses
+			if respCount > 0 {
+				f.WriteString(",r:" + strconv.Itoa(respCount))
+			}
+			f.WriteString("\r")
+
 			if stn.cfg.Debug {
 				stn.cfg.OnMessage("<o> " + f.String())
 			}
+			stn.sendLock.Lock()
 			if _, err := stn.port.Write(f.Bytes()); err != nil {
-				stn.SetError(fmt.Errorf("failed to write: %q %w", f.String(), err))
+				stn.SetError(gocan.Unrecoverable(fmt.Errorf("failed to write: %q %w", f.String(), err)))
 				return
 			}
 			f.Reset()
 		case <-ctx.Done():
 			return
-		case <-stn.close:
+		case <-stn.closeChan:
 			return
 		}
 	}
@@ -433,7 +439,7 @@ func (stn *STN) recvManager(ctx context.Context) {
 						continue
 					}
 					select {
-					case stn.recv <- f:
+					case stn.recvChan <- f:
 					default:
 						stn.cfg.OnMessage(ErrDroppedFrame.Error())
 					}

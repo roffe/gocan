@@ -7,32 +7,34 @@ import (
 	"log"
 	"slices"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
 type Sub struct {
-	ctx         context.Context
-	c           *Client
-	errcount    uint32
-	identifiers map[uint32]struct{}
-	filterCount int
-	callback    chan CANFrame
+	ctx          context.Context
+	c            *Client
+	identifiers  map[uint32]struct{}
+	filterCount  int
+	responseChan chan CANFrame
+	closeOnce    sync.Once
 }
 
 func (s *Sub) Close() {
 	s.c.fh.unregister <- s
+	s.closeOnce.Do(func() {
+		close(s.responseChan)
+	})
 }
 
 func (s *Sub) Chan() <-chan CANFrame {
-	return s.callback
+	return s.responseChan
 }
 
 func (s *Sub) Wait(ctx context.Context, timeout time.Duration) (CANFrame, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case f := <-s.callback:
+	case f := <-s.responseChan:
 		if f == nil {
 			return nil, errors.New("got nil frame")
 		}
@@ -82,20 +84,20 @@ func (h *FrameHandler) run(ctx context.Context) {
 			// log.Println("close channel closed")
 			return
 		case <-ctx.Done():
-			log.Println("context done")
+			// log.Println("context done")
 			return
 		case sub, ok := <-h.register:
 			if !ok {
 				log.Println("register channel closed")
 				return
 			}
-			h.sub(sub)
+			h.subs[sub] = true
 		case sub, ok := <-h.unregister:
 			if !ok {
 				log.Println("unregister channel closed")
 				return
 			}
-			h.unsub(sub)
+			delete(h.subs, sub)
 
 		case frame, ok := <-h.adapter.Recv():
 			if !ok {
@@ -111,10 +113,6 @@ func (h *FrameHandler) Close() {
 	h.closeOnce.Do(func() {
 		close(h.close)
 	})
-}
-
-func (h *FrameHandler) sub(sub *Sub) {
-	h.subs[sub] = true
 }
 
 func (h *FrameHandler) processFrame(frame CANFrame) {
@@ -135,19 +133,12 @@ func (h *FrameHandler) processFrame(frame CANFrame) {
 	}
 }
 
-func (h *FrameHandler) unsub(sub *Sub) {
-	if _, ok := h.subs[sub]; ok {
-		close(sub.callback)
-		delete(h.subs, sub)
-	}
-}
-
 func (h *FrameHandler) deliver(sub *Sub, frame CANFrame) {
 	select {
-	case sub.callback <- frame:
+	case sub.responseChan <- frame:
 	default:
-		if atomic.AddUint32(&sub.errcount, 1) > 10 {
-			h.unregister <- sub
-		}
+		//if atomic.AddUint32(&sub.errcount, 1) > 10 {
+		//	h.unregister <- sub
+		//}
 	}
 }
