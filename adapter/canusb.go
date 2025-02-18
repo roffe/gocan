@@ -213,7 +213,7 @@ func (cu *Canusb) sendManager(ctx context.Context) {
 					strconv.Itoa(v.Length()) +
 					hex.EncodeToString(v.Data()) + "\r")
 				if _, err := cu.port.Write(f.Bytes()); err != nil {
-					cu.SetError(fmt.Errorf("failed to write to com port: %s, %w", f.String(), err))
+					cu.SetError(gocan.Unrecoverable(fmt.Errorf("failed to write to com port: %s, %w", f.String(), err)))
 					return
 				}
 				if cu.cfg.Debug {
@@ -281,33 +281,33 @@ func (cu *Canusb) parse(data []byte) {
 		switch by[0] {
 		case 'F':
 			if err := decodeStatus(by); err != nil {
-				cu.cfg.OnError(fmt.Errorf("CAN status error: %w", err))
+				cu.cfg.OnMessage(fmt.Sprintf("CAN status error: %v", err))
 			}
 			//cu.mu.Unlock()
 		case 't':
 			f, err := cu.decodeFrame(by)
 			if err != nil {
-				cu.cfg.OnError(fmt.Errorf("failed to decode frame: %v", err))
+				cu.cfg.OnMessage(fmt.Sprintf("failed to decode frame: %v", err))
 				cu.buff.Reset()
 				continue
 			}
 			select {
 			case cu.recv <- f:
 			default:
-				cu.cfg.OnError(ErrDroppedFrame)
+				cu.SetError(ErrDroppedFrame)
 			}
 			cu.buff.Reset()
 		case 'T':
 			f, err := cu.decodeFrame29bit(by)
 			if err != nil {
-				cu.cfg.OnError(fmt.Errorf("failed to decode frame: %v", err))
+				cu.cfg.OnMessage("failed to decode frame: " + err.Error())
 				cu.buff.Reset()
 				continue
 			}
 			select {
 			case cu.recv <- f:
 			default:
-				cu.cfg.OnError(ErrDroppedFrame)
+				cu.cfg.OnMessage(ErrDroppedFrame.Error())
 			}
 			cu.buff.Reset()
 		case 'z': // last command ok

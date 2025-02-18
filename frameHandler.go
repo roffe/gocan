@@ -43,7 +43,7 @@ func (s *Sub) Wait(ctx context.Context, timeout time.Duration) (CANFrame, error)
 			identifiers = append(identifiers, id)
 		}
 		slices.Sort(identifiers)
-		return nil, fmt.Errorf("wait timeout (%dms) waiting for frame 0x%03X", timeout.Milliseconds(), identifiers)
+		return nil, fmt.Errorf("wait timeout (%dms) for frame 0x%03X", timeout.Milliseconds(), identifiers)
 
 	}
 }
@@ -73,16 +73,16 @@ func (h *FrameHandler) run(ctx context.Context) {
 	defer func() {
 		for sub := range h.subs {
 			delete(h.subs, sub)
-			close(sub.callback)
+			//close(sub.callback)
 		}
 	}()
 	for {
 		select {
 		case <-h.close:
-			//log.Println("close channel closed")
+			// log.Println("close channel closed")
 			return
 		case <-ctx.Done():
-			//log.Println("context done")
+			log.Println("context done")
 			return
 		case sub, ok := <-h.register:
 			if !ok {
@@ -96,6 +96,7 @@ func (h *FrameHandler) run(ctx context.Context) {
 				return
 			}
 			h.unsub(sub)
+
 		case frame, ok := <-h.adapter.Recv():
 			if !ok {
 				log.Println("incoming channel closed")

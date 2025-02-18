@@ -2,6 +2,7 @@ package adapter
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -228,8 +229,10 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 
 		n, err := tx.port.Read(readbuf)
 		if err != nil {
-			log.Println("recvManager read error", err)
-			tx.SetError(err)
+			if errors.Is(err, net.ErrClosed) {
+				return
+			}
+			tx.SetError(gocan.Unrecoverable(err))
 			return
 		}
 		if n == 0 {
@@ -264,7 +267,7 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 					Data:    db,
 				}
 				if commandChecksum != b {
-					tx.cfg.OnError(fmt.Errorf("checksum error %q %02X != %02X", cmd.Command, commandChecksum, b))
+					tx.cfg.OnMessage(fmt.Sprintf("checksum error %q %02X != %02X", cmd.Command, commandChecksum, b))
 					parsingCommand = false
 					commandSize = 0
 					commandChecksum = 0
@@ -272,7 +275,6 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 					continue
 				}
 				var frame gocan.CANFrame
-
 				switch command {
 				case 'T', 't':
 					frame = gocan.NewFrame(
@@ -281,11 +283,15 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 						gocan.Incoming,
 					)
 				case 'e':
-					frame = gocan.NewFrame(
-						gocan.SystemMsgError,
-						cmd.Data[:commandSize],
-						gocan.Incoming,
-					)
+					switch cmd.Data[0] {
+					case 0x31:
+						tx.SetError(fmt.Errorf("read timeout"))
+					case 0x06:
+						tx.SetError(fmt.Errorf("invalid sequence"))
+					default:
+						tx.SetError(fmt.Errorf("terror: %X", cmd.Data))
+					}
+
 				case 'R':
 					frame = gocan.NewFrame(
 						gocan.SystemMsgDataRequest,
@@ -311,11 +317,18 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 						cmd.Data[:commandSize],
 						gocan.Incoming,
 					)
+				default:
+					tx.cfg.OnMessage(fmt.Sprintf("unknown command: %q: %x", cmd.Command, cmd.Data))
+					cmdbuffPtr = 0
+					commandChecksum = 0
+					commandSize = 0
+					parsingCommand = false
+					continue
 				}
 				select {
 				case tx.recv <- frame:
 				default:
-					tx.cfg.OnError(ErrDroppedFrame)
+					tx.cfg.OnMessage(ErrDroppedFrame.Error())
 				}
 
 				cmdbuffPtr = 0

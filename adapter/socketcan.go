@@ -1,8 +1,9 @@
+//go:build linux
+
 package adapter
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"runtime"
 	"strings"
@@ -113,7 +114,7 @@ func (a *SocketCAN) recvManager(ctx context.Context) {
 						select {
 						case a.recv <- frame:
 						default:
-							a.cfg.OnError(ErrDroppedFrame)
+							a.cfg.OnMessage(ErrDroppedFrame.Error())
 						}
 					}
 				}
@@ -137,7 +138,7 @@ func (a *SocketCAN) sendManager(ctx context.Context) {
 			copy(data[:], f.Data())
 			frame.Data = data
 			if err := a.tx.TransmitFrame(ctx, frame); err != nil {
-				a.cfg.OnError(fmt.Errorf("send error: %w", err))
+				a.cfg.OnMessage("send error: " + err.Error())
 			}
 			delay := 20 * time.Millisecond
 

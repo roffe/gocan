@@ -160,7 +160,7 @@ func (stn *STN) Connect(ctx context.Context) error {
 		for _, from := range stnAdapterSpeeds {
 			if err := stn.setSpeed(stn.port, mode, from, to); err != nil {
 				if stn.cfg.Debug {
-					stn.cfg.OnError(err)
+					stn.cfg.OnMessage(err.Error())
 				}
 			} else {
 				if stn.cfg.Debug {
@@ -206,7 +206,7 @@ func (stn *STN) Connect(ctx context.Context) error {
 			stn.cfg.OnMessage(c)
 		}
 		if _, err := stn.port.Write(out); err != nil {
-			stn.cfg.OnError(err)
+			stn.cfg.OnMessage(err.Error())
 		}
 		time.Sleep(delay)
 	}
@@ -415,27 +415,27 @@ func (stn *STN) recvManager(ctx context.Context) {
 				}
 				switch buff.String() {
 				case "CAN ERROR":
-					stn.cfg.OnError(errors.New("CAN ERROR"))
+					stn.cfg.OnMessage("CAN ERROR")
 					buff.Reset()
 				case "STOPPED":
-					stn.cfg.OnError(errors.New("STOPPED"))
+					stn.cfg.OnMessage("STOPPED")
 					buff.Reset()
 				case "?":
-					stn.cfg.OnError(errors.New("UNKNOWN COMMAND"))
+					stn.cfg.OnMessage("UNKNOWN COMMAND")
 					buff.Reset()
 				case "NO DATA", "OK":
 					buff.Reset()
 				default:
 					f, err := stn.decodeFrame(buff.Bytes())
 					if err != nil {
-						stn.cfg.OnError(fmt.Errorf("failed to decode frame: %s %w", buff.String(), err))
+						stn.cfg.OnMessage(fmt.Sprintf("failed to decode frame: %s %v", buff.String(), err))
 						buff.Reset()
 						continue
 					}
 					select {
 					case stn.recv <- f:
 					default:
-						stn.cfg.OnError(ErrDroppedFrame)
+						stn.cfg.OnMessage(ErrDroppedFrame.Error())
 					}
 					buff.Reset()
 				}

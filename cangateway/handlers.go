@@ -17,7 +17,9 @@ import (
 	"github.com/roffe/gocan/proto"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
@@ -84,12 +86,14 @@ func (s *Server) SendCommand(ctx context.Context, in *proto.Command) (*proto.Com
 	case bytes.Equal(in.GetData(), []byte("ping")):
 		return &proto.CommandResponse{Data: []byte("pong")}, nil
 	case bytes.Equal(in.GetData(), []byte("quit")):
-		go func() {
-			time.Sleep(5 * time.Millisecond)
-			if err := s.Close(); err != nil {
-				log.Fatalf("failed to close server: %v", err)
-			}
-		}()
+		if !ignoreQuit {
+			go func() {
+				time.Sleep(5 * time.Millisecond)
+				if err := s.Close(); err != nil {
+					log.Fatalf("failed to close server: %v", err)
+				}
+			}()
+		}
 		return &proto.CommandResponse{Data: []byte("OK")}, nil
 	default:
 		return nil, fmt.Errorf("unknown command: %s", in.GetData())
@@ -105,25 +109,16 @@ func (s *Server) Stream(srv grpc.BidiStreamingServer[proto.CANFrame, proto.CANFr
 		return fmt.Errorf("failed to create adapter config: %w", err)
 	}
 
-	adapterConfig.OnError = func(err error) {
-		send(srv, gocan.SystemMsgError, []byte(err.Error()))
-		log.Printf("adapter error: %v", err)
-		_, file, no, ok := runtime.Caller(1)
-		if ok {
-			fmt.Printf("%s#%d %v\n", file, no, err)
-		} else {
-			log.Println(err)
-		}
-	}
-
-	adapterConfig.OnMessage = func(s string) {
-		_, file, no, ok := runtime.Caller(1)
-		if ok {
-			fmt.Printf("%s#%d %v\n", file, no, s)
-		} else {
-			log.Println(s)
-		}
-	}
+	//	adapterConfig.OnError = func(err error) {
+	//		send(srv, gocan.SystemMsgError, []byte(err.Error()))
+	//		log.Printf("adapter error: %v", err)
+	//		_, file, no, ok := runtime.Caller(1)
+	//		if ok {
+	//			fmt.Printf("%s#%d %v\n", file, no, err)
+	//		} else {
+	//			log.Println(err)
+	//		}
+	//	}
 
 	dev, err := adapter.New(adaptername, adapterConfig)
 	if err != nil {
@@ -132,14 +127,26 @@ func (s *Server) Stream(srv grpc.BidiStreamingServer[proto.CANFrame, proto.CANFr
 
 	errg, ctx := errgroup.WithContext(gctx)
 
+	log.Printf("connecting to %s", adaptername)
+
 	if err := dev.Connect(ctx); err != nil {
-		send(srv, 0, []byte(err.Error()))
 		return fmt.Errorf("failed to create client: %w", err)
 	}
 	defer dev.Close()
 	log.Printf("%s connected @ %g kbp/s", adaptername, adapterConfig.CANRate)
 	defer log.Printf("%s disconnected", adaptername)
 	send(srv, 0, []byte("OK"))
+
+	adapterConfig.OnMessage = func(s string) {
+		_, file, no, ok := runtime.Caller(1)
+		if ok {
+			fmt.Printf("%s#%d %v\n", file, no, s)
+		} else {
+			log.Println(s)
+		}
+		send(srv, gocan.SystemMsg, []byte(s))
+	}
+
 	// send mesage from canbus adapter to IPC
 	errg.Go(s.recvManager(ctx, srv, dev))
 	// send message from IPC to canbus adapter
@@ -149,6 +156,7 @@ func (s *Server) Stream(srv grpc.BidiStreamingServer[proto.CANFrame, proto.CANFr
 		if err == context.Canceled {
 			return nil
 		}
+		send(srv, gocan.SystemMsgUnrecoverableError, []byte(err.Error()))
 		log.Println("stream error:", err)
 		return err
 	}
@@ -162,7 +170,10 @@ func (s *Server) recvManager(ctx context.Context, srv grpc.BidiStreamingServer[p
 			case <-ctx.Done():
 				return ctx.Err()
 			case err := <-dev.Err():
-				send(srv, gocan.SystemMsgError, []byte(err.Error()))
+				if gocan.IsRecoverable(err) {
+					send(srv, gocan.SystemMsgError, []byte(err.Error()))
+					continue
+				}
 				return fmt.Errorf("adapter error: %w", err)
 			case msg, ok := <-dev.Recv():
 				if !ok {
@@ -206,10 +217,24 @@ func (s *Server) sendManager(srv grpc.BidiStreamingServer[proto.CANFrame, proto.
 			msg, err := srv.Recv()
 			if err != nil {
 				if errors.Is(err, io.EOF) {
-					log.Println("client closed connection")
 					return nil // Client closed connection
 				}
-				return fmt.Errorf("failed to receive outgoing %w", err) // Something unexpected happened
+				if e, ok := status.FromError(err); ok {
+					switch e.Code() {
+					case codes.Canceled:
+						return nil
+					//case codes.PermissionDenied:
+					//	fmt.Println(e.Message()) // this will print PERMISSION_DENIED_TEST
+					//case codes.Internal:
+					//	fmt.Println("Has Internal Error")
+					case codes.Aborted:
+						log.Println("gRPC Aborted the call")
+						return nil
+						//default:
+						//	log.Println(e.Code(), e.Message())
+					}
+				}
+				return fmt.Errorf("sendManager recv error: %w", err) // Something unexpected happened
 			}
 			s.sendMessage(srv, dev, msg)
 		}

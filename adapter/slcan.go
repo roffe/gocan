@@ -112,7 +112,7 @@ func (sl *SLCan) recvManager(ctx context.Context) {
 		n, err := sl.port.Read(readBuffer)
 		if err != nil {
 			if !sl.closed {
-				sl.cfg.OnError(fmt.Errorf("failed to read com port: %w", err))
+				sl.SetError(fmt.Errorf("failed to read com port: %w", err))
 			}
 			return
 		}
@@ -132,7 +132,7 @@ func (sl *SLCan) sendManager(ctx context.Context) {
 				continue
 			}
 			if err := sl.handleSend(frame, f); err != nil {
-				sl.cfg.OnError(fmt.Errorf("send error: %w", err))
+				sl.cfg.OnMessage(fmt.Sprintf("send error: %v", err))
 			}
 		case <-ctx.Done():
 			return
@@ -148,7 +148,7 @@ func (sl *SLCan) handleSend(v gocan.CANFrame, f *bytes.Buffer) error {
 	case *gocan.RawCommand:
 		data := append(frame.Data(), '\r')
 		if _, err := sl.port.Write(data); err != nil {
-			sl.cfg.OnError(fmt.Errorf("failed to write to com port: %s, %w", f.String(), err))
+			sl.cfg.OnMessage(fmt.Sprintf("failed to write to com port: %s, %v", f.String(), err))
 		}
 		if sl.cfg.Debug {
 			log.Println(">> " + frame.String())
@@ -164,7 +164,7 @@ func (sl *SLCan) handleSend(v gocan.CANFrame, f *bytes.Buffer) error {
 		f.WriteByte(0x0D)
 
 		if _, err := sl.port.Write(f.Bytes()); err != nil {
-			sl.cfg.OnError(fmt.Errorf("failed to write to com port: %s, %w", f.String(), err))
+			sl.cfg.OnMessage(fmt.Sprintf("failed to write to com port: %s, %v", f.String(), err))
 		}
 		if sl.cfg.Debug {
 			log.Println(">> " + f.String())
@@ -186,7 +186,7 @@ func (sl *SLCan) parse(ctx context.Context, buff *bytes.Buffer, readBuffer []byt
 				}
 				f, err := sl.decodeFrame(by)
 				if err != nil {
-					sl.cfg.OnError(fmt.Errorf("%w: %X", err, by))
+					sl.cfg.OnMessage(fmt.Sprintf("%v: %X", err, by))
 					buff.Reset()
 					continue
 				}
@@ -195,7 +195,7 @@ func (sl *SLCan) parse(ctx context.Context, buff *bytes.Buffer, readBuffer []byt
 				case <-ctx.Done():
 					return
 				default:
-					sl.cfg.OnError(ErrDroppedFrame)
+					sl.cfg.OnMessage(ErrDroppedFrame.Error())
 				}
 			} else {
 				sl.cfg.OnMessage("Unknown>> " + buff.String())

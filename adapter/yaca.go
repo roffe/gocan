@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -171,7 +170,7 @@ func (ya *YACA) parse(ctx context.Context, buff *bytes.Buffer, readBuffer []byte
 			switch by[0] {
 			case 'F':
 				if err := decodeStatus(by); err != nil {
-					ya.cfg.OnError(fmt.Errorf("CAN status error: %w", err))
+					ya.cfg.OnMessage(fmt.Sprintf("CAN status error: %v", err))
 				}
 			case 't':
 				//if cu.cfg.Debug {
@@ -179,17 +178,17 @@ func (ya *YACA) parse(ctx context.Context, buff *bytes.Buffer, readBuffer []byte
 				//}
 				f, err := ya.decodeFrame(by)
 				if err != nil {
-					ya.cfg.OnError(fmt.Errorf("failed to decode frame: %X", buff.Bytes()))
+					ya.cfg.OnMessage(fmt.Sprintf("failed to decode frame: %X", buff.Bytes()))
 					continue
 				}
 				select {
 				case ya.recv <- f:
 				default:
-					ya.cfg.OnError(ErrDroppedFrame)
+					ya.cfg.OnMessage(ErrDroppedFrame.Error())
 				}
 				buff.Reset()
 			case 0x07: // bell, last command was unknown
-				ya.cfg.OnError(errors.New("unknown command"))
+				ya.cfg.OnMessage("unknown command")
 			default:
 				ya.cfg.OnMessage("Unknown>> " + buff.String())
 			}
@@ -209,7 +208,7 @@ func (ya *YACA) sendManager(ctx context.Context) {
 			switch v.(type) {
 			case *gocan.RawCommand:
 				if _, err := ya.port.Write(append(v.Data(), '\r')); err != nil {
-					ya.cfg.OnError(fmt.Errorf("failed to write to com port: %s, %w", f.String(), err))
+					ya.cfg.OnMessage(fmt.Sprintf("failed to write to com port: %s, %v", f.String(), err))
 				}
 				if ya.cfg.Debug {
 					fmt.Fprint(os.Stderr, ">> "+v.String()+"\n")
@@ -221,7 +220,7 @@ func (ya *YACA) sendManager(ctx context.Context) {
 					strconv.Itoa(v.Length()) +
 					hex.EncodeToString(v.Data()) + "\x0D")
 				if _, err := ya.port.Write(f.Bytes()); err != nil {
-					ya.cfg.OnError(fmt.Errorf("failed to write to com port: %s, %w", f.String(), err))
+					ya.cfg.OnMessage(fmt.Sprintf("failed to write to com port: %s, %v", f.String(), err))
 				}
 				if ya.cfg.Debug {
 					fmt.Fprint(os.Stderr, ">> "+f.String()+"\n")

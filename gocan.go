@@ -13,7 +13,7 @@ import (
 const (
 	SystemMsg uint32 = 0x80000000 + iota
 	SystemMsgError
-	SystemMsgDebug
+	SystemMsgUnrecoverableError
 	SystemMsgWBLReading
 	SystemMsgDataResponse
 	SystemMsgDataRequest
@@ -40,7 +40,6 @@ type AdapterConfig struct {
 	UseExtendedID          bool
 	PrintVersion           bool
 	OnMessage              func(string)
-	OnError                func(error)
 	MinimumFirmwareVersion string
 }
 
@@ -100,7 +99,7 @@ func (c *Client) Send(msg CANFrame) error {
 	case c.adapter.Send() <- msg:
 		return nil
 	default:
-		return errors.New("gocan failed to send frame")
+		return errors.New("canbus adapter transmit queue full")
 	}
 }
 
@@ -115,7 +114,7 @@ func (c *Client) SendFrame(identifier uint32, data []byte, f CANFrameType) error
 // Send and wait up to <timeout> for a answer on given identifiers
 func (c *Client) SendAndWait(ctx context.Context, frame CANFrame, timeout time.Duration, identifiers ...uint32) (CANFrame, error) {
 	frame.SetTimeout(timeout)
-	sub := c.newSub(ctx, 2, identifiers...)
+	sub := c.newSub(ctx, 1, identifiers...)
 	c.fh.register <- sub
 	defer func() {
 		c.fh.unregister <- sub

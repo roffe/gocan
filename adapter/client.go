@@ -47,16 +47,6 @@ type Client struct {
 }
 
 func NewClient(adapterName string, cfg *gocan.AdapterConfig) (*Client, error) {
-	if cfg.OnError == nil {
-		cfg.OnError = func(err error) {
-			_, file, no, ok := runtime.Caller(1)
-			if ok {
-				fmt.Printf("%s#%d %v\n", filepath.Base(file), no, err)
-			} else {
-				log.Println(err)
-			}
-		}
-	}
 	if cfg.OnMessage == nil {
 		cfg.OnMessage = func(msg string) {
 			_, file, no, ok := runtime.Caller(1)
@@ -140,7 +130,6 @@ func (c *Client) sendManager(ctx context.Context, stream grpc.BidiStreamingClien
 	for {
 		select {
 		case <-ctx.Done():
-			close(c.send)
 			return
 		case <-c.close:
 			return
@@ -174,11 +163,6 @@ func (c *Client) recvManager(_ context.Context, stream grpc.BidiStreamingClient[
 		if c.isrecvError(err) {
 			return
 		}
-		if in.GetId() == 0 {
-			c.SetError(errors.New(string(in.GetData())))
-			return
-		}
-
 		c.recvMessage(in.GetId(), in.GetData())
 	}
 }
@@ -190,7 +174,7 @@ func (c *Client) isrecvError(err error) bool {
 	if e, ok := status.FromError(err); ok {
 		switch e.Code() {
 		case codes.Canceled:
-			return false
+			return true
 			//case codes.PermissionDenied:
 			//	fmt.Println(e.Message()) // this will print PERMISSION_DENIED_TEST
 			//case codes.Internal:
@@ -208,11 +192,18 @@ func (c *Client) isrecvError(err error) bool {
 }
 
 func (c *Client) recvMessage(identifier uint32, data []byte) {
+	if identifier == gocan.SystemMsgError {
+		c.SetError(errors.New(string(data)))
+		return
+	} else if identifier == gocan.SystemMsgUnrecoverableError {
+		c.SetError(gocan.Unrecoverable(errors.New(string(data))))
+		return
+	}
 	frame := gocan.NewFrame(identifier, data, gocan.Incoming)
 	select {
 	case c.recv <- frame:
 	default:
-		c.cfg.OnError(errors.New("recv channel full"))
+		c.cfg.OnMessage("client recv channel full")
 	}
 }
 

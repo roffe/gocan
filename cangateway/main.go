@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"log"
 	"net"
@@ -19,8 +20,14 @@ import (
 	"google.golang.org/grpc/keepalive"
 )
 
+var (
+	ignoreQuit bool
+)
+
 func init() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile | log.Lmicroseconds)
+	flag.BoolVar(&ignoreQuit, "ignore-quit", false, "ignore quit RPC")
+	flag.Parse()
 }
 
 func fileExists(name string) bool {

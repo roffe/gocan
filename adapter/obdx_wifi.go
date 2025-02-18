@@ -93,14 +93,14 @@ func (a *OBDXProWifi) Connect(ctx context.Context) error {
 
 	for _, cmd := range initCommands {
 		if _, err := a.conn.Write(cmd.Bytes()); err != nil {
-			a.cfg.OnError(fmt.Errorf("failed to send init command: %v", err))
+			a.cfg.OnMessage(fmt.Sprintf("failed to send init command: %v", err))
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
 
 	for _, f := range a.filters {
 		if _, err := a.conn.Write(f.Bytes()); err != nil {
-			a.cfg.OnError(fmt.Errorf("failed to set filter: %v", err))
+			a.cfg.OnMessage(fmt.Sprintf("failed to set filter: %v", err))
 		}
 		time.Sleep(20 * time.Millisecond)
 	}

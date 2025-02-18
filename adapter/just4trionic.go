@@ -237,13 +237,13 @@ func (a *Just4Trionic) parse(ctx context.Context, readBuffer []byte, buff *bytes
 			case 'w':
 				f, err := a.decodeFrame(by[1 : buff.Len()-1])
 				if err != nil {
-					a.cfg.OnError(fmt.Errorf("failed to decode frame: %w %X", err, by))
+					a.cfg.OnMessage(fmt.Sprintf("failed to decode frame: %v %X", err, by))
 					continue
 				}
 				select {
 				case a.recv <- f:
 				default:
-					a.cfg.OnError(ErrDroppedFrame)
+					a.cfg.OnMessage(ErrDroppedFrame.Error())
 				}
 				buff.Reset()
 			default:
@@ -298,7 +298,7 @@ func (a *Just4Trionic) sendManager(ctx context.Context) {
 				}
 				f += "\r"
 				if _, err := a.port.Write([]byte(f)); err != nil {
-					a.cfg.OnError(fmt.Errorf("failed to write to com port: %q, %w", f, err))
+					a.cfg.OnMessage(fmt.Sprintf("failed to write to com port: %q, %v", f, err))
 				}
 				if a.cfg.Debug {
 					a.cfg.OnMessage(">> " + f)

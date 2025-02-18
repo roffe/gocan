@@ -1,6 +1,7 @@
 package adapter
 
 import (
+	"log"
 	"sync"
 
 	"github.com/roffe/gocan"
@@ -19,9 +20,9 @@ func NewBaseAdapter(name string, cfg *gocan.AdapterConfig) BaseAdapter {
 	return BaseAdapter{
 		name:  name,
 		cfg:   cfg,
-		send:  make(chan gocan.CANFrame, 40),
-		recv:  make(chan gocan.CANFrame, 40),
-		err:   make(chan error, 5),
+		send:  make(chan gocan.CANFrame, 10),
+		recv:  make(chan gocan.CANFrame, 1024),
+		err:   make(chan error, 10),
 		close: make(chan struct{}),
 	}
 }
@@ -52,5 +53,6 @@ func (base *BaseAdapter) SetError(err error) {
 	select {
 	case base.err <- err:
 	default:
+		log.Println("adapter error channel full")
 	}
 }

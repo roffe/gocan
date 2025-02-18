@@ -118,12 +118,12 @@ func (ma *J2534) Connect(ctx context.Context) error {
 	if err := ma.h.PassThruOpen("", &ma.deviceID); err != nil {
 		str, err2 := ma.h.PassThruGetLastError()
 		if err2 != nil {
-			ma.cfg.OnError(fmt.Errorf("PassThruOpenGetLastError: %w", err))
+			ma.cfg.OnMessage(fmt.Sprintf("PassThruOpenGetLastError: %v", err))
 		} else {
 			ma.cfg.OnMessage("PassThruOpen: " + str)
 		}
 		if errg := ma.h.Close(); errg != nil {
-			ma.cfg.OnError(errg)
+			ma.cfg.OnMessage(errg.Error())
 		}
 		return fmt.Errorf("PassThruOpen: %w", err)
 	}
@@ -136,7 +136,7 @@ func (ma *J2534) Connect(ctx context.Context) error {
 
 	if err := ma.h.PassThruConnect(ma.deviceID, ma.protocol, ma.flags, baudRate, &ma.channelID); err != nil {
 		if errg := ma.h.Close(); errg != nil {
-			ma.cfg.OnError(errg)
+			ma.cfg.OnMessage(errg.Error())
 		}
 		return fmt.Errorf("PassThruConnect: %w", err)
 	}
@@ -164,7 +164,7 @@ func (ma *J2534) Connect(ctx context.Context) error {
 				log.Println(st)
 			}
 			if errg := ma.h.Close(); errg != nil {
-				ma.cfg.OnError(errg)
+				ma.cfg.OnMessage(errg.Error())
 			}
 			return fmt.Errorf("PassThruIoctl set SWCAN: %w", err)
 		}
@@ -173,7 +173,7 @@ func (ma *J2534) Connect(ctx context.Context) error {
 
 	if err := ma.h.PassThruIoctl(ma.channelID, passthru.CLEAR_RX_BUFFER, nil, nil); err != nil {
 		if errg := ma.h.Close(); errg != nil {
-			ma.cfg.OnError(errg)
+			ma.cfg.OnMessage(errg.Error())
 		}
 		return fmt.Errorf("PassThruIoctl clear rx buffer: %w", err)
 	}
@@ -229,7 +229,7 @@ func (ma *J2534) allowAll() {
 		RxStatus:       ma.idSizeFlag(),
 	}
 	if err := ma.h.PassThruStartMsgFilter(ma.channelID, passthru.PASS_FILTER, maskMsg, patternMsg, nil, &filterID); err != nil {
-		ma.cfg.OnError(fmt.Errorf("PassThruStartMsgFilter: %w", err))
+		ma.cfg.OnMessage(fmt.Sprintf("PassThruStartMsgFilter: %v", err))
 	}
 }
 
@@ -288,7 +288,7 @@ func (ma *J2534) recvManager() {
 				gocan.Incoming,
 			):
 			default:
-				ma.cfg.OnError(ErrDroppedFrame)
+				ma.cfg.OnMessage(ErrDroppedFrame.Error())
 			}
 		}
 	}
