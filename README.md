@@ -15,11 +15,13 @@ A Go Linux/Windows/OSX CAN library
 
 ## Canusb DLL
 
+Supported via [goCANUSB](https://github.com/roffe/gocanusb)
+
 Lawicell canusbdrv.dll for both 32 and 64bit is supported
 
 ## Kvaser Canlib
 
-Tested with the following adapters
+Supported via [goCANlib](https://github.com/roffe/gocanlib), Tested with the following adapters
 
 * Kvaser Leaf Light V2 https://kvaser.com/
 
