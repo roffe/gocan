@@ -22,7 +22,7 @@ func init() {
 			nameStr := fmt.Sprintf("CANUSB %s", name)
 			if err := Register(&AdapterInfo{
 				Name:               nameStr,
-				New:                NewCanusbDLLName(nameStr),
+				New:                NewCanusbName(nameStr),
 				RequiresSerialPort: false,
 				Capabilities: AdapterCapabilities{
 					HSCAN: true,
@@ -36,7 +36,7 @@ func init() {
 	}
 }
 
-type CanusbDLL struct {
+type Canusb struct {
 	BaseAdapter
 
 	h *canusb.CANHANDLE
@@ -44,19 +44,19 @@ type CanusbDLL struct {
 	closeOnce sync.Once
 }
 
-func NewCanusbDLLName(name string) func(*gocan.AdapterConfig) (gocan.Adapter, error) {
+func NewCanusbName(name string) func(*gocan.AdapterConfig) (gocan.Adapter, error) {
 	return func(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
-		return NewCanusbDLL(name, cfg)
+		return NewCanusb(name, cfg)
 	}
 }
 
-func NewCanusbDLL(name string, cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
-	return &CanusbDLL{
+func NewCanusb(name string, cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
+	return &Canusb{
 		BaseAdapter: NewBaseAdapter(name, cfg),
 	}, nil
 }
 
-func (cu *CanusbDLL) getRate(rate float64) string {
+func (cu *Canusb) getRate(rate float64) string {
 	switch rate {
 	case 33.3:
 		return "0x0e:0x1c"
@@ -69,7 +69,7 @@ func (cu *CanusbDLL) getRate(rate float64) string {
 	}
 }
 
-func (cu *CanusbDLL) calculateFilterMask(canIDs []uint32, isExtended bool) (uint32, uint32) {
+func (cu *Canusb) calculateFilterMask(canIDs []uint32, isExtended bool) (uint32, uint32) {
 	if len(canIDs) == 0 {
 		// No IDs provided, accept all messages
 		return 0, 0xFFFFFFFF
@@ -128,7 +128,7 @@ func (cu *CanusbDLL) calculateFilterMask(canIDs []uint32, isExtended bool) (uint
 	return code, finalMask
 }
 
-func (cu *CanusbDLL) Connect(ctx context.Context) error {
+func (cu *Canusb) Connect(ctx context.Context) error {
 	parts := strings.Split(cu.name, " ")
 	if len(parts) != 2 {
 		return fmt.Errorf("invalid adapter name %q", cu.name)
@@ -167,7 +167,7 @@ func (cu *CanusbDLL) Connect(ctx context.Context) error {
 	return nil
 }
 
-func (cu *CanusbDLL) callbackHandler(msg *canusb.CANMsg) uintptr {
+func (cu *Canusb) callbackHandler(msg *canusb.CANMsg) uintptr {
 	// copy the data as the callback will overwrite it when returning
 	data := make([]byte, msg.Len)
 	copy(data, msg.Data[:msg.Len])
@@ -179,7 +179,7 @@ func (cu *CanusbDLL) callbackHandler(msg *canusb.CANMsg) uintptr {
 	return 0
 }
 
-func (cu *CanusbDLL) run(ctx context.Context) {
+func (cu *Canusb) run(ctx context.Context) {
 	stats := time.NewTicker(10 * time.Second)
 	defer stats.Stop()
 	if !cu.cfg.Debug {
@@ -224,11 +224,11 @@ func (cu *CanusbDLL) run(ctx context.Context) {
 	}
 }
 
-func (cu *CanusbDLL) SetFilter(filters []uint32) error {
+func (cu *Canusb) SetFilter(filters []uint32) error {
 	return nil
 }
 
-func (cu *CanusbDLL) Close() (err error) {
+func (cu *Canusb) Close() (err error) {
 	cu.BaseAdapter.Close()
 	cu.closeOnce.Do(func() {
 		if err = cu.h.Flush(canusb.FLUSH_EMPTY_INQUEUE | canusb.FLUSH_WAIT); err != nil {

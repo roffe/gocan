@@ -25,13 +25,13 @@ func init() {
 			KLine: false,
 			SWCAN: true,
 		},
-		New: NewCanusb,
+		New: NewCanusbVCP,
 	}); err != nil {
 		panic(err)
 	}
 }
 
-type Canusb struct {
+type CanusbVCP struct {
 	BaseAdapter
 	port         serial.Port
 	canRate      string
@@ -40,8 +40,8 @@ type Canusb struct {
 	// mu        sync.Mutex
 }
 
-func NewCanusb(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
-	cu := &Canusb{
+func NewCanusbVCP(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
+	cu := &CanusbVCP{
 		BaseAdapter: NewBaseAdapter("CANUSB VCP", cfg),
 		buff:        bytes.NewBuffer(nil),
 		//sendMutex: make(chan token, 1),
@@ -53,7 +53,7 @@ func NewCanusb(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	return cu, nil
 }
 
-func (cu *Canusb) SetFilter(filters []uint32) error {
+func (cu *CanusbVCP) SetFilter(filters []uint32) error {
 	filter, mask := cu.calcAcceptanceFilters(filters)
 	cu.Send() <- gocan.NewFrame(gocan.SystemMsg, []byte{'C'}, gocan.Outgoing)
 	cu.Send() <- gocan.NewFrame(gocan.SystemMsg, []byte(filter), gocan.Outgoing)
@@ -62,7 +62,7 @@ func (cu *Canusb) SetFilter(filters []uint32) error {
 	return nil
 }
 
-func (cu *Canusb) Connect(ctx context.Context) error {
+func (cu *CanusbVCP) Connect(ctx context.Context) error {
 	mode := &serial.Mode{
 		BaudRate: cu.cfg.PortBaudrate,
 		Parity:   serial.NoParity,
@@ -105,7 +105,7 @@ func (cu *Canusb) Connect(ctx context.Context) error {
 	return nil
 }
 
-func (cu *Canusb) setCANrate(rate float64) error {
+func (cu *CanusbVCP) setCANrate(rate float64) error {
 	switch rate {
 	case 10:
 		cu.canRate = "S0"
@@ -138,7 +138,7 @@ func (cu *Canusb) setCANrate(rate float64) error {
 	return nil
 }
 
-func (cu *Canusb) Close() error {
+func (cu *CanusbVCP) Close() error {
 	cu.BaseAdapter.Close()
 	if cu.port != nil {
 		cu.port.Write([]byte("C\r"))
@@ -152,7 +152,7 @@ func (cu *Canusb) Close() error {
 	return nil
 }
 
-func (*Canusb) calcAcceptanceFilters(idList []uint32) (string, string) {
+func (*CanusbVCP) calcAcceptanceFilters(idList []uint32) (string, string) {
 	if len(idList) == 1 && idList[0] == 0 {
 		return "\r", "\r"
 	}
@@ -175,7 +175,7 @@ func (*Canusb) calcAcceptanceFilters(idList []uint32) (string, string) {
 	return fmt.Sprintf("M%08X", code), fmt.Sprintf("m%08X", mask)
 }
 
-func (cu *Canusb) sendManager(ctx context.Context) {
+func (cu *CanusbVCP) sendManager(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	fb := bytes.NewBuffer(nil)
@@ -220,7 +220,7 @@ func (cu *Canusb) sendManager(ctx context.Context) {
 	}
 }
 
-func (cu *Canusb) recvManager(ctx context.Context) {
+func (cu *CanusbVCP) recvManager(ctx context.Context) {
 	readBuffer := make([]byte, 32)
 	for {
 		select {
@@ -251,7 +251,7 @@ func (cu *Canusb) recvManager(ctx context.Context) {
 	}
 }
 
-func (cu *Canusb) parse(data []byte) {
+func (cu *CanusbVCP) parse(data []byte) {
 	for _, b := range data {
 		if b == 0x07 { // BELL
 			cu.cfg.OnMessage("command error")
@@ -372,7 +372,7 @@ func checkBitSet(n, k int) bool {
 	return v == 1
 }
 
-func (*Canusb) decodeFrame(buff []byte) (gocan.CANFrame, error) {
+func (*CanusbVCP) decodeFrame(buff []byte) (gocan.CANFrame, error) {
 	id, err := strconv.ParseUint(string(buff[1:4]), 16, 32)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode identifier: %v", err)
@@ -401,7 +401,7 @@ func (*Canusb) decodeFrame(buff []byte) (gocan.CANFrame, error) {
 }
 
 // T 00000180 8 2D 12 09 DF 87 56 91 06
-func (*Canusb) decodeFrame29bit(buff []byte) (gocan.CANFrame, error) {
+func (*CanusbVCP) decodeFrame29bit(buff []byte) (gocan.CANFrame, error) {
 	id, err := strconv.ParseUint(string(buff[1:9]), 16, 32)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode identifier: %v", err)

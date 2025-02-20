@@ -8,7 +8,7 @@ import (
 	"log"
 
 	"github.com/roffe/gocan"
-	"github.com/roffe/gocan/pkg/canlib"
+	"github.com/roffe/gocanlib"
 )
 
 const (
@@ -18,11 +18,11 @@ const (
 
 func init() {
 	//	log.Println("Kvaser adapter init")
-	canlib.InitializeLibrary()
-	channels, err := canlib.GetNumberOfChannels()
+	gocanlib.InitializeLibrary()
+	channels, err := gocanlib.GetNumberOfChannels()
 	if err == nil {
 		for channel := range channels {
-			devDescr, err := canlib.GetChannelDataString(channel, canlib.CHANNELDATA_DEVDESCR_ASCII)
+			devDescr, err := gocanlib.GetChannelDataString(channel, gocanlib.CHANNELDATA_DEVDESCR_ASCII)
 			if err != nil {
 				panic(err)
 			}
@@ -49,7 +49,7 @@ var _ gocan.Adapter = (*Kvaser)(nil)
 type Kvaser struct {
 	BaseAdapter
 	channel      int
-	handle       canlib.Handle
+	handle       gocanlib.Handle
 	timeoutRead  int
 	timeoutWrite int
 }
@@ -86,7 +86,7 @@ func (k *Kvaser) Close() error {
 
 func (k *Kvaser) Connect(ctx context.Context) error {
 	//if k.cfg.PrintVersion {
-	//	log.Printf("Canlib v" + canlib.GetVersion())
+	//	log.Printf("Canlib v" + gocanlib.GetVersion())
 	//}
 
 	if err := k.openChannel(); err != nil {
@@ -98,7 +98,7 @@ func (k *Kvaser) Connect(ctx context.Context) error {
 		return fmt.Errorf("setSpeed: %v, Close: %v", err, closeErr)
 	}
 
-	if err := canlib.SetBusOutputControl(k.handle, canlib.DRIVER_NORMAL); err != nil {
+	if err := gocanlib.SetBusOutputControl(k.handle, gocanlib.DRIVER_NORMAL); err != nil {
 		return fmt.Errorf("setBusOutputControl: %v", err)
 	}
 
@@ -109,7 +109,7 @@ func (k *Kvaser) Connect(ctx context.Context) error {
 }
 
 func (k *Kvaser) openChannel() (err error) {
-	k.handle, err = canlib.OpenChannel(k.channel, canlib.OPEN_EXCLUSIVE)
+	k.handle, err = gocanlib.OpenChannel(k.channel, gocanlib.OPEN_EXCLUSIVE)
 	if err != nil {
 		return fmt.Errorf("OpenChannel error: %v", err)
 	}
@@ -119,28 +119,28 @@ func (k *Kvaser) openChannel() (err error) {
 func (k *Kvaser) setSpeed(CANRate float64) error {
 	switch CANRate {
 	case 1000:
-		return k.handle.SetBusParams(canlib.BITRATE_1M, 0, 0, 0, 0, 0)
+		return k.handle.SetBusParams(gocanlib.BITRATE_1M, 0, 0, 0, 0, 0)
 	/*
 		case 615.384: // Trionic 5 is special ;)
 		//return k.handle.SetBusParamsC200(0x40, 0x37)
 		//return k.handle.SetBitrate(615384)
 	*/
 	case 500:
-		return k.handle.SetBusParams(canlib.BITRATE_500K, 0, 0, 0, 0, 0)
+		return k.handle.SetBusParams(gocanlib.BITRATE_500K, 0, 0, 0, 0, 0)
 	case 250:
-		return k.handle.SetBusParams(canlib.BITRATE_250K, 0, 0, 0, 0, 0)
+		return k.handle.SetBusParams(gocanlib.BITRATE_250K, 0, 0, 0, 0, 0)
 	case 125:
-		return k.handle.SetBusParams(canlib.BITRATE_125K, 0, 0, 0, 0, 0)
+		return k.handle.SetBusParams(gocanlib.BITRATE_125K, 0, 0, 0, 0, 0)
 	case 100:
-		return k.handle.SetBusParams(canlib.BITRATE_100K, 0, 0, 0, 0, 0)
+		return k.handle.SetBusParams(gocanlib.BITRATE_100K, 0, 0, 0, 0, 0)
 	case 83:
-		return k.handle.SetBusParams(canlib.BITRATE_83K, 0, 0, 0, 0, 0)
+		return k.handle.SetBusParams(gocanlib.BITRATE_83K, 0, 0, 0, 0, 0)
 	case 62:
-		return k.handle.SetBusParams(canlib.BITRATE_62K, 0, 0, 0, 0, 0)
+		return k.handle.SetBusParams(gocanlib.BITRATE_62K, 0, 0, 0, 0, 0)
 	case 50:
-		return k.handle.SetBusParams(canlib.BITRATE_50K, 0, 0, 0, 0, 0)
+		return k.handle.SetBusParams(gocanlib.BITRATE_50K, 0, 0, 0, 0, 0)
 	case 10:
-		return k.handle.SetBusParams(canlib.BITRATE_10K, 0, 0, 0, 0, 0)
+		return k.handle.SetBusParams(gocanlib.BITRATE_10K, 0, 0, 0, 0, 0)
 	default:
 		return k.handle.SetBitrate(int(k.cfg.CANRate * 1000))
 	}
@@ -166,7 +166,7 @@ func (k *Kvaser) sendManager(ctx context.Context) {
 }
 
 func (k *Kvaser) sendMessage(frame gocan.CANFrame) {
-	if err := k.handle.Write(frame.Identifier(), frame.Data(), canlib.MSG_STD); err != nil {
+	if err := k.handle.Write(frame.Identifier(), frame.Data(), gocanlib.MSG_STD); err != nil {
 		k.SetError(fmt.Errorf("kvaser.sendManager error: %v", err))
 	}
 }
@@ -183,7 +183,7 @@ func (k *Kvaser) recvManager(ctx context.Context) {
 			return
 		default:
 			msg, err := k.handle.ReadWait(k.timeoutRead)
-			if err != nil && err != canlib.ErrNoMsg {
+			if err != nil && err != gocanlib.ErrNoMsg {
 				k.SetError(fmt.Errorf("kvaser.recvManager() error: %v", err))
 				return
 			}

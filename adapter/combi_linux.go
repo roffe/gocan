@@ -1,4 +1,4 @@
-//go:build combi && linux
+//go:build combi
 
 package adapter
 
