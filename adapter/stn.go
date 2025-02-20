@@ -194,16 +194,16 @@ func (stn *STN) Connect(ctx context.Context) error {
 		stn.filter, // code
 	}
 
-	delay := 15 * time.Millisecond
+	delay := 20 * time.Millisecond
 
-	time.Sleep(delay)
-	for _, c := range initCmds {
-		if c == "" {
+	//time.Sleep(delay)
+	for _, cmd := range initCmds {
+		if cmd == "" {
 			continue
 		}
-		out := []byte(c + "\r")
+		out := []byte(cmd + "\r")
 		if stn.cfg.Debug {
-			stn.cfg.OnMessage(c)
+			stn.cfg.OnMessage(">> " + cmd)
 		}
 		if _, err := stn.port.Write(out); err != nil {
 			stn.cfg.OnMessage(err.Error())
@@ -356,14 +356,12 @@ func (stn *STN) sendManager(ctx context.Context) {
 			if timeout != 0 && timeout != 200 {
 				f.WriteString(",t:" + strconv.Itoa(int(timeout)))
 			}
-			timeout = 0
-
+			// timeout = 0
 			respCount := v.Type().Responses
 			if respCount > 0 {
 				f.WriteString(",r:" + strconv.Itoa(respCount))
 			}
 			f.WriteString("\r")
-
 			if stn.cfg.Debug {
 				stn.cfg.OnMessage("<o> " + f.String())
 			}

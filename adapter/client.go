@@ -186,13 +186,19 @@ func (c *Client) recvManager(_ context.Context, stream grpc.BidiStreamingClient[
 }
 
 func (c *Client) recvMessage(identifier uint32, data []byte) {
-	if identifier == gocan.SystemMsgError {
+
+	switch identifier {
+	case gocan.SystemMsg:
+		c.cfg.OnMessage(string(data))
+		return
+	case gocan.SystemMsgError:
 		c.SetError(errors.New(string(data)))
 		return
-	} else if identifier == gocan.SystemMsgUnrecoverableError {
+	case gocan.SystemMsgUnrecoverableError:
 		c.SetError(gocan.Unrecoverable(errors.New(string(data))))
 		return
 	}
+
 	frame := gocan.NewFrame(identifier, data, gocan.Incoming)
 	select {
 	case c.recvChan <- frame:

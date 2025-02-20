@@ -1,4 +1,4 @@
-//go:build kvaser
+//go:build canlib
 
 package adapter
 

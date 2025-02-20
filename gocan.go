@@ -56,10 +56,6 @@ func NewClient(ctx context.Context, adapter Adapter) (*Client, error) {
 }
 
 func NewWithOpts(ctx context.Context, adapter Adapter, opts ...Opts) (*Client, error) {
-	if err := adapter.Connect(ctx); err != nil {
-		return nil, err
-	}
-
 	c := &Client{
 		fh:      newFrameHandler(adapter),
 		adapter: adapter,
@@ -70,6 +66,11 @@ func NewWithOpts(ctx context.Context, adapter Adapter, opts ...Opts) (*Client, e
 	}
 
 	go c.fh.run(ctx)
+
+	if err := adapter.Connect(ctx); err != nil {
+		return nil, err
+	}
+
 	return c, nil
 }
 

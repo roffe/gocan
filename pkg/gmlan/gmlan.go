@@ -406,7 +406,7 @@ func (cl *Client) SecurityAccessSendKey(ctx context.Context, accessLevel, high, 
 }
 
 func (cl *Client) RequestSecurityAccess(ctx context.Context, accesslevel byte, delay time.Duration, seedfunc func([]byte, byte) (byte, byte)) error {
-	log.Println("SecurityAccessRequestSeed")
+	// log.Println("SecurityAccessRequestSeed")
 	seed, err := cl.SecurityAccessRequestSeed(ctx, accesslevel)
 	if err != nil {
 		return err
@@ -426,7 +426,7 @@ func (cl *Client) RequestSecurityAccess(ctx context.Context, accesslevel byte, d
 
 	high, low := seedfunc(seed, accesslevel)
 
-	log.Println("SecurityAccessSendKey")
+	// log.Println("SecurityAccessSendKey")
 	if err := cl.SecurityAccessSendKey(ctx, accesslevel, high, low); err != nil {
 		return err
 	}

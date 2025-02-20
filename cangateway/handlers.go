@@ -128,7 +128,6 @@ func (s *Server) Stream(srv grpc.BidiStreamingServer[proto.CANFrame, proto.CANFr
 	errg, ctx := errgroup.WithContext(gctx)
 
 	log.Printf("connecting to %s", adaptername)
-
 	if err := dev.Connect(ctx); err != nil {
 		return fmt.Errorf("failed to create client: %w", err)
 	}
@@ -170,7 +169,7 @@ func (s *Server) recvManager(ctx context.Context, srv grpc.BidiStreamingServer[p
 			case <-ctx.Done():
 				return ctx.Err()
 			case err := <-dev.Err():
-				log.Println("adapter error:", err)
+				// log.Println("adapter error:", err)
 				if gocan.IsRecoverable(err) {
 					send(srv, gocan.SystemMsgError, []byte(err.Error()))
 					continue

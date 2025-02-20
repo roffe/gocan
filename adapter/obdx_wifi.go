@@ -129,10 +129,10 @@ func (a *OBDXProWifi) sendManager() {
 			}
 			sendCmd := dvi.New(dvi.CMD_SEND_TO_NETWORK_NORMAL, append([]byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)}, frame.Data()...))
 			if a.cfg.Debug {
-				log.Println("dvi out:", sendCmd.String())
+				a.cfg.OnMessage(fmt.Sprintf("dvi out: %s", sendCmd.String()))
 			}
 			if _, err := a.conn.Write(sendCmd.Bytes()); err != nil {
-				log.Printf("Failed to send DVI: %v", err)
+				a.SetError(fmt.Errorf("failed to send frame: %w", err))
 			}
 
 		}
@@ -142,7 +142,7 @@ func (a *OBDXProWifi) sendManager() {
 func (a *OBDXProWifi) recvManager() {
 	parser := dvi.NewCommandParser(func(cmd *dvi.Command) {
 		if a.cfg.Debug {
-			log.Println("dvi in: ", cmd.String())
+			a.cfg.OnMessage(fmt.Sprintf("dvi in: %s", cmd.String()))
 		}
 		switch cmd.Command() {
 		case 0x08:
@@ -155,7 +155,7 @@ func (a *OBDXProWifi) recvManager() {
 			select {
 			case a.recvChan <- frame:
 			default:
-				log.Printf("dropped frame: %s", frame.String())
+				a.SetError(fmt.Errorf("dropped frame: %X", frame.Identifier()))
 			}
 			return
 		}
@@ -172,7 +172,7 @@ func (a *OBDXProWifi) recvManager() {
 				//if errors.Is(err, os.ErrDeadlineExceeded) {
 				//	continue
 				//}
-				log.Println("recv error:", err)
+				a.SetError(gocan.Unrecoverable(fmt.Errorf("failed to read from com port: %w", err)))
 				return
 			}
 			if n == 0 {

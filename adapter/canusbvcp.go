@@ -17,7 +17,7 @@ import (
 
 func init() {
 	if err := Register(&AdapterInfo{
-		Name:               "CANUSB",
+		Name:               "CANUSB VCP",
 		Description:        "Lawicell CANUSB",
 		RequiresSerialPort: true,
 		Capabilities: AdapterCapabilities{
@@ -42,7 +42,7 @@ type Canusb struct {
 
 func NewCanusb(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	cu := &Canusb{
-		BaseAdapter: NewBaseAdapter("CANUSB", cfg),
+		BaseAdapter: NewBaseAdapter("CANUSB VCP", cfg),
 		buff:        bytes.NewBuffer(nil),
 		//sendMutex: make(chan token, 1),
 	}
@@ -176,7 +176,7 @@ func (*Canusb) calcAcceptanceFilters(idList []uint32) (string, string) {
 }
 
 func (cu *Canusb) sendManager(ctx context.Context) {
-	ticker := time.NewTicker(800 * time.Millisecond)
+	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	fb := bytes.NewBuffer(nil)
 	for {
@@ -273,6 +273,7 @@ func (cu *Canusb) parse(data []byte) {
 		case 'F':
 			if err := decodeStatus(by); err != nil {
 				cu.cfg.OnMessage(fmt.Sprintf("CAN status error: %v", err))
+				cu.SetError(err)
 			}
 			//cu.mu.Unlock()
 		case 't':
@@ -350,17 +351,17 @@ func decodeStatus(b []byte) error {
 	case checkBitSet(bs, 2):
 		return errors.New("CAN transmit FIFO queue full")
 	case checkBitSet(bs, 3):
-		return errors.New("error warning (EI), see SJA1000 datasheet")
+		return errors.New("error warning (EI)")
 	case checkBitSet(bs, 4):
-		return errors.New("data Overrun (DOI), see SJA1000 datasheet")
+		return errors.New("data overrun (DOI)") // see SJA1000 datasheet
 	case checkBitSet(bs, 5):
 		return errors.New("not used")
 	case checkBitSet(bs, 6):
-		return errors.New("error Passive (EPI), see SJA1000 datasheet")
+		return errors.New("error passive (EPI)") // see SJA1000 datasheet
 	case checkBitSet(bs, 7):
-		return errors.New("arbitration Lost (ALI), see SJA1000 datasheet *")
+		return errors.New("arbitration lost (ALI)") // see SJA1000 datasheet *
 	case checkBitSet(bs, 8):
-		return errors.New("bus Error (BEI), see SJA1000 datasheet **")
+		return errors.New("bus error (BEI)") // see SJA1000 datasheet **"
 
 	}
 	return nil

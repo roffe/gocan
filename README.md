@@ -13,6 +13,10 @@ A Go Linux/Windows/OSX CAN library
 * CANable Nano and Pro running [slcan](https://github.com/normaldotcom/canable-fw)
 * [YACA](https://github.com/roffe/yaca)
 
+## Canusb DLL
+
+Lawicell canusbdrv.dll for both 32 and 64bit is supported
+
 ## Kvaser Canlib
 
 Tested with the following adapters

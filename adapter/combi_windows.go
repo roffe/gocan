@@ -308,6 +308,9 @@ func (ca *CombiAdapter) recvManager(ctx context.Context) {
 			buff := make([]byte, 19)
 			n, err := ca.in.ReadContext(ctx, buff)
 			if err != nil {
+				if ctx.Err() != nil {
+					return
+				}
 				ca.cfg.OnMessage(fmt.Sprintf("failed to read from usb device: %v", err))
 				//ca.cfg.OnError(fmt.Errorf("failed to read from usb device: %w", err))
 				if n == 0 {
