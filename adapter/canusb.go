@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/roffe/gocan"
-	"github.com/roffe/gocan/pkg/canusb"
+	canusb "github.com/roffe/gocanusb"
 )
 
 func init() {
@@ -234,11 +234,9 @@ func (cu *CanusbDLL) Close() (err error) {
 		if err = cu.h.Flush(canusb.FLUSH_EMPTY_INQUEUE | canusb.FLUSH_WAIT); err != nil {
 			log.Println("Flush:", err)
 		}
-
 		if err = cu.h.Close(); err != nil {
 			log.Println("Close:", err)
 		}
-		//close(cu.callback) // safely close the channel
 		cu.h = nil
 	})
 	return

@@ -1,6 +1,6 @@
 module github.com/roffe/gocan
 
-go 1.23
+go 1.24.0
 
 require (
 	github.com/albenik/bcd v0.0.0-20170831201648-635201416bc7
@@ -16,6 +16,7 @@ require (
 
 require (
 	github.com/mattn/go-colorable v0.1.14 // indirect
+	github.com/roffe/gocanusb v0.0.0-20250220212907-c38eb286c02d // indirect
 	github.com/stretchr/testify v1.8.0 // indirect
 	golang.org/x/text v0.22.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250207221924-e9438ea467c6 // indirect
