@@ -14,25 +14,57 @@ import (
 
 	"github.com/roffe/gocan"
 	canusb "github.com/roffe/gocanusb"
+	"golang.org/x/sys/windows/registry"
 )
 
 func init() {
-	if names, err := canusb.GetAdapters(); err == nil {
-		for _, name := range names {
-			nameStr := fmt.Sprintf("CANUSB %s", name)
-			if err := Register(&AdapterInfo{
-				Name:               nameStr,
-				New:                NewCanusbName(nameStr),
-				RequiresSerialPort: false,
-				Capabilities: AdapterCapabilities{
-					HSCAN: true,
-					KLine: false,
-					SWCAN: false,
-				},
-			}); err != nil {
-				panic(err)
+	if hasdotNet2() {
+		if names, err := canusb.GetAdapters(); err == nil {
+			for _, name := range names {
+				nameStr := fmt.Sprintf("CANUSB %s", name)
+				if err := Register(&AdapterInfo{
+					Name:               nameStr,
+					New:                NewCanusbName(nameStr),
+					RequiresSerialPort: false,
+					Capabilities: AdapterCapabilities{
+						HSCAN: true,
+						KLine: false,
+						SWCAN: false,
+					},
+				}); err != nil {
+					panic(err)
+				}
 			}
 		}
+	}
+}
+
+func hasdotNet2() bool {
+	// Registry path for .NET Framework 2.0
+	registryPath := `SOFTWARE\Microsoft\NET Framework Setup\NDP\v2.0.50727`
+
+	// Open the registry key
+	key, err := registry.OpenKey(registry.LOCAL_MACHINE, registryPath, registry.QUERY_VALUE)
+	if err != nil {
+		log.Printf("Error opening registry key: %v", err)
+		return false
+	}
+	defer key.Close()
+
+	// Read the Install value
+	install, _, err := key.GetIntegerValue("Install")
+	if err != nil {
+		log.Printf("Error reading Install value: %v\n", err)
+		return false
+	}
+
+	// Check if .NET Framework 2.0 is installed (Install = 1)
+	if install == 1 {
+		log.Println(".NET Framework 2.0 is installed")
+		return true
+	} else {
+		log.Printf(".NET Framework 2.0 is not properly installed (Install value = %d)", install)
+		return false
 	}
 }
 
