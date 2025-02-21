@@ -189,12 +189,12 @@ func (cu *CanusbVCP) sendManager(ctx context.Context) {
 			// cu.mu.Lock()
 			cu.port.Write([]byte{'F', '\r'})
 		case v := <-cu.sendChan:
-			if id := v.Identifier(); id >= gocan.SystemMsg {
+			if id := v.Identifier; id >= gocan.SystemMsg {
 				if id == gocan.SystemMsg {
 					if cu.cfg.Debug {
-						cu.cfg.OnMessage(">> " + string(v.Data()))
+						cu.cfg.OnMessage(">> " + string(v.Data))
 					}
-					if _, err := cu.port.Write(append(v.Data(), '\r')); err != nil {
+					if _, err := cu.port.Write(append(v.Data, '\r')); err != nil {
 						cu.SetError(gocan.Unrecoverable(fmt.Errorf("failed to write to com port: %w", err)))
 						return
 					}
@@ -204,10 +204,10 @@ func (cu *CanusbVCP) sendManager(ctx context.Context) {
 			fb.Reset()
 			// cu.mu.Lock()
 			idb := make([]byte, 4)
-			binary.BigEndian.PutUint32(idb, v.Identifier())
+			binary.BigEndian.PutUint32(idb, v.Identifier)
 			fb.WriteString("t" + hex.EncodeToString(idb)[5:] +
 				strconv.Itoa(v.Length()) +
-				hex.EncodeToString(v.Data()) + "\r")
+				hex.EncodeToString(v.Data) + "\r")
 			if _, err := cu.port.Write(fb.Bytes()); err != nil {
 				cu.SetError(gocan.Unrecoverable(fmt.Errorf("failed to write to com port: %s, %w", fb.String(), err)))
 				return
@@ -372,7 +372,7 @@ func checkBitSet(n, k int) bool {
 	return v == 1
 }
 
-func (*CanusbVCP) decodeFrame(buff []byte) (gocan.CANFrame, error) {
+func (*CanusbVCP) decodeFrame(buff []byte) (*gocan.CANFrame, error) {
 	id, err := strconv.ParseUint(string(buff[1:4]), 16, 32)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode identifier: %v", err)
@@ -401,7 +401,7 @@ func (*CanusbVCP) decodeFrame(buff []byte) (gocan.CANFrame, error) {
 }
 
 // T 00000180 8 2D 12 09 DF 87 56 91 06
-func (*CanusbVCP) decodeFrame29bit(buff []byte) (gocan.CANFrame, error) {
+func (*CanusbVCP) decodeFrame29bit(buff []byte) (*gocan.CANFrame, error) {
 	id, err := strconv.ParseUint(string(buff[1:9]), 16, 32)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode identifier: %v", err)

@@ -176,8 +176,8 @@ func (tx *Txbridge) sendManager(_ context.Context) {
 		case <-tx.closeChan:
 			return
 		case frame := <-tx.sendChan:
-			if frame.Identifier() == gocan.SystemMsg {
-				_, err := tx.port.Write(frame.Data())
+			if frame.Identifier == gocan.SystemMsg {
+				_, err := tx.port.Write(frame.Data)
 				if err != nil {
 					tx.SetError(err)
 				}
@@ -186,7 +186,7 @@ func (tx *Txbridge) sendManager(_ context.Context) {
 
 			cmd := &serialcommand.SerialCommand{
 				Command: 't',
-				Data:    append([]byte{uint8(frame.Identifier() >> 8), uint8(frame.Identifier()), byte(frame.Length())}, frame.Data()...),
+				Data:    append([]byte{uint8(frame.Identifier >> 8), uint8(frame.Identifier), byte(frame.Length())}, frame.Data...),
 			}
 			buf, err := cmd.MarshalBinary()
 			if err != nil {
@@ -274,7 +274,7 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 					cmdbuffPtr = 0
 					continue
 				}
-				var frame gocan.CANFrame
+				var frame *gocan.CANFrame
 				switch command {
 				case 'T', 't':
 					frame = gocan.NewFrame(

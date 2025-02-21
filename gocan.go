@@ -24,8 +24,8 @@ const (
 type Adapter interface {
 	Name() string
 	Connect(context.Context) error
-	Recv() <-chan CANFrame
-	Send() chan<- CANFrame
+	Recv() <-chan *CANFrame
+	Send() chan<- *CANFrame
 	Err() <-chan error
 	Close() error
 	//SetFilter([]uint32) error
@@ -95,7 +95,7 @@ func (c *Client) Close() (err error) {
 }
 
 // Send a CAN Frame
-func (c *Client) Send(msg CANFrame) error {
+func (c *Client) Send(msg *CANFrame) error {
 	select {
 	case c.adapter.Send() <- msg:
 		return nil
@@ -114,8 +114,8 @@ func (c *Client) SendFrame(identifier uint32, data []byte, f CANFrameType) error
 }
 
 // Send and wait up to <timeout> for a answer on given identifiers
-func (c *Client) SendAndWait(ctx context.Context, frame CANFrame, timeout time.Duration, identifiers ...uint32) (CANFrame, error) {
-	frame.SetTimeout(timeout)
+func (c *Client) SendAndWait(ctx context.Context, frame *CANFrame, timeout time.Duration, identifiers ...uint32) (*CANFrame, error) {
+	frame.Timeout = timeout
 	sub := c.newSub(ctx, 1, identifiers...)
 	c.fh.register <- sub
 	defer func() {
@@ -128,7 +128,7 @@ func (c *Client) SendAndWait(ctx context.Context, frame CANFrame, timeout time.D
 }
 
 // Wait for a certain CAN identifier for up to <timeout>
-func (c *Client) Wait(ctx context.Context, timeout time.Duration, identifiers ...uint32) (CANFrame, error) {
+func (c *Client) Wait(ctx context.Context, timeout time.Duration, identifiers ...uint32) (*CANFrame, error) {
 	sub := c.newSub(ctx, 1, identifiers...)
 	c.fh.register <- sub
 	defer func() {
@@ -137,7 +137,7 @@ func (c *Client) Wait(ctx context.Context, timeout time.Duration, identifiers ..
 	return sub.Wait(ctx, timeout)
 }
 
-func (c *Client) SubscribeFunc(ctx context.Context, f func(CANFrame), identifiers ...uint32) *Sub {
+func (c *Client) SubscribeFunc(ctx context.Context, f func(*CANFrame), identifiers ...uint32) *Sub {
 	sub := c.newSub(ctx, 20, identifiers...)
 	c.fh.register <- sub
 	go func() {
@@ -160,7 +160,7 @@ func (c *Client) SubscribeFunc(ctx context.Context, f func(CANFrame), identifier
 }
 
 // Subscribe to CAN identifiers and return a message channel
-func (c *Client) SubscribeChan(ctx context.Context, channel chan CANFrame, identifiers ...uint32) *Sub {
+func (c *Client) SubscribeChan(ctx context.Context, channel chan *CANFrame, identifiers ...uint32) *Sub {
 	sub := c.newSub(ctx, 20, identifiers...)
 	sub.responseChan = channel
 	c.fh.register <- sub
@@ -184,6 +184,6 @@ func (c *Client) newSub(ctx context.Context, bufferSize int, identifiers ...uint
 		c:            c,
 		identifiers:  idMap,
 		filterCount:  len(identifiers),
-		responseChan: make(chan CANFrame, bufferSize),
+		responseChan: make(chan *CANFrame, bufferSize),
 	}
 }

@@ -256,7 +256,7 @@ func (a *Just4Trionic) parse(ctx context.Context, readBuffer []byte, buff *bytes
 	}
 }
 
-func (*Just4Trionic) decodeFrame(buff []byte) (gocan.CANFrame, error) {
+func (*Just4Trionic) decodeFrame(buff []byte) (*gocan.CANFrame, error) {
 	id, err := strconv.ParseUint(string(buff[0:3]), 16, 32)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode identifier: %w", err)
@@ -277,12 +277,12 @@ func (a *Just4Trionic) sendManager(ctx context.Context) {
 	for {
 		select {
 		case v := <-a.sendChan:
-			if id := v.Identifier(); id >= gocan.SystemMsg {
+			if id := v.Identifier; id >= gocan.SystemMsg {
 				if id == gocan.SystemMsg {
 					if a.cfg.Debug {
-						log.Println(">> " + string(v.Data()))
+						log.Println(">> " + string(v.Data))
 					}
-					if _, err := a.port.Write(append(v.Data(), '\r')); err != nil {
+					if _, err := a.port.Write(append(v.Data, '\r')); err != nil {
 						a.SetError(gocan.Unrecoverable(fmt.Errorf("failed to write to com port: %w", err)))
 						return
 					}
@@ -290,9 +290,9 @@ func (a *Just4Trionic) sendManager(ctx context.Context) {
 				continue
 			}
 
-			f = "t" + strconv.FormatUint(uint64(v.Identifier()), 16) +
+			f = "t" + strconv.FormatUint(uint64(v.Identifier), 16) +
 				strconv.Itoa(v.Length()) +
-				hex.EncodeToString(v.Data())
+				hex.EncodeToString(v.Data)
 
 			for i := v.Length(); i < 8; i++ {
 				f += "00"

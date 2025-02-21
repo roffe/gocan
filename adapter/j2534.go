@@ -329,7 +329,7 @@ func (ma *J2534) sendManager(ctx context.Context) {
 		case <-ma.closeChan:
 			return
 		case f := <-ma.sendChan:
-			if f.Identifier() >= gocan.SystemMsg {
+			if f.Identifier >= gocan.SystemMsg {
 				continue
 			}
 			msg := &passthru.PassThruMsg{
@@ -342,8 +342,8 @@ func (ma *J2534) sendManager(ctx context.Context) {
 			if ma.protocol == passthru.SW_CAN_PS && !ma.tech2passThru {
 				msg.TxFlags = passthru.SW_CAN_HV_TX
 			}
-			binary.BigEndian.PutUint32(msg.Data[:], f.Identifier())
-			copy(msg.Data[4:], f.Data())
+			binary.BigEndian.PutUint32(msg.Data[:], f.Identifier)
+			copy(msg.Data[4:], f.Data)
 			if err := ma.sendMsg(msg); err != nil {
 				ma.SetError(fmt.Errorf("send error: %w", err))
 			}

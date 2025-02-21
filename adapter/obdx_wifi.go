@@ -123,11 +123,11 @@ func (a *OBDXProWifi) sendManager() {
 			log.Println("sendManager closed")
 			return
 		case frame := <-a.sendChan:
-			id := frame.Identifier()
+			id := frame.Identifier
 			if id >= gocan.SystemMsg {
 				continue
 			}
-			sendCmd := dvi.New(dvi.CMD_SEND_TO_NETWORK_NORMAL, append([]byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)}, frame.Data()...))
+			sendCmd := dvi.New(dvi.CMD_SEND_TO_NETWORK_NORMAL, append([]byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)}, frame.Data...))
 			if a.cfg.Debug {
 				a.cfg.OnMessage(fmt.Sprintf("dvi out: %s", sendCmd.String()))
 			}
@@ -155,7 +155,7 @@ func (a *OBDXProWifi) recvManager() {
 			select {
 			case a.recvChan <- frame:
 			default:
-				a.SetError(fmt.Errorf("dropped frame: %X", frame.Identifier()))
+				a.SetError(fmt.Errorf("dropped frame: %X", frame.Identifier))
 			}
 			return
 		}

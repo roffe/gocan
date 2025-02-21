@@ -337,27 +337,27 @@ func (stn *STN) sendManager(ctx context.Context) {
 	for {
 		select {
 		case v := <-stn.sendChan:
-			if id := v.Identifier(); id >= gocan.SystemMsg {
+			if id := v.Identifier; id >= gocan.SystemMsg {
 				if id == gocan.SystemMsg {
 					if stn.cfg.Debug {
 						stn.cfg.OnMessage("<o> " + f.String())
 					}
 					stn.sendLock.Lock()
-					if _, err := stn.port.Write(append(v.Data(), '\r')); err != nil {
+					if _, err := stn.port.Write(append(v.Data, '\r')); err != nil {
 						stn.SetError(gocan.Unrecoverable(fmt.Errorf("failed to write: %q %w", f.String(), err)))
 						return
 					}
 				}
 				continue
 			}
-			binary.BigEndian.PutUint32(idb, v.Identifier())
-			f.WriteString("STPXh:" + hex.EncodeToString(idb)[5:] + ",d:" + hex.EncodeToString(v.Data()))
-			timeout = v.GetTimeout().Milliseconds()
+			binary.BigEndian.PutUint32(idb, v.Identifier)
+			f.WriteString("STPXh:" + hex.EncodeToString(idb)[5:] + ",d:" + hex.EncodeToString(v.Data))
+			timeout = v.Timeout.Milliseconds()
 			if timeout != 0 && timeout != 200 {
 				f.WriteString(",t:" + strconv.Itoa(int(timeout)))
 			}
 			// timeout = 0
-			respCount := v.Type().Responses
+			respCount := v.FrameType.Responses
 			if respCount > 0 {
 				f.WriteString(",r:" + strconv.Itoa(respCount))
 			}
@@ -450,7 +450,7 @@ func (stn *STN) recvManager(ctx context.Context) {
 	}
 }
 
-func (*STN) decodeFrame(buff []byte) (gocan.CANFrame, error) {
+func (*STN) decodeFrame(buff []byte) (*gocan.CANFrame, error) {
 	id, err := strconv.ParseUint(string(buff[:3]), 16, 32)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode identifier: %v", err)

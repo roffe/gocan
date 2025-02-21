@@ -140,8 +140,7 @@ func (cl *Client) InitiateDiagnosticOperation(ctx context.Context, subFunc byte)
 	if err := CheckErr(resp); err != nil {
 		return err
 	}
-	d := resp.Data()
-	if d[0] != 0x01 || d[1] != 0x50 {
+	if resp.Data[0] != 0x01 || resp.Data[1] != 0x50 {
 		log.Println(resp.String())
 		return errors.New("InitiateDiagnosticOperation: invalid response to InitiateDiagnosticOperation request")
 	}
@@ -178,7 +177,7 @@ func (cl *Client) ReadDataByIdentifier(ctx context.Context, pid byte) ([]byte, e
 	return cl.ReadDataByIdentifierFrame(ctx, frame)
 }
 
-func (cl *Client) ReadDataByIdentifierFrame(ctx context.Context, frame gocan.CANFrame) ([]byte, error) {
+func (cl *Client) ReadDataByIdentifierFrame(ctx context.Context, frame *gocan.CANFrame) ([]byte, error) {
 	resp, err := cl.c.SendAndWait(ctx, frame, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
 		return nil, err
@@ -187,18 +186,17 @@ func (cl *Client) ReadDataByIdentifierFrame(ctx context.Context, frame gocan.CAN
 		log.Println(resp.String())
 		return nil, err
 	}
-	d := resp.Data()
 	switch {
 	//case d[0] == 0x02 && d[1] == 0x1A && d[2] == frame.Data()[2]:
 	//	return nil, fmt.Errorf("ReadDataByIdentifier: no more data")
-	case d[1] == 0x5A: // only one frame in this response
-		length := d[0]
-		return d[3 : 3+(length-2)], nil
-	case d[0] == 0x10 /* && d[2] == READ_DATA_BY_IDENTIFIER+0x40: // Multi frame response */ :
-		left := int(d[1]) - 2
+	case resp.Data[1] == 0x5A: // only one frame in this response
+		length := resp.Data[0]
+		return resp.Data[3 : 3+(length-2)], nil
+	case resp.Data[0] == 0x10 /* && d[2] == READ_DATA_BY_IDENTIFIER+0x40: // Multi frame response */ :
+		left := int(resp.Data[1]) - 2
 		out := bytes.NewBuffer(make([]byte, 0, left))
 		rb := min(4, left)
-		out.Write(d[4 : 4+rb])
+		out.Write(resp.Data[4 : 4+rb])
 		left -= rb
 		//		log.Println(left)
 		framesToReceive := math.Ceil(float64(left) / 7)
@@ -212,7 +210,7 @@ func (cl *Client) ReadDataByIdentifierFrame(ctx context.Context, frame gocan.CAN
 		for framesToReceive > 0 {
 			select {
 			case response := <-cc.Chan():
-				frameData := response.Data()
+				frameData := response.Data
 				if frameData[0]&0x20 != 0x20 {
 					if err := CheckErr(response); err != nil {
 						log.Println(response.String())
@@ -236,10 +234,10 @@ func (cl *Client) ReadDataByIdentifierFrame(ctx context.Context, frame gocan.CAN
 			}
 		}
 		return out.Bytes(), nil
-	case bytes.HasPrefix(d, []byte{0x02, 0x1A, 0x18, 0x00}):
+	case bytes.HasPrefix(resp.Data, []byte{0x02, 0x1A, 0x18, 0x00}):
 		log.Println("retrying1")
 		return nil, ErrRetry
-	case bytes.Equal(d, []byte{0x01, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}):
+	case bytes.Equal(resp.Data, []byte{0x01, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}):
 		log.Println("retrying2")
 		return nil, ErrRetry
 	default:
@@ -299,17 +297,16 @@ func (cl *Client) ReadMemoryByAddress(ctx context.Context, address, length uint3
 	if err := CheckErr(resp); err != nil {
 		return nil, err
 	}
-	d := resp.Data()
 	switch {
 	//case d[0] == 0x02 && d[1] == 0x1A && d[2] == frame.Data()[2]:
 	//	return nil, fmt.Errorf("ReadDataByIdentifier: no more data")
-	case d[1] == READ_MEMORY_BY_ADDRESS+0x40: // only one frame in this response
-		return d[5 : 5+length], nil
-	case d[0] == 0x10 && d[2] == READ_MEMORY_BY_ADDRESS+0x40: // Multi frame response
-		left := int(d[1]) - 4
+	case resp.Data[1] == READ_MEMORY_BY_ADDRESS+0x40: // only one frame in this response
+		return resp.Data[5 : 5+length], nil
+	case resp.Data[0] == 0x10 && resp.Data[2] == READ_MEMORY_BY_ADDRESS+0x40: // Multi frame response
+		left := int(resp.Data[1]) - 4
 		out := bytes.NewBuffer(make([]byte, 0, left))
 		rb := min(2, left)
-		out.Write(d[6 : 6+rb])
+		out.Write(resp.Data[6 : 6+rb])
 		left -= rb
 
 		framesToReceive := math.Ceil(float64(left) / 7)
@@ -321,7 +318,7 @@ func (cl *Client) ReadMemoryByAddress(ctx context.Context, address, length uint3
 		for framesToReceive > 0 {
 			select {
 			case response := <-cc.Chan():
-				frameData := response.Data()
+				frameData := response.Data
 				if frameData[0]&0x20 != 0x20 {
 					if err := CheckErr(response); err != nil {
 						log.Println(response.String())
@@ -377,12 +374,10 @@ func (cl *Client) SecurityAccessRequestSeed(ctx context.Context, accessLevel byt
 	if err := CheckErr(resp); err != nil {
 		return nil, fmt.Errorf("SecurityAccessRequestSeed: %w", err)
 	}
-	d := resp.Data()
-	if d[1] != 0x67 || d[2] != accessLevel {
+	if resp.Data[1] != 0x67 || resp.Data[2] != accessLevel {
 		return nil, errors.New("invalid Response to SecurityAccessRequestSeed")
 	}
-
-	return []byte{d[3], d[4]}, nil
+	return []byte{resp.Data[3], resp.Data[4]}, nil
 }
 
 func (cl *Client) SecurityAccessSendKey(ctx context.Context, accessLevel, high, low byte) error {
@@ -397,8 +392,7 @@ func (cl *Client) SecurityAccessSendKey(ctx context.Context, accessLevel, high, 
 		return err
 	}
 
-	d := resp.Data()
-	if d[1] == 0x67 && d[2] == accessLevel+0x01 {
+	if resp.Data[1] == 0x67 && resp.Data[2] == accessLevel+0x01 {
 		//log.Println("Security access granted")
 		return nil
 	}
@@ -449,8 +443,7 @@ func (cl *Client) DisableNormalCommunication(ctx context.Context) error {
 	if err := CheckErr(resp); err != nil {
 		return err
 	}
-	d := resp.Data()
-	if d[0] != 0x01 || d[1] != 0x68 {
+	if resp.Data[0] != 0x01 || resp.Data[1] != 0x68 {
 		return errors.New("invalid response to DisableNormalCommunication")
 	}
 	return nil
@@ -502,8 +495,7 @@ func (cl *Client) RequestDownload(ctx context.Context, z22se bool) error {
 		return err
 	}
 
-	d := resp.Data()
-	if d[0] != 0x01 || d[1] != 0x74 {
+	if resp.Data[0] != 0x01 || resp.Data[1] != 0x74 {
 		return errors.New("Did not receive correct response from RequestDownload") //lint:ignore ST1005 ignore this
 	}
 
@@ -562,8 +554,7 @@ func (cl *Client) TransferData(ctx context.Context, subFunc byte, length byte, s
 		return err
 	}
 
-	d := resp.Data()
-	if d[0] != 0x30 || d[1] != 0x00 {
+	if resp.Data[0] != 0x30 || resp.Data[1] != 0x00 {
 		return errors.New("/!\\ Did not receive correct response from TransferData")
 	}
 
@@ -658,19 +649,18 @@ func (cl *Client) WriteDataByAddress(ctx context.Context, address uint32, data [
 	if err != nil {
 		return err
 	}
-	d := resp.Data()
 
 	if err := CheckErr(resp); err != nil {
 		// log.Println(resp.String())
 		return err
 	}
 
-	if d[0] != 0x30 || d[1] > 0x01 {
+	if resp.Data[0] != 0x30 || resp.Data[1] > 0x01 {
 		// log.Println(resp.String())
 		return errors.New("invalid response to initial writeDataByIdentifier")
 	}
 
-	delay := d[2]
+	delay := resp.Data[2]
 
 	r := bytes.NewReader(data)
 	var seq byte = 0x21
@@ -736,18 +726,16 @@ func (cl *Client) writeDataByIdentifierMultiframe(ctx context.Context, pid byte,
 		return err
 	}
 	//log.Println(resp.String())
-	d := resp.Data()
-
 	if err := CheckErr(resp); err != nil {
 		return err
 	}
 
-	if d[0] != 0x30 || d[1] > 0x01 {
+	if resp.Data[0] != 0x30 || resp.Data[1] > 0x01 {
 		log.Println(resp.String())
 		return errors.New("invalid response to initial writeDataByIdentifier")
 	}
 
-	delay := d[2]
+	delay := resp.Data[2]
 
 	var seq byte = 0x21
 	for r.Len() > 0 {
@@ -843,11 +831,10 @@ func (cl *Client) ReportProgrammedState(ctx context.Context) (byte, error) {
 	if err := CheckErr(resp); err != nil {
 		return 0, err
 	}
-	d := resp.Data()
-	if d[0] != 0x02 || d[1] != 0xE2 {
+	if resp.Data[0] != 0x02 || resp.Data[1] != 0xE2 {
 		return 0, errors.New("invalid response to ReportProgrammedState request")
 	}
-	return d[2], nil
+	return resp.Data[2], nil
 }
 
 func TranslateProgrammedState(state byte) string {
@@ -920,8 +907,7 @@ func (cl *Client) ProgrammingMode(ctx context.Context, subFunc byte) error {
 		if err != nil {
 			return fmt.Errorf("ProgrammingMode: %X %w", subFunc, err)
 		}
-		d := resp.Data()
-		if d[0] != 0x01 || d[1] != 0xE5 {
+		if resp.Data[0] != 0x01 || resp.Data[1] != 0xE5 {
 			return errors.New("request ProgrammingMode invalid response")
 		}
 		return nil
@@ -967,12 +953,11 @@ func (cl *Client) readDiagnosticInformation(ctx context.Context, subFunc byte, p
 			for {
 				select {
 				case resp := <-ch.Chan():
-					d := resp.Data()
-					if d[1] == 0x00 && d[2] == 0x00 && d[3] == 0x00 { // No more DTCs
+					if resp.Data[1] == 0x00 && resp.Data[2] == 0x00 && resp.Data[3] == 0x00 { // No more DTCs
 						break outer
 					}
 					//log.Println("append")
-					out = append(out, []byte{d[1], d[2], d[3], d[4]})
+					out = append(out, []byte{resp.Data[1], resp.Data[2], resp.Data[3], resp.Data[4]})
 				case <-time.After(00 * time.Millisecond):
 					break outer
 				}
@@ -1043,7 +1028,7 @@ func (cl *Client) ReadDataByPacketIdentifier(ctx context.Context, subFunc byte, 
 			noResp--
 		}
 	*/
-	return resp.Data(), nil
+	return resp.Data, nil
 }
 
 //8.20 DeviceControl ($AE) Service.

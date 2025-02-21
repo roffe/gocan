@@ -40,7 +40,7 @@ func main() {
 	t := time.NewTicker(1 * time.Second)
 	defer t.Stop()
 
-	onMsg := func(f gocan.CANFrame) {
+	onMsg := func(f *gocan.CANFrame) {
 		log.Println("Got frame: ", f.String())
 	}
 

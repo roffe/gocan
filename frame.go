@@ -29,80 +29,33 @@ var (
 	ResponseRequired = CANFrameType{Type: 2, Responses: 1}
 )
 
-type CANFrame interface {
-	// Return frame identifier
-	Identifier() uint32
-	// Return is frame extended (29-bit identifier)
-	Extended() bool
-	// Return frame data length (DLC)
-	Length() int
-	// Return data of frame
-	Data() []byte
-	// Return type of frame
-	Type() CANFrameType
-	// Return fancy string version of frame
-	String() string
-	// Set response timeout
-	SetTimeout(time.Duration)
-	// Return response timeout
-	GetTimeout() time.Duration
+type CANFrame struct {
+	Identifier uint32
+	Extended   bool
+	Data       []byte
+	FrameType  CANFrameType
+	Timeout    time.Duration
 }
 
-type Frame struct {
-	identifier uint32
-	extended   bool
-	data       []byte
-	frameType  CANFrameType
-	timeout    time.Duration
-}
-
-func NewExtendedFrame(identifier uint32, data []byte, frameType CANFrameType) *Frame {
-	return &Frame{
-		identifier: identifier,
-		data:       data,
-		frameType:  frameType,
-		extended:   true,
+func NewExtendedFrame(identifier uint32, data []byte, frameType CANFrameType) *CANFrame {
+	return &CANFrame{
+		Identifier: identifier,
+		Data:       data,
+		FrameType:  frameType,
+		Extended:   true,
 	}
 }
 
-func NewFrame(identifier uint32, data []byte, frameType CANFrameType) *Frame {
-	return &Frame{
-		identifier: identifier,
-		data:       data,
-		frameType:  frameType,
+func NewFrame(identifier uint32, data []byte, frameType CANFrameType) *CANFrame {
+	return &CANFrame{
+		Identifier: identifier,
+		Data:       data,
+		FrameType:  frameType,
 	}
 }
 
-func (f *Frame) Identifier() uint32 {
-	return f.identifier
-}
-
-func (f *Frame) Extended() bool {
-	return f.extended
-}
-
-func (f *Frame) Length() int {
-	return len(f.data)
-}
-
-func (f *Frame) Data() []byte {
-	return f.data
-}
-
-func (f *Frame) Type() CANFrameType {
-	return f.frameType
-}
-
-func (f *Frame) SetTimeout(t time.Duration) {
-	f.timeout = t
-}
-
-func (f *Frame) SetType(t CANFrameType) {
-	f.frameType = t
-}
-
-func (f *Frame) GetTimeout() time.Duration {
-	return f.timeout
+func (f *CANFrame) Length() int {
+	return len(f.Data)
 }
 
 var (
@@ -112,10 +65,10 @@ var (
 	//printable = regexp.MustCompile("[^A-Za-z0-9.,!?]+")
 )
 
-func (f *Frame) String() string {
+func (f *CANFrame) String() string {
 	var out strings.Builder
 
-	switch f.frameType.Type {
+	switch f.FrameType.Type {
 	case 0:
 		out.WriteString("<i> || ")
 	case 1:
@@ -125,15 +78,15 @@ func (f *Frame) String() string {
 
 	}
 
-	out.WriteString(fmt.Sprintf("0x%03X", f.identifier) + " || ")
+	out.WriteString(fmt.Sprintf("0x%03X", f.Identifier) + " || ")
 
-	out.WriteString(strconv.Itoa(len(f.data)) + " || ")
+	out.WriteString(strconv.Itoa(len(f.Data)) + " || ")
 
 	var hexView strings.Builder
 
-	for i, b := range f.data {
+	for i, b := range f.Data {
 		hexView.WriteString(fmt.Sprintf("%02X", b))
-		if i != len(f.data)-1 {
+		if i != len(f.Data)-1 {
 			hexView.WriteString(" ")
 		}
 	}
@@ -143,9 +96,9 @@ func (f *Frame) String() string {
 	out.WriteString(" || ")
 
 	var binView strings.Builder
-	for i, b := range f.data {
+	for i, b := range f.Data {
 		binView.WriteString(fmt.Sprintf("%08b", b))
-		if i != len(f.data)-1 {
+		if i != len(f.Data)-1 {
 			binView.WriteString(" ")
 		}
 	}
@@ -153,14 +106,14 @@ func (f *Frame) String() string {
 	out.WriteString(fmt.Sprintf("%-72s", binView.String()))
 
 	out.WriteString(" || ")
-	out.WriteString(onlyPrintable(f.data))
+	out.WriteString(onlyPrintable(f.Data))
 	return out.String()
 }
 
-func (f *Frame) ColorString() string {
+func (f *CANFrame) ColorString() string {
 	var out strings.Builder
 
-	switch f.frameType.Type {
+	switch f.FrameType.Type {
 	case 0:
 		out.WriteString("<i> || ")
 	case 1:
@@ -170,15 +123,15 @@ func (f *Frame) ColorString() string {
 
 	}
 
-	out.WriteString(green("0x%03X", f.identifier) + " || ")
+	out.WriteString(green("0x%03X", f.Identifier) + " || ")
 
-	out.WriteString(strconv.Itoa(len(f.data)) + " || ")
+	out.WriteString(strconv.Itoa(len(f.Data)) + " || ")
 
 	var hexView strings.Builder
 
-	for i, b := range f.data {
+	for i, b := range f.Data {
 		hexView.WriteString(fmt.Sprintf("%02X", b))
-		if i != len(f.data)-1 {
+		if i != len(f.Data)-1 {
 			hexView.WriteString(" ")
 		}
 	}
@@ -188,9 +141,9 @@ func (f *Frame) ColorString() string {
 	out.WriteString(" || ")
 
 	var binView strings.Builder
-	for i, b := range f.data {
+	for i, b := range f.Data {
 		binView.WriteString(fmt.Sprintf("%08b", b))
-		if i != len(f.data)-1 {
+		if i != len(f.Data)-1 {
 			binView.WriteString(" ")
 		}
 	}
@@ -198,7 +151,7 @@ func (f *Frame) ColorString() string {
 	out.WriteString(red(fmt.Sprintf("%-72s", binView.String())))
 
 	out.WriteString(" || ")
-	out.WriteString(yellow(onlyPrintable(f.data)))
+	out.WriteString(yellow(onlyPrintable(f.Data)))
 	return out.String()
 }
 

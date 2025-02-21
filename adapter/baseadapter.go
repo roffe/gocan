@@ -13,7 +13,7 @@ import (
 type BaseAdapter struct {
 	name               string
 	cfg                *gocan.AdapterConfig
-	sendChan, recvChan chan gocan.CANFrame
+	sendChan, recvChan chan *gocan.CANFrame
 	errChan            chan error
 	closeChan          chan struct{}
 	closeOnce          sync.Once
@@ -23,8 +23,8 @@ func NewBaseAdapter(name string, cfg *gocan.AdapterConfig) BaseAdapter {
 	return BaseAdapter{
 		name:      name,
 		cfg:       cfg,
-		sendChan:  make(chan gocan.CANFrame, 10),
-		recvChan:  make(chan gocan.CANFrame, 1024),
+		sendChan:  make(chan *gocan.CANFrame, 10),
+		recvChan:  make(chan *gocan.CANFrame, 1024),
 		errChan:   make(chan error, 10),
 		closeChan: make(chan struct{}),
 	}
@@ -34,11 +34,11 @@ func (base *BaseAdapter) Name() string {
 	return base.name
 }
 
-func (base *BaseAdapter) Send() chan<- gocan.CANFrame {
+func (base *BaseAdapter) Send() chan<- *gocan.CANFrame {
 	return base.sendChan
 }
 
-func (base *BaseAdapter) Recv() <-chan gocan.CANFrame {
+func (base *BaseAdapter) Recv() <-chan *gocan.CANFrame {
 	return base.recvChan
 }
 

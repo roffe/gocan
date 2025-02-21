@@ -204,12 +204,12 @@ func (ya *YACA) sendManager(ctx context.Context) {
 	for {
 		select {
 		case v := <-ya.sendChan:
-			if id := v.Identifier(); id >= gocan.SystemMsg {
+			if id := v.Identifier; id >= gocan.SystemMsg {
 				if id == gocan.SystemMsg {
 					if ya.cfg.Debug {
-						ya.cfg.OnMessage(">> " + string(v.Data()))
+						ya.cfg.OnMessage(">> " + string(v.Data))
 					}
-					if _, err := ya.port.Write(append(v.Data(), '\r')); err != nil {
+					if _, err := ya.port.Write(append(v.Data, '\r')); err != nil {
 						ya.SetError(gocan.Unrecoverable(fmt.Errorf("failed to write to com port: %w", err)))
 						return
 					}
@@ -217,10 +217,10 @@ func (ya *YACA) sendManager(ctx context.Context) {
 				continue
 			}
 			idb := make([]byte, 4)
-			binary.BigEndian.PutUint32(idb, v.Identifier())
+			binary.BigEndian.PutUint32(idb, v.Identifier)
 			f.WriteString("t" + hex.EncodeToString(idb)[5:] +
 				strconv.Itoa(v.Length()) +
-				hex.EncodeToString(v.Data()) + "\x0D")
+				hex.EncodeToString(v.Data) + "\x0D")
 			if _, err := ya.port.Write(f.Bytes()); err != nil {
 				ya.cfg.OnMessage(fmt.Sprintf("failed to write to com port: %s, %v", f.String(), err))
 			}
@@ -237,7 +237,7 @@ func (ya *YACA) sendManager(ctx context.Context) {
 	}
 }
 
-func (*YACA) decodeFrame(buff []byte) (gocan.CANFrame, error) {
+func (*YACA) decodeFrame(buff []byte) (*gocan.CANFrame, error) {
 	id, err := strconv.ParseUint(string(buff[1:4]), 16, 32)
 	if err != nil {
 		return nil, fmt.Errorf("filed to decode identifier: %v", err)

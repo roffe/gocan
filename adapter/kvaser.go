@@ -157,7 +157,7 @@ func (k *Kvaser) sendManager(ctx context.Context) {
 		case <-k.closeChan:
 			return
 		case frame := <-k.sendChan:
-			if frame.Identifier() >= gocan.SystemMsg {
+			if frame.Identifier >= gocan.SystemMsg {
 				continue
 			}
 			k.sendMessage(frame)
@@ -165,8 +165,8 @@ func (k *Kvaser) sendManager(ctx context.Context) {
 	}
 }
 
-func (k *Kvaser) sendMessage(frame gocan.CANFrame) {
-	if err := k.handle.Write(frame.Identifier(), frame.Data(), gocanlib.MSG_STD); err != nil {
+func (k *Kvaser) sendMessage(frame *gocan.CANFrame) {
+	if err := k.handle.Write(frame.Identifier, frame.Data, gocanlib.MSG_STD); err != nil {
 		k.SetError(fmt.Errorf("kvaser.sendManager error: %v", err))
 	}
 }

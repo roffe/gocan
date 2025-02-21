@@ -37,8 +37,8 @@ github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZb
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/roffe/gocanlib v1.0.1 h1:6tCmIygCiUaqorIW1b1VmvHE6l0xX2FjyC2NYILT4TY=
 github.com/roffe/gocanlib v1.0.1/go.mod h1:YfsBq3MPnBTaBjLBgoLTfvXvJ2eQDJT5O9H7mK6222A=
-github.com/roffe/gocanusb v1.0.0 h1:L8IUslibaUfJTYcaquGVC/Acg/jK7m1hHdE/IztLGjg=
-github.com/roffe/gocanusb v1.0.0/go.mod h1:zRgZyTCvOyLIMeW+d9aUPmoJC3PId0PUJF0IVNQ70Z4=
+github.com/roffe/gocanusb v1.0.1 h1:2kS6cars8YQeXmN0ghWFgveQ5bNHkCTixvD4D0t2IIs=
+github.com/roffe/gocanusb v1.0.1/go.mod h1:zRgZyTCvOyLIMeW+d9aUPmoJC3PId0PUJF0IVNQ70Z4=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
 github.com/stretchr/objx v0.4.0/go.mod h1:YvHI0jy2hoMjB+UWwv71VJQ9isScKT/TqJzVSSt89Yw=
 github.com/stretchr/testify v1.7.1/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=

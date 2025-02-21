@@ -142,13 +142,13 @@ func (c *Client) sendManager(ctx context.Context, stream grpc.BidiStreamingClien
 	}
 }
 
-func (c *Client) sendMessage(stream grpc.BidiStreamingClient[proto.CANFrame, proto.CANFrame], msg gocan.CANFrame) error {
-	var id uint32 = msg.Identifier()
-	typ := proto.CANFrameTypeEnum(msg.Type().Type)
-	resps := uint32(msg.Type().Responses)
+func (c *Client) sendMessage(stream grpc.BidiStreamingClient[proto.CANFrame, proto.CANFrame], msg *gocan.CANFrame) error {
+	var id uint32 = msg.Identifier
+	typ := proto.CANFrameTypeEnum(msg.FrameType.Type)
+	resps := uint32(msg.FrameType.Responses)
 	frame := &proto.CANFrame{
 		Id:   &id,
-		Data: msg.Data(),
+		Data: msg.Data,
 		FrameType: &proto.CANFrameType{
 			FrameType: &typ,
 			Responses: &resps,

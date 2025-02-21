@@ -203,12 +203,14 @@ func (cu *Canusb) callbackHandler(msg *canusb.CANMsg) uintptr {
 	// copy the data as the callback will overwrite it when returning
 	data := make([]byte, msg.Len)
 	copy(data, msg.Data[:msg.Len])
+	frame := gocan.NewFrame(msg.Id, data, gocan.Incoming)
+	frame.Extended = msg.Flags&uint8(canusb.CANMSG_EXTENDED) != 0
 	select {
-	case cu.recvChan <- gocan.NewFrame(msg.Id, data, gocan.Incoming):
+	case cu.recvChan <- frame:
 	default:
 		cu.SetError(errors.New("recvChan full, dropping frame"))
 	}
-	return 0
+	return 1
 }
 
 func (cu *Canusb) run(ctx context.Context) {
@@ -239,15 +241,19 @@ func (cu *Canusb) run(ctx context.Context) {
 				continue
 			}
 		case frame := <-cu.sendChan:
-			if frame.Identifier() >= gocan.SystemMsg {
+			if frame.Identifier >= gocan.SystemMsg {
 				continue
 			}
 			var data [8]byte
-			copy(data[:], frame.Data())
+			copy(data[:], frame.Data)
 			msg := &canusb.CANMsg{
-				Id:   frame.Identifier(),
-				Len:  uint8(len(frame.Data())),
-				Data: data,
+				Id:    frame.Identifier,
+				Len:   uint8(frame.Length()),
+				Flags: 0,
+				Data:  data,
+			}
+			if frame.Extended {
+				msg.Flags |= uint8(canusb.CANMSG_EXTENDED)
 			}
 			if err := cu.h.Write(msg); err != nil {
 				cu.SetError(fmt.Errorf("write failed: %w", err))

@@ -15,7 +15,7 @@ type Sub struct {
 	c            *Client
 	identifiers  map[uint32]struct{}
 	filterCount  int
-	responseChan chan CANFrame
+	responseChan chan *CANFrame
 	closeOnce    sync.Once
 }
 
@@ -26,11 +26,11 @@ func (s *Sub) Close() {
 	})
 }
 
-func (s *Sub) Chan() <-chan CANFrame {
+func (s *Sub) Chan() <-chan *CANFrame {
 	return s.responseChan
 }
 
-func (s *Sub) Wait(ctx context.Context, timeout time.Duration) (CANFrame, error) {
+func (s *Sub) Wait(ctx context.Context, timeout time.Duration) (*CANFrame, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -115,7 +115,7 @@ func (h *FrameHandler) Close() {
 	})
 }
 
-func (h *FrameHandler) processFrame(frame CANFrame) {
+func (h *FrameHandler) processFrame(frame *CANFrame) {
 	for sub := range h.subs {
 		select {
 		case <-sub.ctx.Done():
@@ -126,14 +126,14 @@ func (h *FrameHandler) processFrame(frame CANFrame) {
 				h.deliver(sub, frame)
 				continue
 			}
-			if _, ok := sub.identifiers[frame.Identifier()]; ok {
+			if _, ok := sub.identifiers[frame.Identifier]; ok {
 				h.deliver(sub, frame)
 			}
 		}
 	}
 }
 
-func (h *FrameHandler) deliver(sub *Sub, frame CANFrame) {
+func (h *FrameHandler) deliver(sub *Sub, frame *CANFrame) {
 	select {
 	case sub.responseChan <- frame:
 	default:

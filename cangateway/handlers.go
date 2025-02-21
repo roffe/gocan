@@ -191,15 +191,15 @@ func (s *Server) recvManager(ctx context.Context, srv grpc.BidiStreamingServer[p
 	}
 }
 
-func (s *Server) recvMessage(srv grpc.BidiStreamingServer[proto.CANFrame, proto.CANFrame], msg gocan.CANFrame) error {
-	id := msg.Identifier()
-	frameType := proto.CANFrameTypeEnum(msg.Type().Type)
-	responseCount := uint32(msg.Type().Responses)
+func (s *Server) recvMessage(srv grpc.BidiStreamingServer[proto.CANFrame, proto.CANFrame], msg *gocan.CANFrame) error {
+	id := msg.Identifier
+	frameType := proto.CANFrameTypeEnum(msg.FrameType.Type)
+	responseCount := uint32(msg.FrameType.Responses)
 	//log.Println("frameTyp:", frameTyp)
 	//log.Println("responses:", responses)
 	mmsg := &proto.CANFrame{
 		Id:   &id,
-		Data: msg.Data(),
+		Data: msg.Data,
 		FrameType: &proto.CANFrameType{
 			FrameType: &frameType,
 			Responses: &responseCount,

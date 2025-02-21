@@ -413,7 +413,7 @@ func (ca *CombiAdapter) sendManager(ctx context.Context) {
 		case <-ca.closeChan:
 			return
 		case frame := <-ca.sendChan:
-			if frame.Identifier() >= gocan.SystemMsg {
+			if frame.Identifier >= gocan.SystemMsg {
 				continue
 			}
 			ca.sendMessage(ctx, frame)
@@ -421,7 +421,7 @@ func (ca *CombiAdapter) sendManager(ctx context.Context) {
 	}
 }
 
-func (ca *CombiAdapter) sendMessage(ctx context.Context, frame gocan.CANFrame) {
+func (ca *CombiAdapter) sendMessage(ctx context.Context, frame *gocan.CANFrame) {
 	buff := ca.buffPool.Get().([]byte)
 	defer ca.buffPool.Put(buff)
 	buff[0] = combiCmdtxFrame
@@ -429,8 +429,8 @@ func (ca *CombiAdapter) sendMessage(ctx context.Context, frame gocan.CANFrame) {
 	//buff[2] = 15 & 0xff
 	buff[1] = 0x00
 	buff[2] = 0x0F
-	binary.LittleEndian.PutUint32(buff[3:], frame.Identifier())
-	copy(buff[7:], frame.Data())
+	binary.LittleEndian.PutUint32(buff[3:], frame.Identifier)
+	copy(buff[7:], frame.Data)
 	buff[15] = uint8(frame.Length())
 	buff[16] = 0x00 // is extended
 	buff[17] = 0x00 // is remote

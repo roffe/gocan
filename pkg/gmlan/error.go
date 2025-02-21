@@ -16,12 +16,11 @@ func (e GMError) Error() string {
 	return e.Service + " - " + e.Code
 }
 
-func CheckErr(frame gocan.CANFrame) error {
-	d := frame.Data()
-	if d[1] == 0x7F {
-		return &GMError{TranslateServiceCode(d[2]), TranslateErrorCode(d[3])}
+func CheckErr(frame *gocan.CANFrame) error {
+	if frame.Data[1] == 0x7F {
+		return &GMError{TranslateServiceCode(frame.Data[2]), TranslateErrorCode(frame.Data[3])}
 	}
-	if bytes.Equal(d, []byte{0x01, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}) {
+	if bytes.Equal(frame.Data, []byte{0x01, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}) {
 		return errors.New("Busy, repeat request")
 	}
 	return nil

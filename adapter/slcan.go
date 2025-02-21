@@ -140,13 +140,13 @@ func (sl *SLCan) sendManager(ctx context.Context) {
 }
 
 // handleSend processes a single send operation.
-func (sl *SLCan) handleSend(frame gocan.CANFrame, f *bytes.Buffer) error {
-	if id := frame.Identifier(); id >= gocan.SystemMsg {
+func (sl *SLCan) handleSend(frame *gocan.CANFrame, f *bytes.Buffer) error {
+	if id := frame.Identifier; id >= gocan.SystemMsg {
 		if id == gocan.SystemMsg {
 			if sl.cfg.Debug {
-				log.Println(">> " + string(frame.Data()))
+				log.Println(">> " + string(frame.Data))
 			}
-			if _, err := sl.port.Write(append(frame.Data(), '\r')); err != nil {
+			if _, err := sl.port.Write(append(frame.Data, '\r')); err != nil {
 				return gocan.Unrecoverable(fmt.Errorf("failed to write to com port: %w", err))
 			}
 		}
@@ -156,10 +156,10 @@ func (sl *SLCan) handleSend(frame gocan.CANFrame, f *bytes.Buffer) error {
 	f.Reset()
 	f.WriteByte('t')
 	idb := make([]byte, 4)
-	binary.BigEndian.PutUint32(idb, frame.Identifier())
+	binary.BigEndian.PutUint32(idb, frame.Identifier)
 	f.WriteString(hex.EncodeToString(idb)[5:]) // Skip the first byte
 	f.WriteString(strconv.Itoa(frame.Length()))
-	f.WriteString(hex.EncodeToString(frame.Data()))
+	f.WriteString(hex.EncodeToString(frame.Data))
 	f.WriteByte(0x0D)
 
 	if _, err := sl.port.Write(f.Bytes()); err != nil {
@@ -213,7 +213,7 @@ func (sl *SLCan) parse(ctx context.Context, buff *bytes.Buffer, readBuffer []byt
 	}
 }
 
-func (*SLCan) decodeFrame(buff []byte) (gocan.CANFrame, error) {
+func (*SLCan) decodeFrame(buff []byte) (*gocan.CANFrame, error) {
 	id, err := strconv.ParseUint(string(buff[1:4]), 16, 32)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode identifier: %v", err)
