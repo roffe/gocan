@@ -32,6 +32,8 @@ var (
 type CANFrame interface {
 	// Return frame identifier
 	Identifier() uint32
+	// Return is frame extended (29-bit identifier)
+	Extended() bool
 	// Return frame data length (DLC)
 	Length() int
 	// Return data of frame
@@ -48,14 +50,22 @@ type CANFrame interface {
 
 type Frame struct {
 	identifier uint32
+	extended   bool
 	data       []byte
 	frameType  CANFrameType
 	timeout    time.Duration
 }
 
+func NewExtendedFrame(identifier uint32, data []byte, frameType CANFrameType) *Frame {
+	return &Frame{
+		identifier: identifier,
+		data:       data,
+		frameType:  frameType,
+		extended:   true,
+	}
+}
+
 func NewFrame(identifier uint32, data []byte, frameType CANFrameType) *Frame {
-	//db := make([]byte, len(data))
-	//copy(db, data)
 	return &Frame{
 		identifier: identifier,
 		data:       data,
@@ -65,6 +75,10 @@ func NewFrame(identifier uint32, data []byte, frameType CANFrameType) *Frame {
 
 func (f *Frame) Identifier() uint32 {
 	return f.identifier
+}
+
+func (f *Frame) Extended() bool {
+	return f.extended
 }
 
 func (f *Frame) Length() int {
