@@ -9,7 +9,7 @@ A Go Linux/Windows/OSX CAN library
 * STN1130
 * STN1170
 * STN2120
-* [CANUSB](https://lawicel-shop.se/elektronik/kommunikation/can/lawicel-canusb-adapter-1m-usb-cable/) adapter running in VCP mode using [Lawicel ascii api](http://www.can232.com/docs/canusb_manual.pdf)
+* [CANUSB](https://www.canusb.com/products/canusb/) adapter running in VCP mode using [Lawicel ascii api](https://www.canusb.com/files/canusb_manual.pdf)
 * CANable Nano and Pro running [slcan](https://github.com/normaldotcom/canable-fw)
 * [YACA](https://github.com/roffe/yaca)
 
@@ -17,7 +17,7 @@ A Go Linux/Windows/OSX CAN library
 
 Supported via [goCANUSB](https://github.com/roffe/gocanusb)
 
-Lawicell canusbdrv.dll for both 32 and 64bit is supported
+Lawicel canusbdrv.dll for both 32 and 64bit is supported
 
 ## Kvaser Canlib
 
