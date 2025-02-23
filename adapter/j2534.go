@@ -20,11 +20,11 @@ import (
 func init() {
 	for i, dll := range passthru.FindDLLs() {
 		name := fmt.Sprintf("J2534 #%d %s", i, dll.Name)
-		if err := Register(&AdapterInfo{
+		if err := gocan.RegisterAdapter(&gocan.AdapterInfo{
 			Name:               name,
 			Description:        "J2534 Interface",
 			RequiresSerialPort: false,
-			Capabilities: AdapterCapabilities{
+			Capabilities: gocan.AdapterCapabilities{
 				HSCAN: dll.Capabilities.CAN || dll.Capabilities.CANPS,
 				KLine: dll.Capabilities.ISO9141 || dll.Capabilities.ISO14230,
 				SWCAN: dll.Capabilities.SWCANPS,
@@ -80,7 +80,7 @@ func (ma *J2534) SetFilter(filters []uint32) error {
 	return nil
 }
 
-func (ma *J2534) Connect(ctx context.Context) error {
+func (ma *J2534) Open(ctx context.Context) error {
 	runtime.LockOSThread()
 	var err error
 	ma.h, err = passthru.New(ma.cfg.Port)
@@ -290,7 +290,7 @@ func (ma *J2534) recvManager(ctx context.Context) {
 				gocan.Incoming,
 			):
 			default:
-				ma.cfg.OnMessage(ErrDroppedFrame.Error())
+				ma.cfg.OnMessage(gocan.ErrDroppedFrame.Error())
 			}
 		}
 	}

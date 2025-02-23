@@ -7,6 +7,13 @@ import (
 	"unsafe"
 )
 
+func init() {
+	if err := InitializeLibrary(); err != nil {
+		log.Println("canlib InitializeLibrary() error:", err)
+		return
+	}
+}
+
 var (
 	canlib32                = syscall.NewLazyDLL("canlib32.dll")
 	procInitializeLibrary   = canlib32.NewProc("canInitializeLibrary")
@@ -64,63 +71,68 @@ func GetNumberOfChannels() (int, error) {
 	return int(noChannels), NewError(int32(r1))
 }
 
-type ChannelDataItem int32
+type ChannelData int32
 
 const (
-	CHANNELDATA_CHANNEL_CAP              ChannelDataItem = 1
-	CHANNELDATA_TRANS_CAP                ChannelDataItem = 2
-	CHANNELDATA_CHANNEL_FLAGS            ChannelDataItem = 3
-	CHANNELDATA_CARD_TYPE                ChannelDataItem = 4
-	CHANNELDATA_CARD_NUMBER              ChannelDataItem = 5
-	CHANNELDATA_CHAN_NO_ON_CARD          ChannelDataItem = 6
-	CHANNELDATA_CARD_SERIAL_NO           ChannelDataItem = 7
-	CHANNELDATA_TRANS_SERIAL_NO          ChannelDataItem = 8
-	CHANNELDATA_CARD_FIRMWARE_REV        ChannelDataItem = 9
-	CHANNELDATA_CARD_HARDWARE_REV        ChannelDataItem = 10
-	CHANNELDATA_CARD_UPC_NO              ChannelDataItem = 11
-	CHANNELDATA_TRANS_UPC_NO             ChannelDataItem = 12
-	CHANNELDATA_CHANNEL_NAME             ChannelDataItem = 13
-	CHANNELDATA_DLL_FILE_VERSION         ChannelDataItem = 14
-	CHANNELDATA_DLL_PRODUCT_VERSION      ChannelDataItem = 15
-	CHANNELDATA_DLL_FILETYPE             ChannelDataItem = 16
-	CHANNELDATA_TRANS_TYPE               ChannelDataItem = 17
-	CHANNELDATA_DEVICE_PHYSICAL_POSITION ChannelDataItem = 18
-	CHANNELDATA_UI_NUMBER                ChannelDataItem = 19
-	CHANNELDATA_TIMESYNC_ENABLED         ChannelDataItem = 20
-	CHANNELDATA_DRIVER_FILE_VERSION      ChannelDataItem = 21
-	CHANNELDATA_DRIVER_PRODUCT_VERSION   ChannelDataItem = 22
-	CHANNELDATA_MFGNAME_UNICODE          ChannelDataItem = 23
-	CHANNELDATA_MFGNAME_ASCII            ChannelDataItem = 24
-	CHANNELDATA_DEVDESCR_UNICODE         ChannelDataItem = 25
-	CHANNELDATA_DEVDESCR_ASCII           ChannelDataItem = 26
-	CHANNELDATA_DRIVER_NAME              ChannelDataItem = 27
-	CHANNELDATA_CHANNEL_QUALITY          ChannelDataItem = 28
-	CHANNELDATA_ROUNDTRIP_TIME           ChannelDataItem = 29
-	CHANNELDATA_BUS_TYPE                 ChannelDataItem = 30
-	CHANNELDATA_DEVNAME_ASCII            ChannelDataItem = 31
-	CHANNELDATA_TIME_SINCE_LAST_SEEN     ChannelDataItem = 32
-	CHANNELDATA_REMOTE_OPERATIONAL_MODE  ChannelDataItem = 33
-	CHANNELDATA_REMOTE_PROFILE_NAME      ChannelDataItem = 34
-	CHANNELDATA_REMOTE_HOST_NAME         ChannelDataItem = 35
-	CHANNELDATA_REMOTE_MAC               ChannelDataItem = 36
-	CHANNELDATA_MAX_BITRATE              ChannelDataItem = 37
-	CHANNELDATA_CHANNEL_CAP_MASK         ChannelDataItem = 38
-	CHANNELDATA_CUST_CHANNEL_NAME        ChannelDataItem = 39
-	CHANNELDATA_IS_REMOTE                ChannelDataItem = 40
-	CHANNELDATA_REMOTE_TYPE              ChannelDataItem = 41
-	CHANNELDATA_LOGGER_TYPE              ChannelDataItem = 42
-	CHANNELDATA_HW_STATUS                ChannelDataItem = 43
-	CHANNELDATA_FEATURE_EAN              ChannelDataItem = 44
-	CHANNELDATA_BUS_PARAM_LIMITS         ChannelDataItem = 45
-	CHANNELDATA_CLOCK_INFO               ChannelDataItem = 46
-	CHANNELDATA_CHANNEL_CAP_EX           ChannelDataItem = 47
+	CHANNELDATA_CHANNEL_CAP              ChannelData = 0x01
+	CHANNELDATA_TRANS_CAP                ChannelData = 0x02
+	CHANNELDATA_CHANNEL_FLAGS            ChannelData = 0x03
+	CHANNELDATA_CARD_TYPE                ChannelData = 0x04
+	CHANNELDATA_CARD_NUMBER              ChannelData = 0x05
+	CHANNELDATA_CHAN_NO_ON_CARD          ChannelData = 0x06
+	CHANNELDATA_CARD_SERIAL_NO           ChannelData = 0x07
+	CHANNELDATA_TRANS_SERIAL_NO          ChannelData = 0x08
+	CHANNELDATA_CARD_FIRMWARE_REV        ChannelData = 0x09
+	CHANNELDATA_CARD_HARDWARE_REV        ChannelData = 0x0A
+	CHANNELDATA_CARD_UPC_NO              ChannelData = 0x0B
+	CHANNELDATA_TRANS_UPC_NO             ChannelData = 0x0C
+	CHANNELDATA_CHANNEL_NAME             ChannelData = 0x0D
+	CHANNELDATA_DLL_FILE_VERSION         ChannelData = 0x0E
+	CHANNELDATA_DLL_PRODUCT_VERSION      ChannelData = 0x0F
+	CHANNELDATA_DLL_FILETYPE             ChannelData = 0x10
+	CHANNELDATA_TRANS_TYPE               ChannelData = 0x11
+	CHANNELDATA_DEVICE_PHYSICAL_POSITION ChannelData = 0x12
+	CHANNELDATA_UI_NUMBER                ChannelData = 0x13
+	CHANNELDATA_TIMESYNC_ENABLED         ChannelData = 0x14
+	CHANNELDATA_DRIVER_FILE_VERSION      ChannelData = 0x15
+	CHANNELDATA_DRIVER_PRODUCT_VERSION   ChannelData = 0x16
+	CHANNELDATA_MFGNAME_UNICODE          ChannelData = 0x17
+	CHANNELDATA_MFGNAME_ASCII            ChannelData = 0x18
+	CHANNELDATA_DEVDESCR_UNICODE         ChannelData = 0x19
+	CHANNELDATA_DEVDESCR_ASCII           ChannelData = 0x1A
+	CHANNELDATA_DRIVER_NAME              ChannelData = 0x1B
+	CHANNELDATA_CHANNEL_QUALITY          ChannelData = 0x1C
+	CHANNELDATA_ROUNDTRIP_TIME           ChannelData = 0x1D
+	CHANNELDATA_BUS_TYPE                 ChannelData = 0x1E
+	CHANNELDATA_DEVNAME_ASCII            ChannelData = 0x1F
+	CHANNELDATA_TIME_SINCE_LAST_SEEN     ChannelData = 0x20
+	CHANNELDATA_REMOTE_OPERATIONAL_MODE  ChannelData = 0x21
+	CHANNELDATA_REMOTE_PROFILE_NAME      ChannelData = 0x22
+	CHANNELDATA_REMOTE_HOST_NAME         ChannelData = 0x23
+	CHANNELDATA_REMOTE_MAC               ChannelData = 0x24
+	CHANNELDATA_MAX_BITRATE              ChannelData = 0x25
+	CHANNELDATA_CHANNEL_CAP_MASK         ChannelData = 0x26
+	CHANNELDATA_CUST_CHANNEL_NAME        ChannelData = 0x27
+	CHANNELDATA_IS_REMOTE                ChannelData = 0x28
+	CHANNELDATA_REMOTE_TYPE              ChannelData = 0x29
+	CHANNELDATA_LOGGER_TYPE              ChannelData = 0x2A
+	CHANNELDATA_HW_STATUS                ChannelData = 0x2B
+	CHANNELDATA_FEATURE_EAN              ChannelData = 0x2C
+	CHANNELDATA_BUS_PARAM_LIMITS         ChannelData = 0x2D
+	CHANNELDATA_CLOCK_INFO               ChannelData = 0x2E
+	CHANNELDATA_CHANNEL_CAP_EX           ChannelData = 0x2F
 )
 
 // This function can be used to retrieve certain pieces of information about a channel.
-func GetChannelDataString(channel int, item ChannelDataItem) (string, error) {
+func GetChannelDataString(channel int, item ChannelData) (string, error) {
+	data, err := GetChannelDataBytes(channel, item)
+	return cBytetoString(data), err
+}
+
+func GetChannelDataBytes(channel int, item ChannelData) ([]byte, error) {
 	data := make([]byte, 256)
 	r1, _, _ := procGetChannelData.Call(uintptr(channel), uintptr(item), uintptr(unsafe.Pointer(&data[0])), uintptr(len(data)))
-	return cBytetoString(data), NewError(int32(r1))
+	return data, NewError(int32(r1))
 }
 
 type OpenFlag int32
@@ -308,10 +320,10 @@ func (hnd Handle) SetBusParamsC200(btr0, btr1 uint8) error {
 type DriverType uint32
 
 const (
-	DRIVER_NORMAL        DriverType = 0x04
-	DRIVER_SILENT        DriverType = 0x01
-	DRIVER_SELFRECEPTION DriverType = 0x08
 	DRIVER_OFF           DriverType = 0x00
+	DRIVER_SILENT        DriverType = 0x01
+	DRIVER_NORMAL        DriverType = 0x04
+	DRIVER_SELFRECEPTION DriverType = 0x08
 )
 
 // This function sets the driver type for a CAN controller.
@@ -331,8 +343,9 @@ func (hnd Handle) ReadErrorCounters() (uint32, uint32, uint32, error) {
 }
 
 func (hnd Handle) Read() (*CANMessage, error) {
-	msg := new(CANMessage)
-	msg.Data = make([]byte, 64)
+	msg := &CANMessage{
+		Data: make([]byte, 64),
+	}
 	r1, _, _ := procRead.Call(uintptr(hnd), uintptr(unsafe.Pointer(&msg.Identifier)), uintptr(unsafe.Pointer(&msg.Data[0])), uintptr(unsafe.Pointer(&msg.DLC)), uintptr(unsafe.Pointer(&msg.Flags)), uintptr(unsafe.Pointer(&msg.Timestamp)))
 	if err := NewError(int32(r1)); err != nil {
 		return nil, err
@@ -342,8 +355,9 @@ func (hnd Handle) Read() (*CANMessage, error) {
 
 // Reads a message from the receive buffer. If no message is available, the function waits until a message arrives or a timeout occurs.
 func (hnd Handle) ReadWait(timeout uint32) (*CANMessage, error) {
-	msg := new(CANMessage)
-	msg.Data = make([]byte, 64)
+	msg := &CANMessage{
+		Data: make([]byte, 64),
+	}
 	r1, _, _ := procReadWait.Call(uintptr(hnd), uintptr(unsafe.Pointer(&msg.Identifier)), uintptr(unsafe.Pointer(&msg.Data[0])), uintptr(unsafe.Pointer(&msg.DLC)), uintptr(unsafe.Pointer(&msg.Flags)), uintptr(unsafe.Pointer(&msg.Timestamp)), uintptr(timeout))
 	if err := NewError(int32(r1)); err != nil {
 		return nil, err
@@ -367,30 +381,6 @@ func (hnd Handle) WriteWait(identifier uint32, data []byte, flags MsgFlag, timeo
 	return checkErr(procWriteWait.Call(uintptr(hnd), uintptr(identifier), uintptr(unsafe.Pointer(&data[0])), uintptr(len(data)), uintptr(flags), uintptr(timeoutMS)))
 }
 
-func GetErrorText(status int) (string, error) {
-	err := make([]byte, 64)
-	r1, _, _ := procGetErrorText.Call(uintptr(status), uintptr(unsafe.Pointer(&err[0])), uintptr(len(err)))
-	if int32(r1) < int32(ERR_OK) {
-		return "", fmt.Errorf("unable to get description for error code %v (%v)", status, int32(r1))
-	}
-	return cBytetoString(err), nil
-}
-
-func GetChannelDataBytes(channel int, item ChannelDataItem) ([]byte, error) {
-	data := make([]byte, 256)
-	r1, _, _ := procGetChannelData.Call(uintptr(channel), uintptr(item), uintptr(unsafe.Pointer(&data[0])), uintptr(len(data)))
-	return data, NewError(int32(r1))
-}
-
-func cBytetoString(data []byte) string {
-	for i, b := range data {
-		if b == 0 {
-			return string(data[:i])
-		}
-	}
-	return string(data)
-}
-
 type NotifyFlag uint32
 
 const (
@@ -407,17 +397,30 @@ const (
 type NotifyCallback func(hnd int32, ctx uintptr, event NotifyFlag) uintptr
 
 func (hnd Handle) SetNotifyCallback(cb NotifyCallback, flags NotifyFlag) error {
-	if cb == nil {
-		log.Println("Setting callback to nil")
-		r1, _, _ := prockvSetNotifyCallback.Call(uintptr(hnd), 0, 0, uintptr(flags))
-		return NewError(int32(r1))
+	if cb != nil {
+		return checkErr(prockvSetNotifyCallback.Call(uintptr(hnd), syscall.NewCallback(cb), 0, uintptr(flags)))
 	}
-	return checkErr(prockvSetNotifyCallback.Call(uintptr(hnd), syscall.NewCallback(cb), 0, uintptr(flags)))
+	return checkErr(prockvSetNotifyCallback.Call(uintptr(hnd), 0, 0, uintptr(flags)))
+}
+
+func GetErrorText(status int) (string, error) {
+	err := make([]byte, 64)
+	r1, _, _ := procGetErrorText.Call(uintptr(status), uintptr(unsafe.Pointer(&err[0])), uintptr(len(err)))
+	if int32(r1) < int32(ERR_OK) {
+		return "", fmt.Errorf("unable to get description for error code %v (%v)", status, int32(r1))
+	}
+	return cBytetoString(err), nil
+}
+
+func cBytetoString(data []byte) string {
+	for i, b := range data {
+		if b == 0 {
+			return string(data[:i])
+		}
+	}
+	return string(data)
 }
 
 func checkErr(r1, _ uintptr, _ error) error {
-	if r1 != 0 {
-		return fmt.Errorf("error code: %d", r1)
-	}
 	return NewError(int32(r1))
 }

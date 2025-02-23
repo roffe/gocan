@@ -25,7 +25,6 @@ import (
 )
 
 var (
-	_          gocan.Adapter = (*Client)(nil)
 	socketFile string
 	kacp       = keepalive.ClientParameters{
 		Time:                10 * time.Second, // send pings every 10 seconds if there is no activity
@@ -39,6 +38,8 @@ func init() {
 		socketFile = filepath.Join(cacheDir, "gocan.sock")
 	}
 }
+
+var _ gocan.Adapter = (*Client)(nil)
 
 type Client struct {
 	BaseAdapter
@@ -92,7 +93,7 @@ func NewGRPCClient() (*grpc.ClientConn, proto.GocanClient, error) {
 	return conn, proto.NewGocanClient(conn), nil
 }
 
-func (c *Client) Connect(gctx context.Context) error {
+func (c *Client) Open(gctx context.Context) error {
 	conn, cl, err := NewGRPCClient()
 	if err != nil {
 		return fmt.Errorf("could not connect to GoCAN Gateway: %w", err)

@@ -16,11 +16,11 @@ import (
 )
 
 func init() {
-	if err := Register(&AdapterInfo{
+	if err := gocan.RegisterAdapter(&gocan.AdapterInfo{
 		Name:               "txbridge wifi",
 		Description:        "txbridge over wifi",
 		RequiresSerialPort: false,
-		Capabilities: AdapterCapabilities{
+		Capabilities: gocan.AdapterCapabilities{
 			HSCAN: true,
 			KLine: false,
 			SWCAN: false,
@@ -30,11 +30,11 @@ func init() {
 		panic(err)
 	}
 
-	if err := Register(&AdapterInfo{
+	if err := gocan.RegisterAdapter(&gocan.AdapterInfo{
 		Name:               "txbridge bluetooth",
 		Description:        "txbridge over bluetooth",
 		RequiresSerialPort: false,
-		Capabilities: AdapterCapabilities{
+		Capabilities: gocan.AdapterCapabilities{
 			HSCAN: true,
 			KLine: false,
 			SWCAN: false,
@@ -58,7 +58,7 @@ func NewTxbridge(name string) func(cfg *gocan.AdapterConfig) (gocan.Adapter, err
 	}
 }
 
-func (tx *Txbridge) Connect(ctx context.Context) error {
+func (tx *Txbridge) Open(ctx context.Context) error {
 	switch tx.name {
 	case "txbridge wifi":
 		d := net.Dialer{Timeout: 2 * time.Second}
@@ -260,11 +260,9 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 			}
 
 			if cmdbuffPtr == commandSize {
-				db := make([]byte, len(cmdbuff[:cmdbuffPtr]))
-				copy(db, cmdbuff[:cmdbuffPtr])
 				cmd := &serialcommand.SerialCommand{
 					Command: command,
-					Data:    db,
+					Data:    append([]byte(nil), cmdbuff[:cmdbuffPtr]...),
 				}
 				if commandChecksum != b {
 					tx.cfg.OnMessage(fmt.Sprintf("checksum error %q %02X != %02X", cmd.Command, commandChecksum, b))
@@ -333,7 +331,7 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 				select {
 				case tx.recvChan <- frame:
 				default:
-					tx.cfg.OnMessage(ErrDroppedFrame.Error())
+					tx.cfg.OnMessage(gocan.ErrDroppedFrame.Error())
 				}
 
 				cmdbuffPtr = 0
@@ -402,12 +400,9 @@ func readSerialCommand(port io.Reader, timeout time.Duration) (*serialcommand.Se
 					return nil, fmt.Errorf("checksum error: expected %02X, got %02X", b, commandChecksum)
 				}
 
-				data := make([]byte, cmdbuffPtr)
-				copy(data, cmdbuff[:cmdbuffPtr])
-
 				return &serialcommand.SerialCommand{
 					Command: command,
-					Data:    data,
+					Data:    append([]byte(nil), cmdbuff[:cmdbuffPtr]...),
 				}, nil
 			}
 

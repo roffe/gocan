@@ -16,11 +16,11 @@ import (
 )
 
 func init() {
-	if err := Register(&AdapterInfo{
+	if err := gocan.RegisterAdapter(&gocan.AdapterInfo{
 		Name:               "CANUSB VCP",
 		Description:        "Lawicell CANUSB",
 		RequiresSerialPort: true,
-		Capabilities: AdapterCapabilities{
+		Capabilities: gocan.AdapterCapabilities{
 			HSCAN: true,
 			KLine: false,
 			SWCAN: true,
@@ -62,7 +62,7 @@ func (cu *CanusbVCP) SetFilter(filters []uint32) error {
 	return nil
 }
 
-func (cu *CanusbVCP) Connect(ctx context.Context) error {
+func (cu *CanusbVCP) Open(ctx context.Context) error {
 	mode := &serial.Mode{
 		BaudRate: cu.cfg.PortBaudrate,
 		Parity:   serial.NoParity,
@@ -286,7 +286,7 @@ func (cu *CanusbVCP) parse(data []byte) {
 			select {
 			case cu.recvChan <- f:
 			default:
-				cu.SetError(ErrDroppedFrame)
+				cu.SetError(gocan.ErrDroppedFrame)
 			}
 			cu.buff.Reset()
 		case 'T':
@@ -299,7 +299,7 @@ func (cu *CanusbVCP) parse(data []byte) {
 			select {
 			case cu.recvChan <- f:
 			default:
-				cu.cfg.OnMessage(ErrDroppedFrame.Error())
+				cu.cfg.OnMessage(gocan.ErrDroppedFrame.Error())
 			}
 			cu.buff.Reset()
 		case 'z': // last command ok

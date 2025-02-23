@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/roffe/gocan"
-	"github.com/roffe/gocan/adapter"
 	"github.com/roffe/gocan/proto"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
@@ -120,7 +119,7 @@ func (s *Server) Stream(srv grpc.BidiStreamingServer[proto.CANFrame, proto.CANFr
 	//		}
 	//	}
 
-	dev, err := adapter.New(adaptername, adapterConfig)
+	dev, err := gocan.NewAdapter(adaptername, adapterConfig)
 	if err != nil {
 		return fmt.Errorf("failed to create adapter: %w", err)
 	}
@@ -128,7 +127,7 @@ func (s *Server) Stream(srv grpc.BidiStreamingServer[proto.CANFrame, proto.CANFr
 	errg, ctx := errgroup.WithContext(gctx)
 
 	log.Printf("connecting to %s", adaptername)
-	if err := dev.Connect(ctx); err != nil {
+	if err := dev.Open(ctx); err != nil {
 		return fmt.Errorf("failed to create client: %w", err)
 	}
 	defer dev.Close()
@@ -260,7 +259,7 @@ func (s *Server) GetAdapters(ctx context.Context, _ *emptypb.Empty) (*proto.Adap
 	//	log.Printf("metadata: %s: %v", k, v)
 	//}
 	var adapters []*proto.AdapterInfo
-	for _, a := range adapter.GetAdapterMap() {
+	for _, a := range gocan.GetAdapterMap() {
 		adapter := &proto.AdapterInfo{
 			Name:        &a.Name,
 			Description: &a.Description,

@@ -16,7 +16,7 @@ func NewTemplate(name string, cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	}, nil
 }
 
-func (a *Template) Connect(ctx context.Context) error {
+func (a *Template) Open(ctx context.Context) error {
 	return nil
 }
 

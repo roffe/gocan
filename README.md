@@ -73,7 +73,6 @@ func main() {
 		"J2534",
 		&gocan.AdapterConfig{
 			Port:         `C:\Program Files (x86)\Drew Technologies, Inc\J2534\MongoosePro GM II\monpa432.dll`,
-			PortBaudrate: 0,
 			CANRate:      33.3,
 			CANFilter:    []uint32{0x64F},
 		},

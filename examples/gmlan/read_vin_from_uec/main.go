@@ -5,12 +5,11 @@ import (
 	"log"
 
 	"github.com/roffe/gocan"
-	"github.com/roffe/gocan/adapter"
 	"github.com/roffe/gocan/pkg/gmlan"
 )
 
 func main() {
-	dev, err := adapter.New(
+	dev, err := gocan.NewAdapter(
 		"J2534",
 		&gocan.AdapterConfig{
 			Port:         `C:\Program Files (x86)\Drew Technologies, Inc\J2534\MongoosePro GM II\monpa432.dll`,

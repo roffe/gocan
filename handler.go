@@ -50,8 +50,8 @@ func (s *Sub) Wait(ctx context.Context, timeout time.Duration) (*CANFrame, error
 	}
 }
 
-// FrameHandler takes care of faning out incoming frames to any subs
-type FrameHandler struct {
+// Handler takes care of faning out incoming frames to any subs
+type Handler struct {
 	adapter    Adapter
 	subs       map[*Sub]bool
 	register   chan *Sub
@@ -60,8 +60,8 @@ type FrameHandler struct {
 	closeOnce  sync.Once
 }
 
-func newFrameHandler(adapter Adapter) *FrameHandler {
-	f := &FrameHandler{
+func newHandler(adapter Adapter) *Handler {
+	f := &Handler{
 		subs:       make(map[*Sub]bool),
 		register:   make(chan *Sub, 40),
 		unregister: make(chan *Sub, 40),
@@ -71,7 +71,7 @@ func newFrameHandler(adapter Adapter) *FrameHandler {
 	return f
 }
 
-func (h *FrameHandler) run(ctx context.Context) {
+func (h *Handler) run(ctx context.Context) {
 	defer func() {
 		for sub := range h.subs {
 			delete(h.subs, sub)
@@ -109,13 +109,13 @@ func (h *FrameHandler) run(ctx context.Context) {
 	}
 }
 
-func (h *FrameHandler) Close() {
+func (h *Handler) Close() {
 	h.closeOnce.Do(func() {
 		close(h.close)
 	})
 }
 
-func (h *FrameHandler) processFrame(frame *CANFrame) {
+func (h *Handler) processFrame(frame *CANFrame) {
 	for sub := range h.subs {
 		select {
 		case <-sub.ctx.Done():
@@ -133,7 +133,7 @@ func (h *FrameHandler) processFrame(frame *CANFrame) {
 	}
 }
 
-func (h *FrameHandler) deliver(sub *Sub, frame *CANFrame) {
+func (h *Handler) deliver(sub *Sub, frame *CANFrame) {
 	select {
 	case sub.responseChan <- frame:
 	default:

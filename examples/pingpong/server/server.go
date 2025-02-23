@@ -8,7 +8,6 @@ import (
 	"syscall"
 
 	"github.com/roffe/gocan"
-	"github.com/roffe/gocan/adapter"
 )
 
 func init() {
@@ -23,7 +22,7 @@ func main() {
 	sigChan := make(chan os.Signal, 2)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
-	dev, err := adapter.New("CANUSB", &gocan.AdapterConfig{
+	dev, err := gocan.NewAdapter("CANUSB", &gocan.AdapterConfig{
 		Port:         "COM11",
 		PortBaudrate: 2000000,
 		CANRate:      500,
@@ -48,7 +47,7 @@ func main() {
 			cancel()
 		case frame := <-sub.Chan():
 			log.Println(frame.String())
-			err := cl.SendFrame(0x124, []byte("pong"), gocan.Outgoing)
+			err := cl.Send(0x124, []byte("pong"), gocan.Outgoing)
 			if err != nil {
 				log.Println(err)
 			}

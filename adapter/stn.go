@@ -28,11 +28,11 @@ const (
 )
 
 func init() {
-	if err := Register(&AdapterInfo{
+	if err := gocan.RegisterAdapter(&gocan.AdapterInfo{
 		Name:               OBDLinkSX,
 		Description:        OBDLinkSX,
 		RequiresSerialPort: true,
-		Capabilities: AdapterCapabilities{
+		Capabilities: gocan.AdapterCapabilities{
 			HSCAN: true,
 			KLine: false,
 			SWCAN: false,
@@ -41,11 +41,11 @@ func init() {
 	}); err != nil {
 		panic(err)
 	}
-	if err := Register(&AdapterInfo{
+	if err := gocan.RegisterAdapter(&gocan.AdapterInfo{
 		Name:               OBDLinkEX,
 		Description:        OBDLinkEX,
 		RequiresSerialPort: true,
-		Capabilities: AdapterCapabilities{
+		Capabilities: gocan.AdapterCapabilities{
 			HSCAN: true,
 			KLine: false,
 			SWCAN: false,
@@ -54,11 +54,11 @@ func init() {
 	}); err != nil {
 		panic(err)
 	}
-	if err := Register(&AdapterInfo{
+	if err := gocan.RegisterAdapter(&gocan.AdapterInfo{
 		Name:               STN1170,
 		Description:        "ScanTool.net STN1170 based adapter",
 		RequiresSerialPort: true,
-		Capabilities: AdapterCapabilities{
+		Capabilities: gocan.AdapterCapabilities{
 			HSCAN: true,
 			KLine: true,
 			SWCAN: true,
@@ -67,11 +67,11 @@ func init() {
 	}); err != nil {
 		panic(err)
 	}
-	if err := Register(&AdapterInfo{
+	if err := gocan.RegisterAdapter(&gocan.AdapterInfo{
 		Name:               STN2120,
 		Description:        "ScanTool.net STN2120 based adapter",
 		RequiresSerialPort: true,
-		Capabilities: AdapterCapabilities{
+		Capabilities: gocan.AdapterCapabilities{
 			HSCAN: true,
 			KLine: true,
 			SWCAN: true,
@@ -134,7 +134,7 @@ func (stn *STN) SetFilter(filters []uint32) error {
 	return nil
 }
 
-func (stn *STN) Connect(ctx context.Context) error {
+func (stn *STN) Open(ctx context.Context) error {
 	mode := &serial.Mode{
 		BaudRate: stn.cfg.PortBaudrate,
 		Parity:   serial.NoParity,
@@ -439,7 +439,7 @@ func (stn *STN) recvManager(ctx context.Context) {
 					select {
 					case stn.recvChan <- f:
 					default:
-						stn.cfg.OnMessage(ErrDroppedFrame.Error())
+						stn.cfg.OnMessage(gocan.ErrDroppedFrame.Error())
 					}
 					buff.Reset()
 				}

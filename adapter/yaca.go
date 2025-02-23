@@ -15,11 +15,11 @@ import (
 )
 
 func init() {
-	if err := Register(&AdapterInfo{
+	if err := gocan.RegisterAdapter(&gocan.AdapterInfo{
 		Name:               "YACA",
 		Description:        "Yet Another CANBus Adapter",
 		RequiresSerialPort: true,
-		Capabilities: AdapterCapabilities{
+		Capabilities: gocan.AdapterCapabilities{
 			HSCAN: true,
 			KLine: false,
 			SWCAN: true,
@@ -53,7 +53,7 @@ func (ya *YACA) SetFilter(filters []uint32) error {
 	return nil
 }
 
-func (ya *YACA) Connect(ctx context.Context) error {
+func (ya *YACA) Open(ctx context.Context) error {
 	mode := &serial.Mode{
 		BaudRate: ya.cfg.PortBaudrate,
 		Parity:   serial.NoParity,
@@ -184,7 +184,7 @@ func (ya *YACA) parse(ctx context.Context, buff *bytes.Buffer, readBuffer []byte
 				select {
 				case ya.recvChan <- f:
 				default:
-					ya.cfg.OnMessage(ErrDroppedFrame.Error())
+					ya.SetError(gocan.ErrDroppedFrame)
 				}
 				buff.Reset()
 			case 0x07: // bell, last command was unknown

@@ -21,11 +21,11 @@ type SLCan struct {
 }
 
 func init() {
-	if err := Register(&AdapterInfo{
+	if err := gocan.RegisterAdapter(&gocan.AdapterInfo{
 		Name:               "SLCan",
 		Description:        "Canable SLCan adapter",
 		RequiresSerialPort: true,
-		Capabilities: AdapterCapabilities{
+		Capabilities: gocan.AdapterCapabilities{
 			HSCAN: true,
 			KLine: false,
 			SWCAN: false,
@@ -43,7 +43,7 @@ func NewSLCan(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	return sl, nil
 }
 
-func (sl *SLCan) Connect(ctx context.Context) error {
+func (sl *SLCan) Open(ctx context.Context) error {
 	mode := &serial.Mode{
 		BaudRate: sl.cfg.PortBaudrate,
 		Parity:   serial.NoParity,
@@ -194,7 +194,7 @@ func (sl *SLCan) parse(ctx context.Context, buff *bytes.Buffer, readBuffer []byt
 				case <-ctx.Done():
 					return
 				default:
-					sl.cfg.OnMessage(ErrDroppedFrame.Error())
+					sl.SetError(gocan.ErrDroppedFrame)
 				}
 			} else {
 				sl.cfg.OnMessage("Unknown>> " + buff.String())

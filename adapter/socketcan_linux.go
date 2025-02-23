@@ -57,7 +57,7 @@ func NewSocketCAN(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	}, nil
 }
 
-func (a *SocketCAN) Connect(ctx context.Context) error {
+func (a *SocketCAN) Open(ctx context.Context) error {
 	var err error = nil
 	a.d, err = candevice.New(a.cfg.Port)
 	if err != nil {

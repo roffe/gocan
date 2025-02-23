@@ -85,7 +85,7 @@ func FindDevice() bool {
 	return true
 }
 
-func (a *Combi) Connect(ctx context.Context) error {
+func (a *Combi) Open(ctx context.Context) error {
 	a.usbCtx = gousb.NewContext()
 
 	var err error

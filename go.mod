@@ -1,6 +1,7 @@
 module github.com/roffe/gocan
 
 // replace github.com/roffe/gocanusb => ..\gocanusb
+
 // replace github.com/roffe/gocanlib => ..\gocanlib
 
 go 1.24.0
@@ -17,11 +18,9 @@ require (
 	google.golang.org/protobuf v1.36.5
 )
 
-require github.com/roffe/gocanlib v1.0.2
-
 require (
 	github.com/mattn/go-colorable v0.1.14 // indirect
-	github.com/roffe/gocanusb v1.0.2
+	github.com/roffe/gocanusb v1.0.3
 	github.com/stretchr/testify v1.8.0 // indirect
 	golang.org/x/text v0.22.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250207221924-e9438ea467c6 // indirect

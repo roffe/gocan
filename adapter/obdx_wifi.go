@@ -14,11 +14,11 @@ import (
 )
 
 func init() {
-	if err := Register(&AdapterInfo{
+	if err := gocan.RegisterAdapter(&gocan.AdapterInfo{
 		Name:               "OBDX Pro Wifi",
 		Description:        "OBDX Pro Wifi",
 		RequiresSerialPort: false,
-		Capabilities: AdapterCapabilities{
+		Capabilities: gocan.AdapterCapabilities{
 			HSCAN: true,
 			KLine: true,
 			SWCAN: true,
@@ -51,7 +51,7 @@ func (a *OBDXProWifi) SetFilter(filters []uint32) error {
 	return nil
 }
 
-func (a *OBDXProWifi) Connect(ctx context.Context) error {
+func (a *OBDXProWifi) Open(ctx context.Context) error {
 
 	if err := a.SetFilter(a.cfg.CANFilter); err != nil {
 		return err

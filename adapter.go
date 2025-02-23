@@ -1,28 +1,31 @@
-package adapter
+package gocan
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
-
-	"github.com/roffe/gocan"
 )
 
-var (
-	ErrDroppedFrame = fmt.Errorf("incoming buffer full")
-
-	adapterMap = make(map[string]*AdapterInfo)
-)
+type Adapter interface {
+	Name() string
+	Open(context.Context) error
+	Close() error
+	Send() chan<- *CANFrame
+	Recv() <-chan *CANFrame
+	Err() <-chan error
+	//SetFilter([]uint32) error
+}
 
 type AdapterInfo struct {
 	Name               string
 	Description        string
 	Capabilities       AdapterCapabilities
 	RequiresSerialPort bool
-	New                func(*gocan.AdapterConfig) (gocan.Adapter, error)
+	New                func(*AdapterConfig) (Adapter, error)
 }
 
 type AdapterCapabilities struct {
@@ -31,7 +34,21 @@ type AdapterCapabilities struct {
 	KLine bool
 }
 
-func New(adapterName string, cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
+type AdapterConfig struct {
+	Debug                  bool
+	Port                   string
+	PortBaudrate           int
+	CANRate                float64
+	CANFilter              []uint32
+	UseExtendedID          bool
+	PrintVersion           bool
+	OnMessage              func(string)
+	MinimumFirmwareVersion string
+}
+
+var adapterMap = make(map[string]*AdapterInfo)
+
+func NewAdapter(adapterName string, cfg *AdapterConfig) (Adapter, error) {
 	if cfg.OnMessage == nil {
 		cfg.OnMessage = func(msg string) {
 			_, file, no, ok := runtime.Caller(1)
@@ -60,7 +77,7 @@ func New(adapterName string, cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	return nil, fmt.Errorf("unknown adapter %q", adapterName)
 }
 
-func Register(adapter *AdapterInfo) error {
+func RegisterAdapter(adapter *AdapterInfo) error {
 	//log.Println("Registering adapter", adapter.Name)
 	if _, found := adapterMap[adapter.Name]; !found {
 		adapterMap[adapter.Name] = adapter

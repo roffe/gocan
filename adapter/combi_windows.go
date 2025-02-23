@@ -3,6 +3,7 @@
 package adapter
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -17,13 +18,67 @@ import (
 )
 
 const (
-	combiVid              = 0xFFFF
-	combiPid              = 0x0005
-	combiCmdtxFrame       = 0x83
-	combiCmdrxFrame       = 0x82
-	combiCmdSetCanBitrate = 0x81
-	combiCmdOpen          = 0x80
-	combiCmdVersion       = 0x20
+	combiVid = 0xFFFF
+	combiPid = 0x0005
+)
+
+var (
+	ErrInvalidCommand      = errors.New("invalid command")
+	ErrCommandSizeTooLarge = errors.New("command size too large")
+	ErrCommandTermination  = errors.New("command terminated with NAK")
+)
+
+const (
+	MaxCommandSize = 1024
+	ReadBufferSize = 32
+	TermNAK        = 0xff
+	TermACK        = 0x00
+)
+
+const (
+	term_ack = 0x00 ///< command acknowledged
+	term_nak = 0xff ///< command failed
+
+	cmd_brd_fwversion = 0x20 ///< firmware version
+	cmd_brd_adcfilter = 0x21 ///< ADC filter settings
+	cmd_brd_adc       = 0x22 ///< ADC value
+	cmd_brd_egt       = 0x23 ///< EGT value
+
+	cmd_bdm_stop        = 0x40 ///< stop chip
+	cmd_bdm_reset       = 0x41 ///< reset chip
+	cmd_bdm_run         = 0x42 ///< run from given address
+	cmd_bdm_step        = 0x43 ///< step chip
+	cmd_bdm_restart     = 0x44 ///< restart
+	cmd_bdm_readmem     = 0x45 ///< read memory
+	cmd_bdm_writemem    = 0x46 ///< write memory
+	cmd_bdm_readsysreg  = 0x47 ///< read system register
+	cmd_bdm_writesysreg = 0x48 ///< write system register
+	cmd_bdm_readadreg   = 0x49 ///< read A/D register
+	cmd_bdm_writeadreg  = 0x4a ///< write A/D register
+	cmd_bdm_readflash   = 0x4b ///< read ECU flash
+	cmd_bdm_eraseflash  = 0x4c ///< erase ECU flash
+	cmd_bdm_writeflash  = 0x4d ///< write ECU flash
+	cmd_bdm_pinstate    = 0x4e ///< BDM pin state
+
+	cmd_can_open       = 0x80 ///< open/close CAN channel
+	cmd_can_bitrate    = 0x81 ///< set bitrate
+	cmd_can_frame      = 0x82 ///< incoming frame
+	cmd_can_txframe    = 0x83 ///< outgoing frame
+	cmd_can_ecuconnect = 0x89 ///< connect / disconnect ECU
+	cmd_can_readflash  = 0x8a ///< read ECU flash
+	cmd_can_writeflash = 0x8b ///< write ECU flash
+
+	cmd_mw_readall  = 0xa0
+	cmd_mw_writeall = 0xa1
+	cmd_mw_eraseall = 0xa2
+)
+
+const (
+	stepCommand = iota
+	stepSizeHigh
+	stepSizeLow
+	stepData
+	stepTermination
 )
 
 type CombiAdapter struct {
@@ -107,11 +162,11 @@ func init() {
 	//	return
 	//}
 	//defer dev.Close()
-	if err := Register(&AdapterInfo{
+	if err := gocan.RegisterAdapter(&gocan.AdapterInfo{
 		Name:               "CombiAdapter",
 		Description:        "libusb windows driver",
 		RequiresSerialPort: false,
-		Capabilities: AdapterCapabilities{
+		Capabilities: gocan.AdapterCapabilities{
 			HSCAN: true,
 			KLine: false,
 			SWCAN: false,
@@ -138,7 +193,7 @@ func (ca *CombiAdapter) SetFilter(filters []uint32) error {
 	return nil
 }
 
-func (ca *CombiAdapter) Connect(ctx context.Context) error {
+func (ca *CombiAdapter) Open(ctx context.Context) error {
 	var err error
 	ca.usbCtx = gousb.NewContext()
 	ca.dev, err = ca.usbCtx.OpenDeviceWithVIDPID(combiVid, combiPid)
@@ -216,8 +271,8 @@ func (ca *CombiAdapter) Connect(ctx context.Context) error {
 		return fmt.Errorf("failed to close canbus: %w", err)
 	}
 
-	dump := make([]byte, 38)
-	ca.in.Read(dump)
+	dump := make([]byte, 1024)
+	ca.in.ReadContext(ctx, dump)
 
 	if ca.cfg.PrintVersion {
 		if ver, err := ca.ReadVersion(ctx); err == nil {
@@ -234,6 +289,7 @@ func (ca *CombiAdapter) Connect(ctx context.Context) error {
 		return err
 	}
 	// Open can-bus
+	ca.sendSem <- struct{}{}
 	if err := ca.canCtrl(1); err != nil {
 		ca.iface.Close()
 		ca.devCfg.Close()
@@ -251,9 +307,10 @@ func (ca *CombiAdapter) Connect(ctx context.Context) error {
 func (ca *CombiAdapter) canCtrl(mode byte) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-	if _, err := ca.out.WriteContext(ctx, []byte{combiCmdOpen, 0, 1, mode, 0}); err != nil {
+	if _, err := ca.out.WriteContext(ctx, []byte{cmd_can_open, 0x00, 0x01, mode, 0x00}); err != nil {
 		return fmt.Errorf("failed to write to usb device: %w", err)
 	}
+
 	return nil
 }
 
@@ -267,6 +324,7 @@ func (ca *CombiAdapter) Close() error {
 }
 
 func (ca *CombiAdapter) closeAdapter() error {
+	ca.sendSem <- struct{}{}
 	if err := ca.canCtrl(0); err != nil {
 		ca.cfg.OnMessage(fmt.Sprintf("failed to close canbus: %v", err))
 	}
@@ -294,10 +352,25 @@ func (ca *CombiAdapter) closeAdapter() error {
 	return nil
 }
 
+var combiValidCommands = map[byte]struct{}{
+	cmd_brd_fwversion: {},
+	cmd_can_open:      {},
+	cmd_can_bitrate:   {},
+	cmd_can_frame:     {},
+	cmd_can_txframe:   {},
+}
+
 func (ca *CombiAdapter) recvManager(ctx context.Context) {
 	if ca.cfg.Debug {
 		defer log.Println("recvManager exited")
 	}
+	var readBuff [ReadBufferSize * 4]byte
+	var parseStep int
+	var command byte
+	var commandSize uint16
+	var commandData [MaxCommandSize]byte
+	var commandPointer uint16
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -305,101 +378,104 @@ func (ca *CombiAdapter) recvManager(ctx context.Context) {
 		case <-ca.closeChan:
 			return
 		default:
-			buff := make([]byte, 19)
-			n, err := ca.in.ReadContext(ctx, buff)
+			n, err := ca.in.ReadContext(ctx, readBuff[:])
 			if err != nil {
 				if ctx.Err() != nil {
 					return
 				}
-				ca.cfg.OnMessage(fmt.Sprintf("failed to read from usb device: %v", err))
-				//ca.cfg.OnError(fmt.Errorf("failed to read from usb device: %w", err))
+				//ca.cfg.OnMessage(fmt.Sprintf("failed to read from usb device: %v", err))
+				ca.SetError(fmt.Errorf("failed to read from usb device: %w", err))
 				if n == 0 {
 					continue
 				}
 			}
-			if err := ca.parseCMD(buff[:n]); err != nil {
-				ca.cfg.OnMessage(fmt.Sprintf("failed to parse command: %v", err))
-				continue
+			for _, b := range readBuff[:n] {
+				switch parseStep {
+				case stepCommand:
+					_, valid := combiValidCommands[b]
+					if !valid {
+						ca.SetError(fmt.Errorf("%w: %02X", ErrInvalidCommand, b))
+						parseStep = stepCommand // Explicit reset
+						continue
+					}
+					command = b
+					commandPointer = 0
+					commandSize = 0
+					parseStep++
+				case stepSizeHigh:
+					commandSize = uint16(b) << 8
+					parseStep++
+				case stepSizeLow:
+					commandSize |= uint16(b)
+					if commandSize >= 1024 {
+						ca.SetError(fmt.Errorf("command size too large: %d", commandSize))
+						parseStep = stepCommand
+						continue
+					}
+					if commandSize == 0 {
+						parseStep = stepTermination
+					} else {
+						parseStep = stepData
+					}
+				case stepData:
+					commandData[commandPointer] = b
+					commandPointer++
+					if commandPointer >= commandSize {
+						parseStep = stepTermination
+					}
+				case stepTermination:
+					commandData[commandPointer] = b
+					commandPointer++
+					if err := ca.processCommand(command, commandData[:commandPointer]); err != nil {
+						ca.SetError(fmt.Errorf("failed to process command: %w", err))
+					}
+					parseStep = stepCommand
+				}
 			}
 		}
 	}
 }
 
-func (ca *CombiAdapter) parseCMD(data []byte) error {
-	// Append any partial command from previous call
-	if len(ca.cmdBuffer) > 0 {
-		data = append(ca.cmdBuffer, data...)
-		ca.cmdBuffer = nil
+func (ca *CombiAdapter) processCommand(cmd byte, data []byte) error {
+	// log.Printf("cmd: %02X, data: %X", cmd, data)
+	switch cmd {
+	case cmd_brd_fwversion, cmd_can_open, cmd_can_bitrate, cmd_can_txframe:
+		return ca.handleControlCommand(cmd, data)
+	case cmd_can_frame:
+		return ca.handleCANFrame(data)
+	default:
+		return fmt.Errorf("%w: %02X", ErrInvalidCommand, cmd)
 	}
+}
 
-	// Process complete commands
-	for len(data) > 0 {
-		// Ensure we have enough data for the command header (command + size fields)
-		if len(data) < 3 {
-			ca.cmdBuffer = data
-			return nil
-		}
-
-		// Get command size
-		cmdSize := binary.BigEndian.Uint16(data[1:3])
-		totalSize := int(cmdSize) + 4 // cmd(1) + size(2) + data(cmdSize) + terminator(1)
-
-		// Check if we have a complete command
-		if len(data) < totalSize {
-			ca.cmdBuffer = data
-			return nil
-		}
-
-		// Process the complete command
-		if err := ca.processCommand(data[0], cmdSize, data[3:3+cmdSize]); err != nil {
-			ca.cfg.OnMessage(fmt.Sprintf("failed to process command: %v", err))
-		}
-
-		// Move to next command
-		data = data[totalSize:]
+func (ca *CombiAdapter) handleControlCommand(cmd byte, data []byte) error {
+	select {
+	case <-ca.sendSem:
+	default:
 	}
-
+	if data[0] == term_nak {
+		return fmt.Errorf("%w: command %02X", ErrCommandTermination, cmd)
+	}
 	return nil
 }
 
-// processCommand handles a complete command packet
-func (ca *CombiAdapter) processCommand(cmdType byte, size uint16, payload []byte) error {
-	switch cmdType {
-	case combiCmdtxFrame, combiCmdSetCanBitrate, combiCmdOpen, combiCmdVersion:
-		// Release send semaphore if any of these commands
-		select {
-		case <-ca.sendSem:
-		default:
-			// Already released, no need to block
-		}
-
-	case combiCmdrxFrame:
-		if len(payload) < 13 { // Ensure we have enough data
-			return fmt.Errorf("invalid rx frame payload size: %d", len(payload))
-		}
-
-		id := binary.LittleEndian.Uint32(payload[:4])
-		dlc := payload[12] // Data length is at offset 12
-		if int(dlc) > len(payload)-4 {
-			return fmt.Errorf("invalid data length: %d", dlc)
-		}
-
-		// Create new CAN frame from the payload
-		frame := gocan.NewFrame(
-			id,
-			payload[4:4+dlc],
-			gocan.Incoming,
-		)
-
-		// Send to receive channel, drop if full
-		select {
-		case ca.recvChan <- frame:
-		default:
-			ca.cfg.OnMessage(ErrDroppedFrame.Error())
-		}
+func (ca *CombiAdapter) handleCANFrame(data []byte) error {
+	if len(data) != 16 {
+		return fmt.Errorf("invalid CAN frame size: %d", len(data))
 	}
-
-	return nil
+	frame := gocan.NewFrame(
+		binary.LittleEndian.Uint32(data[:4]),
+		append([]byte(nil), data[4:4+data[12]]...),
+		gocan.Incoming,
+	)
+	frame.Extended = data[13] == 1
+	frame.RTR = data[14] == 1
+	select {
+	case ca.recvChan <- frame:
+		return nil
+	default:
+		return gocan.ErrDroppedFrame
+	}
 }
 
 func (ca *CombiAdapter) sendManager(ctx context.Context) {
@@ -413,29 +489,40 @@ func (ca *CombiAdapter) sendManager(ctx context.Context) {
 		case <-ca.closeChan:
 			return
 		case frame := <-ca.sendChan:
-			if frame.Identifier >= gocan.SystemMsg {
-				continue
-			}
 			ca.sendMessage(ctx, frame)
 		}
 	}
 }
 
 func (ca *CombiAdapter) sendMessage(ctx context.Context, frame *gocan.CANFrame) {
+	ca.sendSem <- struct{}{}
+	if frame.Identifier >= gocan.SystemMsg {
+		if frame.Identifier == gocan.SystemMsg {
+			if _, err := ca.out.WriteContext(ctx, frame.Data); err != nil {
+				ca.SetError(fmt.Errorf("failed to send frame: %w", err))
+			}
+		}
+		return
+	}
 	buff := ca.buffPool.Get().([]byte)
 	defer ca.buffPool.Put(buff)
-	buff[0] = combiCmdtxFrame
-	//buff[1] = 15 >> 8
-	//buff[2] = 15 & 0xff
+	var extended byte
+	if frame.Extended {
+		extended = 1
+	}
+	var rtr byte
+	if frame.RTR {
+		rtr = 1
+	}
+	buff[0] = cmd_can_txframe
 	buff[1] = 0x00
 	buff[2] = 0x0F
 	binary.LittleEndian.PutUint32(buff[3:], frame.Identifier)
-	copy(buff[7:], frame.Data)
+	copy(buff[7:], frame.Data[:min(frame.Length(), 8)])
 	buff[15] = uint8(frame.Length())
-	buff[16] = 0x00 // is extended
-	buff[17] = 0x00 // is remote
-	buff[18] = 0x00 // terminator
-	ca.sendSem <- struct{}{}
+	buff[16] = extended // is extended
+	buff[17] = rtr      // is remote
+	buff[18] = 0x00     // terminator
 	if _, err := ca.out.WriteContext(ctx, buff); err != nil {
 		ca.SetError(fmt.Errorf("failed to send frame: %w", err))
 	}
@@ -449,7 +536,7 @@ func (ca *CombiAdapter) setBitrate(ctx context.Context) error {
 		canrate = uint32(ca.cfg.CANRate * 1000)
 	}
 
-	payload := []byte{combiCmdSetCanBitrate, 0x00, 0x04, byte(canrate >> 24), byte(canrate >> 16), byte(canrate >> 8), byte(canrate), 0x00}
+	payload := []byte{cmd_can_bitrate, 0x00, 0x04, byte(canrate >> 24), byte(canrate >> 16), byte(canrate >> 8), byte(canrate), 0x00}
 
 	wctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
 	defer cancel()
@@ -457,17 +544,26 @@ func (ca *CombiAdapter) setBitrate(ctx context.Context) error {
 		ca.cfg.OnMessage(fmt.Sprintf("failed to set bitrate: %v", err))
 		return err
 	}
+	resp := make([]byte, ca.in.Desc.MaxPacketSize)
+	n, err := ca.in.Read(resp)
+	if err != nil {
+		ca.cfg.OnMessage(fmt.Sprintf("failed to read response: %v", err))
+	}
+	if !bytes.HasPrefix(resp, []byte{cmd_can_bitrate, 0x00, 0x00, term_ack}) {
+		ca.cfg.OnMessage(fmt.Sprintf("failed to set bitrate: %X", resp[:n]))
+	}
+
 	return nil
 }
 
 func (ca *CombiAdapter) ReadVersion(ctx context.Context) (string, error) {
 	rctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
 	defer cancel()
-	if _, err := ca.out.WriteContext(rctx, []byte{combiCmdVersion, 0x00, 0x00, 0x00}); err != nil {
+	if _, err := ca.out.WriteContext(rctx, []byte{cmd_brd_fwversion, 0x00, 0x00, 0x00}); err != nil {
 		return "", err
 	}
 	vers := make([]byte, ca.in.Desc.MaxPacketSize)
-	_, err := ca.in.Read(vers)
+	_, err := ca.in.ReadContext(ctx, vers)
 	if err != nil {
 		return "", err
 	}

@@ -15,11 +15,11 @@ import (
 )
 
 func init() {
-	if err := Register(&AdapterInfo{
+	if err := gocan.RegisterAdapter(&gocan.AdapterInfo{
 		Name:               "Just4Trionic",
 		Description:        "STM32F103C8T6 based CAN adapter",
 		RequiresSerialPort: true,
-		Capabilities: AdapterCapabilities{
+		Capabilities: gocan.AdapterCapabilities{
 			HSCAN: true,
 			KLine: false,
 			SWCAN: false,
@@ -108,7 +108,7 @@ func (*Just4Trionic) calcAcceptanceFilters(idList []uint32) (string, string) {
 	return fmt.Sprintf("M%08X", code), fmt.Sprintf("m%08X", mask)
 }
 
-func (a *Just4Trionic) Connect(ctx context.Context) error {
+func (a *Just4Trionic) Open(ctx context.Context) error {
 	mode := &serial.Mode{
 		BaudRate: 115200,
 		Parity:   serial.NoParity,
@@ -243,7 +243,7 @@ func (a *Just4Trionic) parse(ctx context.Context, readBuffer []byte, buff *bytes
 				select {
 				case a.recvChan <- f:
 				default:
-					a.cfg.OnMessage(ErrDroppedFrame.Error())
+					a.SetError(gocan.ErrDroppedFrame)
 				}
 				buff.Reset()
 			default:

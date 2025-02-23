@@ -203,7 +203,7 @@ func (cl *Client) ReadDataByIdentifierFrame(ctx context.Context, frame *gocan.CA
 		cc := cl.c.Subscribe(ctx, cl.recvID...)
 		defer cc.Close()
 		frame := gocan.NewFrame(cl.canID, []byte{0x30, 0x00, 0x00}, gocan.CANFrameType{Type: 2, Responses: int(framesToReceive)})
-		if err := cl.c.Send(frame); err != nil {
+		if err := cl.c.SendFrame(frame); err != nil {
 			return nil, err
 		}
 		var seq byte = 0x21
@@ -310,7 +310,7 @@ func (cl *Client) ReadMemoryByAddress(ctx context.Context, address, length uint3
 		left -= rb
 
 		framesToReceive := math.Ceil(float64(left) / 7)
-		cl.c.SendFrame(cl.canID, []byte{0x30, 0x00, 0x00}, gocan.CANFrameType{Type: 2, Responses: int(framesToReceive)})
+		cl.c.Send(cl.canID, []byte{0x30, 0x00, 0x00}, gocan.CANFrameType{Type: 2, Responses: int(framesToReceive)})
 
 		cc := cl.c.Subscribe(ctx, cl.recvID...)
 		defer cc.Close()
@@ -451,7 +451,7 @@ func (cl *Client) DisableNormalCommunication(ctx context.Context) error {
 
 // AllNodes functional diagnostic request CANId ($101) and the AllNodes extended address ($FE).
 func (cl *Client) DisableNormalCommunicationAllNodes() error {
-	if err := cl.c.SendFrame(0x101, []byte{0xFE, 0x01, DISABLE_NORMAL_COMMUNICATION}, gocan.Outgoing); err != nil {
+	if err := cl.c.Send(0x101, []byte{0xFE, 0x01, DISABLE_NORMAL_COMMUNICATION}, gocan.Outgoing); err != nil {
 		return err
 	}
 	return nil
@@ -680,9 +680,8 @@ func (cl *Client) WriteDataByAddress(ctx context.Context, address uint32, data [
 		}
 
 		if r.Len() > 0 {
-			frame := gocan.NewFrame(cl.canID, pkg, gocan.Outgoing)
 			//log.Println(frame.String())
-			cl.c.Send(frame)
+			cl.c.Send(cl.canID, pkg, gocan.Outgoing)
 			time.Sleep(time.Duration(delay) * time.Millisecond)
 		} else {
 			frame := gocan.NewFrame(cl.canID, pkg, gocan.ResponseRequired)
@@ -754,9 +753,8 @@ func (cl *Client) writeDataByIdentifierMultiframe(ctx context.Context, pid byte,
 		}
 
 		if r.Len() > 0 {
-			frame := gocan.NewFrame(cl.canID, pkg, gocan.Outgoing)
 			//log.Println(frame.String())
-			cl.c.Send(frame)
+			cl.c.Send(cl.canID, pkg, gocan.Outgoing)
 			time.Sleep(time.Duration(delay) * time.Millisecond)
 		} else {
 			frame := gocan.NewFrame(cl.canID, pkg, gocan.ResponseRequired)
@@ -798,7 +796,7 @@ func (cl *Client) TesterPresentResponseRequired(ctx context.Context) error {
 }
 
 func (cl *Client) TesterPresentNoResponseAllowed() error {
-	return cl.c.Send(gocan.NewFrame(0x101, []byte{0xFE, 0x01, 0x3E}, gocan.Outgoing))
+	return cl.c.Send(0x101, []byte{0xFE, 0x01, 0x3E}, gocan.Outgoing)
 }
 
 // ReadDiagnosticInformation $A9 Service
@@ -913,8 +911,7 @@ func (cl *Client) ProgrammingMode(ctx context.Context, subFunc byte) error {
 		return nil
 
 	case 0x03:
-		frame := gocan.NewFrame(cl.canID, payload, gocan.Outgoing)
-		if err := cl.c.Send(frame); err != nil {
+		if err := cl.c.Send(cl.canID, payload, gocan.Outgoing); err != nil {
 			return err
 		}
 		return nil

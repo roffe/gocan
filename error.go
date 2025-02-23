@@ -1,5 +1,7 @@
 package gocan
 
+import "errors"
+
 type unrecoverableError struct {
 	error
 }
@@ -27,3 +29,8 @@ func IsRecoverable(err error) bool {
 	}
 	return true
 }
+
+var (
+	ErrDroppedFrame           = errors.New("adapter incoming channel full")
+	ErrFramhandlerRegisterSub = errors.New("failed to register subscription, framehandler is full")
+)

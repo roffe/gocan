@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/roffe/gocan"
-	"github.com/roffe/gocan/adapter"
 )
 
 func init() {
@@ -24,7 +23,7 @@ func main() {
 	sigChan := make(chan os.Signal, 2)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
-	dev, err := adapter.New("CANlib #0 Kvaser Leaf Light v2", &gocan.AdapterConfig{
+	dev, err := gocan.NewAdapter("CANlib #0 Kvaser Leaf Light v2", &gocan.AdapterConfig{
 		CANRate: 500,
 	})
 	if err != nil {

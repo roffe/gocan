@@ -1,6 +1,7 @@
 package gocan
 
 import (
+	"encoding/binary"
 	"fmt"
 	"strconv"
 	"strings"
@@ -32,24 +33,27 @@ var (
 type CANFrame struct {
 	Identifier uint32
 	Extended   bool
+	RTR        bool
 	Data       []byte
 	FrameType  CANFrameType
 	Timeout    time.Duration
 }
 
+// NewExtendedFrame creates a new CANFrame and copies the data slice
 func NewExtendedFrame(identifier uint32, data []byte, frameType CANFrameType) *CANFrame {
 	return &CANFrame{
 		Identifier: identifier,
-		Data:       data,
+		Data:       append([]byte(nil), data...),
 		FrameType:  frameType,
 		Extended:   true,
 	}
 }
 
+// NewFrame creates a new CANFrame and copies the data slice
 func NewFrame(identifier uint32, data []byte, frameType CANFrameType) *CANFrame {
 	return &CANFrame{
 		Identifier: identifier,
-		Data:       data,
+		Data:       append([]byte(nil), data...),
 		FrameType:  frameType,
 	}
 }
@@ -64,6 +68,14 @@ var (
 	green  = color.New(color.FgGreen).SprintfFunc()
 	//printable = regexp.MustCompile("[^A-Za-z0-9.,!?]+")
 )
+
+func (f *CANFrame) Bytes() []byte {
+	data := make([]byte, 4, 13)
+	binary.LittleEndian.PutUint32(data, f.Identifier)
+	binary.Append(data, binary.LittleEndian, uint8(len(f.Data)))
+	data = append(data, f.Data...)
+	return data
+}
 
 func (f *CANFrame) String() string {
 	var out strings.Builder

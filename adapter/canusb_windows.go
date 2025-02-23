@@ -22,11 +22,11 @@ func init() {
 		if names, err := canusb.GetAdapters(); err == nil {
 			for _, name := range names {
 				nameStr := fmt.Sprintf("CANUSB %s", name)
-				if err := Register(&AdapterInfo{
+				if err := gocan.RegisterAdapter(&gocan.AdapterInfo{
 					Name:               nameStr,
 					New:                NewCanusbName(nameStr),
 					RequiresSerialPort: false,
-					Capabilities: AdapterCapabilities{
+					Capabilities: gocan.AdapterCapabilities{
 						HSCAN: true,
 						KLine: false,
 						SWCAN: false,
@@ -160,7 +160,7 @@ func (cu *Canusb) calculateFilterMask(canIDs []uint32, isExtended bool) (uint32,
 	return code, finalMask
 }
 
-func (cu *Canusb) Connect(ctx context.Context) error {
+func (cu *Canusb) Open(ctx context.Context) error {
 	parts := strings.Split(cu.name, " ")
 	if len(parts) != 2 {
 		return fmt.Errorf("invalid adapter name %q", cu.name)
@@ -200,13 +200,13 @@ func (cu *Canusb) Connect(ctx context.Context) error {
 }
 
 func (cu *Canusb) callbackHandler(msg *canusb.CANMsg) uintptr {
-	// copy the data as the callback will overwrite it when returning
-	data := make([]byte, msg.Len)
-	copy(data, msg.Data[:msg.Len])
-	frame := gocan.NewFrame(msg.Id, data, gocan.Incoming)
-	frame.Extended = msg.Flags&uint8(canusb.CANMSG_EXTENDED) != 0
 	select {
-	case cu.recvChan <- frame:
+	case cu.recvChan <- &gocan.CANFrame{
+		Identifier: msg.Id,
+		Data:       msg.Data[:],
+		Extended:   msg.Flags&canusb.CANMSG_EXTENDED != 0,
+		RTR:        msg.Flags&canusb.CANMSG_RTR != 0,
+	}:
 	default:
 		cu.SetError(errors.New("recvChan full, dropping frame"))
 	}
@@ -244,16 +244,17 @@ func (cu *Canusb) run(ctx context.Context) {
 			if frame.Identifier >= gocan.SystemMsg {
 				continue
 			}
-			var data [8]byte
-			copy(data[:], frame.Data)
 			msg := &canusb.CANMsg{
 				Id:    frame.Identifier,
 				Len:   uint8(frame.Length()),
 				Flags: 0,
-				Data:  data,
 			}
+			copy(msg.Data[:], frame.Data)
 			if frame.Extended {
-				msg.Flags |= uint8(canusb.CANMSG_EXTENDED)
+				msg.Flags |= canusb.CANMSG_EXTENDED
+			}
+			if frame.RTR {
+				msg.Flags |= canusb.CANMSG_RTR
 			}
 			if err := cu.h.Write(msg); err != nil {
 				cu.SetError(fmt.Errorf("write failed: %w", err))
