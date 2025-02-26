@@ -331,7 +331,7 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 				select {
 				case tx.recvChan <- frame:
 				default:
-					tx.cfg.OnMessage(gocan.ErrDroppedFrame.Error())
+					tx.SetError(gocan.ErrDroppedFrame)
 				}
 
 				cmdbuffPtr = 0

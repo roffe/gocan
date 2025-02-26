@@ -10,6 +10,10 @@ import (
 	"strings"
 )
 
+func init() {
+
+}
+
 type Adapter interface {
 	Name() string
 	Open(context.Context) error
@@ -23,8 +27,8 @@ type Adapter interface {
 type AdapterInfo struct {
 	Name               string
 	Description        string
-	Capabilities       AdapterCapabilities
 	RequiresSerialPort bool
+	Capabilities       AdapterCapabilities
 	New                func(*AdapterConfig) (Adapter, error)
 }
 
@@ -40,7 +44,7 @@ type AdapterConfig struct {
 	PortBaudrate           int
 	CANRate                float64
 	CANFilter              []uint32
-	UseExtendedID          bool
+	UseExtendedID          bool // only used for j2534 when setting upp frame filters
 	PrintVersion           bool
 	OnMessage              func(string)
 	MinimumFirmwareVersion string

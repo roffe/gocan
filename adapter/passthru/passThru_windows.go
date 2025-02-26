@@ -3,11 +3,8 @@ package passthru
 import (
 	"bytes"
 	"fmt"
-	"strings"
 	"syscall"
 	"unsafe"
-
-	"golang.org/x/sys/windows/registry"
 )
 
 type PassThru struct {
@@ -92,6 +89,32 @@ func (j *PassThru) Close() error {
 	return j.dll.Release()
 }
 
+// # PASSTHRUCONNECT
+//
+// This function is used to establish a logical connection with a protocol channel on the specified SAE J2534
+// device.  After this function is called, the value pointed to by pChannelID is used as the logical identifier for
+// the combination of Device ID and Protocol ID. If the function is successful, a value of
+// STATUS_NOERROR is returned and a valid channel ID will be placed in <pChannelID>. All future
+// interactions with the protocol channel will be done using the pChannelID.  Note that the interface will
+// block all received messages on this channel until a filter is set.
+//
+//	 extern "C" long WINAPI PassThruConnect
+//
+//		(
+//			unsigned long DeviceID,
+//			unsigned long ProtocolID,
+//			unsigned long Flags,
+//			unsigned long BaudRate,
+//			unsigned long *pChannelID
+//		)
+//
+// Parameters
+//
+//   - Device ID returned from PassThruOpen
+//   - Protocol ID,
+//   - Connection flags,
+//   - Initial baud rate
+//   - Pointer to location for the channel ID that is assigned by the DLL.
 func (j *PassThru) PassThruConnect(deviceID, protocolID, flags, baudRate uint32, pChannelID *uint32) error {
 	// long PassThruConnect(unsigned long DeviceID, unsigned long ProtocolID, unsigned long Flags, unsigned long BaudRate, unsigned long *pChannelID);
 	ret, _, _ := j.passThruConnect.Call(
@@ -287,74 +310,4 @@ func (j *PassThru) PassThruGetLastError() (string, error) {
 		uintptr(unsafe.Pointer(&pErrorDescription)),
 	)
 	return string(bytes.Trim(pErrorDescription[:], "\x00")), CheckError(uint32(ret))
-}
-
-func FindDLLs() (dlls []J2534DLL) {
-	k, err := registry.OpenKey(registry.LOCAL_MACHINE, `SOFTWARE\PassThruSupport.04.04`, registry.QUERY_VALUE|registry.WOW64_32KEY)
-	if err != nil {
-		//log.Println(err)
-		return
-	}
-	ki, err := k.Stat()
-	if err != nil {
-		//log.Println(err)
-		return
-	}
-
-	if err := k.Close(); err != nil {
-		//log.Println(err)
-		return
-	}
-
-	k2, err := registry.OpenKey(registry.LOCAL_MACHINE, `SOFTWARE\PassThruSupport.04.04`, registry.ENUMERATE_SUB_KEYS|registry.WOW64_32KEY)
-	if err != nil {
-		//log.Println(err)
-		return
-	}
-
-	adapters, err := k2.ReadSubKeyNames(int(ki.SubKeyCount))
-	if err != nil {
-		//log.Println(err)
-		return
-	}
-
-	var capabilities Capabilities
-	for _, adapter := range adapters {
-		k3, err := registry.OpenKey(registry.LOCAL_MACHINE, `SOFTWARE\PassThruSupport.04.04\`+adapter, registry.QUERY_VALUE|registry.WOW64_32KEY)
-		if err != nil {
-			continue
-		}
-		name, _, err := k3.GetStringValue("Name")
-		if err != nil {
-			continue
-		}
-		functionLibrary, _, err := k3.GetStringValue("FunctionLibrary")
-		if err != nil {
-			continue
-		}
-		if val, _, err := k3.GetIntegerValue("CAN"); err == nil {
-			capabilities.CAN = val == 1
-		}
-		if val, _, err := k3.GetIntegerValue("CAN_PS"); err == nil {
-			capabilities.CANPS = val == 1
-		}
-		if val, _, err := k3.GetIntegerValue("ISO9141"); err == nil {
-			capabilities.ISO9141 = val == 1
-		}
-		if val, _, err := k3.GetIntegerValue("ISO15765"); err == nil {
-			capabilities.ISO15765 = val == 1
-		}
-		if val, _, err := k3.GetIntegerValue("ISO14230"); err == nil {
-			capabilities.ISO14230 = val == 1
-		}
-		if val, _, err := k3.GetIntegerValue("SW_CAN_PS"); err == nil {
-			capabilities.SWCANPS = val == 1 || strings.ToLower(name) == "tech2"
-		} else {
-			if strings.ToLower(name) == "tech2" {
-				capabilities.SWCANPS = true
-			}
-		}
-		dlls = append(dlls, J2534DLL{Name: name, FunctionLibrary: functionLibrary, Capabilities: capabilities})
-	}
-	return
 }

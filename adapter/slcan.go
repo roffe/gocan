@@ -112,7 +112,7 @@ func (sl *SLCan) recvManager(ctx context.Context) {
 		n, err := sl.port.Read(readBuffer)
 		if err != nil {
 			if !sl.closed {
-				sl.SetError(fmt.Errorf("failed to read com port: %w", err))
+				sl.SetError(gocan.Unrecoverable(fmt.Errorf("failed to read com port: %w", err)))
 			}
 			return
 		}

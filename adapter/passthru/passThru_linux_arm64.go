@@ -3,13 +3,8 @@ package passthru
 import "C"
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"os"
-	"path/filepath"
-	"strings"
 	"unsafe"
 )
 
@@ -195,61 +190,6 @@ type J2534Config struct {
 	COMPORT     string `json:"COM-PORT"`
 }
 
-func FindConfigFiles(root string) ([]string, error) {
-	var files []string
-	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if !info.IsDir() && filepath.Ext(path) == ".json" {
-			files = append(files, path)
-		}
-		return nil
-	})
-	return files, err
-}
-
-func FindDLLs() (libs []J2534DLL) {
-	home, _ := os.UserHomeDir()
-	configDir := home + "/.passthru/"
-	if _, err := os.Stat(configDir); os.IsNotExist(err) {
-		return
-	}
-	configFiles, err := FindConfigFiles(configDir)
-
-	for _, file := range configFiles {
-		if _, err := os.Stat(file); errors.Is(err, os.ErrNotExist) {
-			return
-		}
-		jsonFile, _ := os.Open(file)
-
-		defer func(jsonFile *os.File) {
-			err := jsonFile.Close()
-			if err != nil {
-				return
-			}
-		}(jsonFile)
-
-		byteValue, _ := io.ReadAll(jsonFile)
-		var config J2534Config
-		err = json.Unmarshal(byteValue, &config)
-		if err != nil {
-			return nil
-		}
-
-		if strings.HasPrefix(config.FUNCTIONLIB, "~/") {
-			config.FUNCTIONLIB = filepath.Join(home, config.FUNCTIONLIB[2:])
-		}
-
-		name := config.VENDOR + " " + config.NAME
-		if _, err := os.Stat(config.FUNCTIONLIB); err == nil && filepath.Ext(config.FUNCTIONLIB) == ".so" {
-			var capabilities = Capabilities{
-				SWCANPS:  config.SWCANPS,
-				CAN:      config.CAN,
-				CANPS:    config.CANPS,
-				ISO15765: config.ISO15765,
-				ISO9141:  config.ISO9141,
-				ISO14230: config.ISO14230,
-			}
-			libs = append(libs, J2534DLL{Name: name, FunctionLibrary: config.FUNCTIONLIB, Capabilities: capabilities})
-		}
-	}
+func FindConfigFiles(root string) (dlls []string, err error) {
 	return
 }

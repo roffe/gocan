@@ -155,7 +155,7 @@ func (a *OBDXProWifi) recvManager() {
 			select {
 			case a.recvChan <- frame:
 			default:
-				a.SetError(fmt.Errorf("dropped frame: %X", frame.Identifier))
+				a.SetError(gocan.ErrDroppedFrame)
 			}
 			return
 		}

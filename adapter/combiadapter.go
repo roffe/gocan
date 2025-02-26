@@ -1,9 +1,8 @@
-//go:build combi && windows
+//go:build combi
 
 package adapter
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -37,7 +36,7 @@ const (
 
 const (
 	term_ack = 0x00 ///< command acknowledged
-	term_nak = 0xff ///< command failed
+	term_nak = 0xFF ///< command failed
 
 	cmd_brd_fwversion = 0x20 ///< firmware version
 	cmd_brd_adcfilter = 0x21 ///< ADC filter settings
@@ -89,68 +88,10 @@ type CombiAdapter struct {
 	iface     *gousb.Interface
 	in        *gousb.InEndpoint
 	out       *gousb.OutEndpoint
-	sendSem   chan struct{}
+	sendSem   chan byte
 	cmdBuffer []byte
 	closeOnce sync.Once
-	buffPool  sync.Pool
-}
-
-func list() {
-	ctx := gousb.NewContext()
-	defer ctx.Close()
-
-	// Debugging can be turned on; this shows some of the inner workings of the libusb package.
-	ctx.Debug(0)
-
-	// OpenDevices is used to find the devices to open.
-	devs, err := ctx.OpenDevices(func(desc *gousb.DeviceDesc) bool {
-		// The usbid package can be used to print out human readable information.
-		fmt.Printf("%03d.%03d %s:%s %s\n", desc.Bus, desc.Address, desc.Vendor, desc.Product, usbid.Describe(desc))
-		fmt.Printf("  Protocol: %s\n", usbid.Classify(desc))
-
-		// The configurations can be examined from the DeviceDesc, though they can only
-		// be set once the device is opened.  All configuration references must be closed,
-		// to free up the memory in libusb.
-		for _, cfg := range desc.Configs {
-			// This loop just uses more of the built-in and usbid pretty printing to list
-			// the USB devices.
-			fmt.Printf("  %s:\n", cfg)
-			for _, intf := range cfg.Interfaces {
-				fmt.Printf("    --------------\n")
-				for _, ifSetting := range intf.AltSettings {
-					fmt.Printf("    %s\n", ifSetting)
-					fmt.Printf("      %s\n", usbid.Classify(ifSetting))
-					for _, end := range ifSetting.Endpoints {
-						fmt.Printf("      %s\n", end)
-					}
-				}
-			}
-			fmt.Printf("    --------------\n")
-		}
-
-		// After inspecting the descriptor, return true or false depending on whether
-		// the device is "interesting" or not.  Any descriptor for which true is returned
-		// opens a Device which is retuned in a slice (and must be subsequently closed).
-		return false
-	})
-
-	// All Devices returned from OpenDevices must be closed.
-	defer func() {
-		for _, d := range devs {
-			d.Close()
-		}
-	}()
-
-	// OpenDevices can occasionally fail, so be sure to check its return value.
-	if err != nil {
-		log.Fatalf("list: %s", err)
-	}
-
-	for _, dev := range devs {
-		// Once the device has been selected from OpenDevices, it is opened
-		// and can be interacted with.
-		_ = dev
-	}
+	txPool    sync.Pool
 }
 
 func init() {
@@ -180,10 +121,15 @@ func init() {
 func NewCombi(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	return &CombiAdapter{
 		BaseAdapter: NewBaseAdapter("CombiAdapter", cfg),
-		sendSem:     make(chan struct{}, 1),
-		buffPool: sync.Pool{
+		sendSem:     make(chan byte, 1),
+		txPool: sync.Pool{
 			New: func() any {
-				return make([]byte, 19)
+				b := make([]byte, 19)
+				b[0] = cmd_can_txframe
+				// b[1] = 0x00
+				b[2] = 0x0F // length always same
+				// b[18] = 0x00
+				return b
 			},
 		},
 	}, nil
@@ -262,7 +208,7 @@ func (ca *CombiAdapter) Open(ctx context.Context) error {
 		}
 	}
 
-	// Close can-bus
+	// Close canbus
 	if err := ca.canCtrl(0); err != nil {
 		ca.iface.Close()
 		ca.devCfg.Close()
@@ -288,28 +234,18 @@ func (ca *CombiAdapter) Open(ctx context.Context) error {
 		ca.usbCtx.Close()
 		return err
 	}
-	// Open can-bus
-	ca.sendSem <- struct{}{}
+
+	// Open canbus
 	if err := ca.canCtrl(1); err != nil {
 		ca.iface.Close()
 		ca.devCfg.Close()
 		ca.dev.Close()
 		ca.usbCtx.Close()
-		return fmt.Errorf("failed to open can-bus: %w", err)
+		return fmt.Errorf("failed to open canbus: %w", err)
 	}
 
 	go ca.sendManager(ctx)
 	go ca.recvManager(ctx)
-
-	return nil
-}
-
-func (ca *CombiAdapter) canCtrl(mode byte) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-	if _, err := ca.out.WriteContext(ctx, []byte{cmd_can_open, 0x00, 0x01, mode, 0x00}); err != nil {
-		return fmt.Errorf("failed to write to usb device: %w", err)
-	}
 
 	return nil
 }
@@ -323,8 +259,23 @@ func (ca *CombiAdapter) Close() error {
 	return err
 }
 
+func (ca *CombiAdapter) ReadVersion(ctx context.Context) (string, error) {
+	rctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer cancel()
+	if _, err := ca.out.WriteContext(rctx, []byte{cmd_brd_fwversion, 0x00, 0x00, 0x00}); err != nil {
+		return "", err
+	}
+	vers := make([]byte, ca.in.Desc.MaxPacketSize)
+	_, err := ca.in.ReadContext(ctx, vers)
+	if err != nil {
+		return "", err
+	}
+	//  20 00 02 01 01 00
+	return fmt.Sprintf("CombiAdapter v%d.%d", vers[4], vers[3]), nil
+}
+
 func (ca *CombiAdapter) closeAdapter() error {
-	ca.sendSem <- struct{}{}
+	ca.sendSem <- cmd_can_open
 	if err := ca.canCtrl(0); err != nil {
 		ca.cfg.OnMessage(fmt.Sprintf("failed to close canbus: %v", err))
 	}
@@ -427,7 +378,7 @@ func (ca *CombiAdapter) recvManager(ctx context.Context) {
 					commandData[commandPointer] = b
 					commandPointer++
 					if err := ca.processCommand(command, commandData[:commandPointer]); err != nil {
-						ca.SetError(fmt.Errorf("failed to process command: %w", err))
+						ca.SetError(err)
 					}
 					parseStep = stepCommand
 				}
@@ -450,11 +401,14 @@ func (ca *CombiAdapter) processCommand(cmd byte, data []byte) error {
 
 func (ca *CombiAdapter) handleControlCommand(cmd byte, data []byte) error {
 	select {
-	case <-ca.sendSem:
+	case b := <-ca.sendSem:
+		if b != cmd && b != 'x' {
+			return fmt.Errorf("unexpected command: %02X, expected: %02X", cmd, b)
+		}
 	default:
 	}
 	if data[0] == term_nak {
-		return fmt.Errorf("%w: command %02X", ErrCommandTermination, cmd)
+		return fmt.Errorf("%w: %2X", ErrCommandTermination, cmd)
 	}
 	return nil
 }
@@ -465,7 +419,7 @@ func (ca *CombiAdapter) handleCANFrame(data []byte) error {
 	}
 	frame := gocan.NewFrame(
 		binary.LittleEndian.Uint32(data[:4]),
-		append([]byte(nil), data[4:4+data[12]]...),
+		data[4:4+data[12]],
 		gocan.Incoming,
 	)
 	frame.Extended = data[13] == 1
@@ -495,37 +449,62 @@ func (ca *CombiAdapter) sendManager(ctx context.Context) {
 }
 
 func (ca *CombiAdapter) sendMessage(ctx context.Context, frame *gocan.CANFrame) {
-	ca.sendSem <- struct{}{}
 	if frame.Identifier >= gocan.SystemMsg {
 		if frame.Identifier == gocan.SystemMsg {
+			ca.sendSem <- 'x'
 			if _, err := ca.out.WriteContext(ctx, frame.Data); err != nil {
 				ca.SetError(fmt.Errorf("failed to send frame: %w", err))
 			}
 		}
 		return
 	}
-	buff := ca.buffPool.Get().([]byte)
-	defer ca.buffPool.Put(buff)
-	var extended byte
-	if frame.Extended {
-		extended = 1
-	}
-	var rtr byte
-	if frame.RTR {
-		rtr = 1
-	}
-	buff[0] = cmd_can_txframe
-	buff[1] = 0x00
-	buff[2] = 0x0F
+	buff := ca.txPool.Get().([]byte)
+	defer ca.txPool.Put(buff)
+
+	//buff[0] = cmd_can_txframe
+	//buff[1] = 0x00 // will never change length in this byte
+	//buff[2] = 0x0F
 	binary.LittleEndian.PutUint32(buff[3:], frame.Identifier)
 	copy(buff[7:], frame.Data[:min(frame.Length(), 8)])
+
 	buff[15] = uint8(frame.Length())
-	buff[16] = extended // is extended
-	buff[17] = rtr      // is remote
-	buff[18] = 0x00     // terminator
+
+	if frame.Extended {
+		buff[16] = 1 // is extended
+	} else {
+		buff[16] = 0 // not extended
+	}
+	if frame.RTR {
+		buff[17] = 1 // is remote
+	} else {
+		buff[17] = 0 // not remote
+	}
+	//buff[18] = 0x00 // terminator
+
+	ca.sendSem <- cmd_can_txframe
 	if _, err := ca.out.WriteContext(ctx, buff); err != nil {
 		ca.SetError(fmt.Errorf("failed to send frame: %w", err))
 	}
+}
+
+func (ca *CombiAdapter) canCtrl(mode byte) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
+	defer cancel()
+	if _, err := ca.out.WriteContext(ctx, []byte{cmd_can_open, 0x00, 0x01, mode, 0x00}); err != nil {
+		return fmt.Errorf("failed to write to usb device: %w", err)
+	}
+
+	/*
+		resp := make([]byte, 4)
+		n, err := ca.in.ReadContext(ctx, resp)
+		if err != nil {
+			return fmt.Errorf("failed to read response: %w", err)
+		}
+		if !bytes.HasPrefix(resp, []byte{cmd_can_open, 0x00, 0x00, term_ack}) {
+			return fmt.Errorf("failed to open canbus: %X", resp[:n])
+		}
+	*/
+	return nil
 }
 
 func (ca *CombiAdapter) setBitrate(ctx context.Context) error {
@@ -538,37 +517,23 @@ func (ca *CombiAdapter) setBitrate(ctx context.Context) error {
 
 	payload := []byte{cmd_can_bitrate, 0x00, 0x04, byte(canrate >> 24), byte(canrate >> 16), byte(canrate >> 8), byte(canrate), 0x00}
 
-	wctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	wctx, cancel := context.WithTimeout(ctx, 400*time.Millisecond)
 	defer cancel()
 	if _, err := ca.out.WriteContext(wctx, payload); err != nil {
-		ca.cfg.OnMessage(fmt.Sprintf("failed to set bitrate: %v", err))
-		return err
+		return fmt.Errorf("failed to write to usb device: %w", err)
 	}
-	resp := make([]byte, ca.in.Desc.MaxPacketSize)
-	n, err := ca.in.Read(resp)
-	if err != nil {
-		ca.cfg.OnMessage(fmt.Sprintf("failed to read response: %v", err))
-	}
-	if !bytes.HasPrefix(resp, []byte{cmd_can_bitrate, 0x00, 0x00, term_ack}) {
-		ca.cfg.OnMessage(fmt.Sprintf("failed to set bitrate: %X", resp[:n]))
-	}
+	/*
+		resp := make([]byte, 4)
+		n, err := ca.in.ReadContext(ctx, resp)
+		if err != nil {
+			return fmt.Errorf("failed to read response: %w", err)
+		}
+		if !bytes.HasPrefix(resp, []byte{cmd_can_bitrate, 0x00, 0x00, term_ack}) {
+			return fmt.Errorf("failed to set bitrate: %X", resp[:n])
+		}
+	*/
 
 	return nil
-}
-
-func (ca *CombiAdapter) ReadVersion(ctx context.Context) (string, error) {
-	rctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
-	defer cancel()
-	if _, err := ca.out.WriteContext(rctx, []byte{cmd_brd_fwversion, 0x00, 0x00, 0x00}); err != nil {
-		return "", err
-	}
-	vers := make([]byte, ca.in.Desc.MaxPacketSize)
-	_, err := ca.in.ReadContext(ctx, vers)
-	if err != nil {
-		return "", err
-	}
-	//  20 00 02 01 01 00
-	return fmt.Sprintf("CombiAdapter v%d.%d", vers[4], vers[3]), nil
 }
 
 /*
@@ -696,3 +661,61 @@ func (ca *CombiAdapter) recvManager() {
 	}
 }
 */
+
+func list() {
+	ctx := gousb.NewContext()
+	defer ctx.Close()
+
+	// Debugging can be turned on; this shows some of the inner workings of the libusb package.
+	ctx.Debug(0)
+
+	// OpenDevices is used to find the devices to open.
+	devs, err := ctx.OpenDevices(func(desc *gousb.DeviceDesc) bool {
+		// The usbid package can be used to print out human readable information.
+		fmt.Printf("%03d.%03d %s:%s %s\n", desc.Bus, desc.Address, desc.Vendor, desc.Product, usbid.Describe(desc))
+		fmt.Printf("  Protocol: %s\n", usbid.Classify(desc))
+
+		// The configurations can be examined from the DeviceDesc, though they can only
+		// be set once the device is opened.  All configuration references must be closed,
+		// to free up the memory in libusb.
+		for _, cfg := range desc.Configs {
+			// This loop just uses more of the built-in and usbid pretty printing to list
+			// the USB devices.
+			fmt.Printf("  %s:\n", cfg)
+			for _, intf := range cfg.Interfaces {
+				fmt.Printf("    --------------\n")
+				for _, ifSetting := range intf.AltSettings {
+					fmt.Printf("    %s\n", ifSetting)
+					fmt.Printf("      %s\n", usbid.Classify(ifSetting))
+					for _, end := range ifSetting.Endpoints {
+						fmt.Printf("      %s\n", end)
+					}
+				}
+			}
+			fmt.Printf("    --------------\n")
+		}
+
+		// After inspecting the descriptor, return true or false depending on whether
+		// the device is "interesting" or not.  Any descriptor for which true is returned
+		// opens a Device which is retuned in a slice (and must be subsequently closed).
+		return false
+	})
+
+	// All Devices returned from OpenDevices must be closed.
+	defer func() {
+		for _, d := range devs {
+			d.Close()
+		}
+	}()
+
+	// OpenDevices can occasionally fail, so be sure to check its return value.
+	if err != nil {
+		log.Fatalf("list: %s", err)
+	}
+
+	for _, dev := range devs {
+		// Once the device has been selected from OpenDevices, it is opened
+		// and can be interacted with.
+		_ = dev
+	}
+}

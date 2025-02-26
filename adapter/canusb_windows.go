@@ -4,7 +4,6 @@ package adapter
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"strconv"
@@ -14,57 +13,25 @@ import (
 
 	"github.com/roffe/gocan"
 	canusb "github.com/roffe/gocanusb"
-	"golang.org/x/sys/windows/registry"
 )
 
 func init() {
-	if hasdotNet2() {
-		if names, err := canusb.GetAdapters(); err == nil {
-			for _, name := range names {
-				nameStr := fmt.Sprintf("CANUSB %s", name)
-				if err := gocan.RegisterAdapter(&gocan.AdapterInfo{
-					Name:               nameStr,
-					New:                NewCanusbName(nameStr),
-					RequiresSerialPort: false,
-					Capabilities: gocan.AdapterCapabilities{
-						HSCAN: true,
-						KLine: false,
-						SWCAN: false,
-					},
-				}); err != nil {
-					panic(err)
-				}
+	if names, err := canusb.GetAdapters(); err == nil {
+		for _, name := range names {
+			nameStr := fmt.Sprintf("CANUSB %s", name)
+			if err := gocan.RegisterAdapter(&gocan.AdapterInfo{
+				Name:               nameStr,
+				New:                NewCanusbName(nameStr),
+				RequiresSerialPort: false,
+				Capabilities: gocan.AdapterCapabilities{
+					HSCAN: true,
+					KLine: false,
+					SWCAN: false,
+				},
+			}); err != nil {
+				panic(err)
 			}
 		}
-	}
-}
-
-func hasdotNet2() bool {
-	// Registry path for .NET Framework 2.0
-	registryPath := `SOFTWARE\Microsoft\NET Framework Setup\NDP\v2.0.50727`
-
-	// Open the registry key
-	key, err := registry.OpenKey(registry.LOCAL_MACHINE, registryPath, registry.QUERY_VALUE)
-	if err != nil {
-		log.Printf("Error opening registry key: %v", err)
-		return false
-	}
-	defer key.Close()
-
-	// Read the Install value
-	install, _, err := key.GetIntegerValue("Install")
-	if err != nil {
-		log.Printf("Error reading Install value: %v\n", err)
-		return false
-	}
-
-	// Check if .NET Framework 2.0 is installed (Install = 1)
-	if install == 1 {
-		log.Println(".NET Framework 2.0 is installed")
-		return true
-	} else {
-		log.Printf(".NET Framework 2.0 is not properly installed (Install value = %d)", install)
-		return false
 	}
 }
 
@@ -172,9 +139,9 @@ func (cu *Canusb) Open(ctx context.Context) error {
 	cu.h, err = canusb.Open(
 		parts[1],
 		cu.getRate(cu.cfg.CANRate),
-		code,                      //canusb.ACCEPTANCE_CODE_ALL,
-		mask,                      //canusb.ACCEPTANCE_MASK_ALL,
-		canusb.FLAG_NO_LOCAL_SEND, //|canusb.FLAG_BLOCK|canusb.FLAG_TIMESTAMP|canusb.FLAG_SLOW,
+		code, //canusb.ACCEPTANCE_CODE_ALL,
+		mask, //canusb.ACCEPTANCE_MASK_ALL,
+		canusb.FLAG_NO_LOCAL_SEND|canusb.FLAG_BLOCK|canusb.FLAG_TIMESTAMP|canusb.FLAG_SLOW,
 	)
 	if err != nil {
 		return err
@@ -202,13 +169,14 @@ func (cu *Canusb) Open(ctx context.Context) error {
 func (cu *Canusb) callbackHandler(msg *canusb.CANMsg) uintptr {
 	select {
 	case cu.recvChan <- &gocan.CANFrame{
-		Identifier: msg.Id,
-		Data:       msg.Data[:],
+		Identifier: msg.ID,
+		Data:       msg.Bytes(),
 		Extended:   msg.Flags&canusb.CANMSG_EXTENDED != 0,
 		RTR:        msg.Flags&canusb.CANMSG_RTR != 0,
+		FrameType:  gocan.Incoming,
 	}:
 	default:
-		cu.SetError(errors.New("recvChan full, dropping frame"))
+		cu.SetError(gocan.ErrDroppedFrame)
 	}
 	return 1
 }
@@ -245,7 +213,7 @@ func (cu *Canusb) run(ctx context.Context) {
 				continue
 			}
 			msg := &canusb.CANMsg{
-				Id:    frame.Identifier,
+				ID:    frame.Identifier,
 				Len:   uint8(frame.Length()),
 				Flags: 0,
 			}
@@ -258,6 +226,9 @@ func (cu *Canusb) run(ctx context.Context) {
 			}
 			if err := cu.h.Write(msg); err != nil {
 				cu.SetError(fmt.Errorf("write failed: %w", err))
+			}
+			if err := cu.h.Flush(canusb.FLUSH_WAIT); err != nil {
+				log.Println(err)
 			}
 		}
 	}

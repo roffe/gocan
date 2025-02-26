@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -18,8 +17,9 @@ import (
 )
 
 func init() {
-	for i, dll := range passthru.FindDLLs() {
-		name := fmt.Sprintf("J2534 #%d %s", i, dll.Name)
+	prefix, dlls := passthru.FindDLLs()
+	for i, dll := range dlls {
+		name := fmt.Sprintf("%sJ2534 #%d %s", prefix, i, dll.Name)
 		if err := gocan.RegisterAdapter(&gocan.AdapterInfo{
 			Name:               name,
 			Description:        "J2534 Interface",
@@ -42,12 +42,17 @@ type J2534 struct {
 
 	h *passthru.PassThru
 
-	channelID, deviceID, flags, protocol uint32
-	useExtendedID                        bool
+	channelID uint32
+	deviceID  uint32
+	flags     uint32
+	protocol  uint32
 
+	useExtendedID bool
 	tech2passThru bool
 	sync.Mutex
 }
+
+// J2534-1 v04.04 Connect Flags
 
 func NewJ2534FromDLLName(name, dllPath string) func(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	return func(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
@@ -61,6 +66,7 @@ func NewJ2534(name string, cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 		BaseAdapter: NewBaseAdapter(name, cfg),
 		channelID:   0,
 		deviceID:    0,
+		flags:       passthru.CAN_ID_BOTH | passthru.CAN_29BIT_ID,
 	}
 	return ma, nil
 }
@@ -81,7 +87,7 @@ func (ma *J2534) SetFilter(filters []uint32) error {
 }
 
 func (ma *J2534) Open(ctx context.Context) error {
-	runtime.LockOSThread()
+	//runtime.LockOSThread()
 	var err error
 	ma.h, err = passthru.New(ma.cfg.Port)
 	if err != nil {
@@ -192,13 +198,6 @@ func (ma *J2534) Open(ctx context.Context) error {
 	return nil
 }
 
-func (ma *J2534) idSizeFlag() uint32 {
-	if ma.cfg.UseExtendedID {
-		return passthru.CAN_29BIT_ID
-	}
-	return 0
-}
-
 func (ma *J2534) PrintVersions() error {
 	firmwareVersion, dllVersion, apiVersion, err := ma.h.PassThruReadVersion(ma.deviceID)
 	if err != nil {
@@ -212,21 +211,25 @@ func (ma *J2534) PrintVersions() error {
 
 func (ma *J2534) allowAll() {
 	filterID := uint32(0)
+
+	var txflags uint32
+	if ma.cfg.UseExtendedID {
+		txflags = passthru.CAN_29BIT_ID
+	}
+
 	maskMsg := &passthru.PassThruMsg{
 		ProtocolID:     ma.protocol,
 		DataSize:       4,
 		ExtraDataIndex: 4,
 		Data:           [4128]byte{0x00, 0x00, 0x00, 0x00},
-		TxFlags:        ma.idSizeFlag(),
-		RxStatus:       ma.idSizeFlag(),
+		TxFlags:        txflags,
 	}
 	patternMsg := &passthru.PassThruMsg{
 		ProtocolID:     ma.protocol,
 		DataSize:       4,
 		ExtraDataIndex: 4,
 		Data:           [4128]byte{0x00, 0x00, 0x00, 0x00},
-		TxFlags:        ma.idSizeFlag(),
-		RxStatus:       ma.idSizeFlag(),
+		TxFlags:        txflags,
 	}
 	if err := ma.h.PassThruStartMsgFilter(ma.channelID, passthru.PASS_FILTER, maskMsg, patternMsg, nil, &filterID); err != nil {
 		ma.cfg.OnMessage(fmt.Sprintf("PassThruStartMsgFilter: %v", err))
@@ -237,13 +240,18 @@ func (ma *J2534) setupFilters() error {
 	if len(ma.cfg.CANFilter) > 10 {
 		return errors.New("too many filters")
 	}
+
+	var txflags uint32
+	if ma.cfg.UseExtendedID {
+		txflags = passthru.CAN_29BIT_ID
+	}
+
 	maskMsg := &passthru.PassThruMsg{
 		ProtocolID:     ma.protocol,
 		DataSize:       4,
 		ExtraDataIndex: 4,
 		Data:           [4128]byte{0x00, 0x00, 0xff, 0xff},
-		TxFlags:        ma.idSizeFlag(),
-		RxStatus:       ma.idSizeFlag(),
+		TxFlags:        txflags,
 	}
 	for i, filter := range ma.cfg.CANFilter {
 		filterID := uint32(i)
@@ -251,8 +259,7 @@ func (ma *J2534) setupFilters() error {
 			ProtocolID:     ma.protocol,
 			DataSize:       4,
 			ExtraDataIndex: 4,
-			TxFlags:        ma.idSizeFlag(),
-			RxStatus:       ma.idSizeFlag(),
+			TxFlags:        txflags,
 		}
 		binary.BigEndian.PutUint32(patternMsg.Data[:], filter)
 		if err := ma.h.PassThruStartMsgFilter(ma.channelID, passthru.PASS_FILTER, maskMsg, patternMsg, nil, &filterID); err != nil {
@@ -263,7 +270,7 @@ func (ma *J2534) setupFilters() error {
 }
 
 func (ma *J2534) recvManager(ctx context.Context) {
-	runtime.LockOSThread()
+	//runtime.LockOSThread()
 	for {
 		select {
 		case <-ctx.Done():
@@ -283,14 +290,18 @@ func (ma *J2534) recvManager(ctx context.Context) {
 				ma.SetError(errors.New("empty message"))
 				continue
 			}
-			select {
-			case ma.recvChan <- gocan.NewFrame(
+			frame := gocan.NewFrame(
 				binary.BigEndian.Uint32(msg.Data[0:4]),
-				msg.Data[4:4+msg.DataSize],
+				msg.Data[4:4+(msg.DataSize-4)],
 				gocan.Incoming,
-			):
+			)
+
+			frame.Extended = msg.RxStatus&passthru.CAN_29BIT_ID != 0
+
+			select {
+			case ma.recvChan <- frame:
 			default:
-				ma.cfg.OnMessage(gocan.ErrDroppedFrame.Error())
+				ma.SetError(gocan.ErrDroppedFrame)
 			}
 		}
 	}
@@ -301,13 +312,10 @@ func (ma *J2534) readMsg() (*passthru.PassThruMsg, error) {
 		ma.Lock()
 		defer ma.Unlock()
 	}
-	msg := &passthru.PassThruMsg{
-		ProtocolID: ma.protocol,
-		TxFlags:    ma.idSizeFlag(),
-		RxStatus:   ma.idSizeFlag(),
-	}
-	_, err := ma.h.PassThruReadMsg(ma.channelID, msg, 4)
 
+	msg := new(passthru.PassThruMsg)
+	msg.ProtocolID = ma.protocol
+	n, err := ma.h.PassThruReadMsg(ma.channelID, msg, 50)
 	if err != nil {
 		if errors.Is(err, passthru.ErrBufferEmpty) {
 			return nil, nil
@@ -317,11 +325,14 @@ func (ma *J2534) readMsg() (*passthru.PassThruMsg, error) {
 		}
 		return nil, fmt.Errorf("read error: %w", err)
 	}
+	if n == 0 {
+		return nil, nil
+	}
 	return msg, nil
 }
 
 func (ma *J2534) sendManager(ctx context.Context) {
-	runtime.LockOSThread()
+	//runtime.LockOSThread()
 	for {
 		select {
 		case <-ctx.Done():
@@ -332,15 +343,20 @@ func (ma *J2534) sendManager(ctx context.Context) {
 			if f.Identifier >= gocan.SystemMsg {
 				continue
 			}
+
+			var txflags uint32
+			if f.Extended {
+				txflags = passthru.CAN_29BIT_ID
+			}
+
 			msg := &passthru.PassThruMsg{
 				ProtocolID:     ma.protocol,
-				DataSize:       uint32(f.Length() + 4),
-				ExtraDataIndex: uint32(f.Length() + 4),
-				TxFlags:        ma.idSizeFlag(),
-				RxStatus:       ma.idSizeFlag(),
+				DataSize:       4 + uint32(f.Length()),
+				ExtraDataIndex: 4 + uint32(f.Length()),
+				TxFlags:        txflags,
 			}
 			if ma.protocol == passthru.SW_CAN_PS && !ma.tech2passThru {
-				msg.TxFlags = passthru.SW_CAN_HV_TX
+				msg.TxFlags |= passthru.SW_CAN_HV_TX
 			}
 			binary.BigEndian.PutUint32(msg.Data[:], f.Identifier)
 			copy(msg.Data[4:], f.Data)

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"strconv"
 	"time"
 
@@ -38,6 +39,7 @@ type CanusbVCP struct {
 	filter, mask string
 	buff         *bytes.Buffer
 	// mu        sync.Mutex
+	sendSem chan struct{}
 }
 
 func NewCanusbVCP(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
@@ -45,6 +47,7 @@ func NewCanusbVCP(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 		BaseAdapter: NewBaseAdapter("CANUSB VCP", cfg),
 		buff:        bytes.NewBuffer(nil),
 		//sendMutex: make(chan token, 1),
+		sendSem: make(chan struct{}, 1),
 	}
 	if err := cu.setCANrate(cfg.CANRate); err != nil {
 		return nil, err
@@ -176,9 +179,10 @@ func (*CanusbVCP) calcAcceptanceFilters(idList []uint32) (string, string) {
 }
 
 func (cu *CanusbVCP) sendManager(ctx context.Context) {
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
-	fb := bytes.NewBuffer(nil)
+	idBuff := make([]byte, 4)
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -186,34 +190,43 @@ func (cu *CanusbVCP) sendManager(ctx context.Context) {
 		case <-cu.closeChan:
 			return
 		case <-ticker.C:
-			// cu.mu.Lock()
+			cu.sendSem <- struct{}{}
 			cu.port.Write([]byte{'F', '\r'})
-		case v := <-cu.sendChan:
-			if id := v.Identifier; id >= gocan.SystemMsg {
+		case msg := <-cu.sendChan:
+			if id := msg.Identifier; id >= gocan.SystemMsg {
 				if id == gocan.SystemMsg {
 					if cu.cfg.Debug {
-						cu.cfg.OnMessage(">> " + string(v.Data))
+						cu.cfg.OnMessage(">> " + string(msg.Data))
 					}
-					if _, err := cu.port.Write(append(v.Data, '\r')); err != nil {
+					if _, err := cu.port.Write(append(msg.Data, '\r')); err != nil {
 						cu.SetError(gocan.Unrecoverable(fmt.Errorf("failed to write to com port: %w", err)))
 						return
 					}
 				}
 				continue
 			}
-			fb.Reset()
-			// cu.mu.Lock()
-			idb := make([]byte, 4)
-			binary.BigEndian.PutUint32(idb, v.Identifier)
-			fb.WriteString("t" + hex.EncodeToString(idb)[5:] +
-				strconv.Itoa(v.Length()) +
-				hex.EncodeToString(v.Data) + "\r")
-			if _, err := cu.port.Write(fb.Bytes()); err != nil {
-				cu.SetError(gocan.Unrecoverable(fmt.Errorf("failed to write to com port: %s, %w", fb.String(), err)))
-				return
+
+			cu.sendSem <- struct{}{}
+
+			var out []byte
+			if msg.Extended {
+				binary.BigEndian.PutUint32(idBuff, msg.Identifier&0x1FFFFFFF)
+				out = []byte("T" + hex.EncodeToString(idBuff) + strconv.Itoa(msg.Length()) + hex.EncodeToString(msg.Data) + "\r")
+				if _, err := cu.port.Write(out); err != nil {
+					cu.SetError(gocan.Unrecoverable(fmt.Errorf("failed to write to com port: %w", err)))
+					return
+				}
+			} else {
+				binary.BigEndian.PutUint32(idBuff, msg.Identifier&0x7FF)
+				out = []byte("t" + hex.EncodeToString(idBuff)[5:] + strconv.Itoa(msg.Length()) + hex.EncodeToString(msg.Data) + "\r")
+				if _, err := cu.port.Write(out); err != nil {
+					cu.SetError(gocan.Unrecoverable(fmt.Errorf("failed to write to com port: %w", err)))
+					return
+				}
 			}
+
 			if cu.cfg.Debug {
-				cu.cfg.OnMessage(">> " + fb.String())
+				cu.cfg.OnMessage(">> " + string(out))
 			}
 
 		}
@@ -230,11 +243,10 @@ func (cu *CanusbVCP) recvManager(ctx context.Context) {
 		}
 		n, err := cu.port.Read(readBuffer)
 		if err != nil {
-			//var portError *serial.PortError
-			//if errors.As(err, &portError) {
-			//	log.Println(portError.EncodedErrorString())
-			//	return
-			//}
+			if ctx.Err() != nil {
+				log.Println("context error", ctx.Err())
+				return
+			}
 			cu.SetError(fmt.Errorf("failed to read com port: %w", err))
 			return
 		}
@@ -254,8 +266,11 @@ func (cu *CanusbVCP) recvManager(ctx context.Context) {
 func (cu *CanusbVCP) parse(data []byte) {
 	for _, b := range data {
 		if b == 0x07 { // BELL
-			cu.cfg.OnMessage("command error")
-			// cu.mu.Unlock()
+			cu.SetError(errors.New("command error"))
+			select {
+			case <-cu.sendSem:
+			default:
+			}
 			continue
 		}
 		if b != 0x0D { // CR
@@ -271,15 +286,17 @@ func (cu *CanusbVCP) parse(data []byte) {
 		}
 		switch by[0] {
 		case 'F':
-			if err := decodeStatus(by); err != nil {
-				cu.cfg.OnMessage(fmt.Sprintf("CAN status error: %v", err))
-				cu.SetError(err)
+			select {
+			case <-cu.sendSem:
+			default:
 			}
-			//cu.mu.Unlock()
+			if err := decodeStatus(by); err != nil {
+				cu.SetError(fmt.Errorf("CAN status error: %w", err))
+			}
 		case 't':
 			f, err := cu.decodeFrame(by)
 			if err != nil {
-				cu.cfg.OnMessage(fmt.Sprintf("failed to decode frame: %v", err))
+				cu.SetError(fmt.Errorf("failed to decode frame: %w", err.Error()))
 				cu.buff.Reset()
 				continue
 			}
@@ -290,20 +307,23 @@ func (cu *CanusbVCP) parse(data []byte) {
 			}
 			cu.buff.Reset()
 		case 'T':
-			f, err := cu.decodeFrame29bit(by)
+			f, err := cu.decodeExtendedFrame(by)
 			if err != nil {
-				cu.cfg.OnMessage("failed to decode frame: " + err.Error())
+				cu.SetError(fmt.Errorf("failed to decode frame: %w", err.Error()))
 				cu.buff.Reset()
 				continue
 			}
 			select {
 			case cu.recvChan <- f:
 			default:
-				cu.cfg.OnMessage(gocan.ErrDroppedFrame.Error())
+				cu.SetError(gocan.ErrDroppedFrame)
 			}
 			cu.buff.Reset()
 		case 'z': // last command ok
-			//cu.mu.Unlock()
+			select {
+			case <-cu.sendSem:
+			default:
+			}
 		case 'V':
 			if cu.cfg.PrintVersion {
 				cu.cfg.OnMessage("H/W version " + cu.buff.String())
@@ -314,16 +334,6 @@ func (cu *CanusbVCP) parse(data []byte) {
 			}
 		default:
 			cu.cfg.OnMessage("Unknown>> " + cu.buff.String())
-			/*
-				if cu.mu.TryLock() {
-					log.Println("was unlocked")
-					cu.mu.Unlock()
-				} else {
-					log.Println("was locked")
-					cu.mu.Unlock()
-				}
-			*/
-
 		}
 		cu.buff.Reset()
 	}
@@ -345,7 +355,7 @@ Bit 7 Bus Error (BEI), see SJA1000 datasheet **
 func decodeStatus(b []byte) error {
 	bs := int(bcd.ToUint16(b[1:]))
 	//log.Printf("%08b\n", bs)
-	switch true {
+	switch {
 	case checkBitSet(bs, 1):
 		return errors.New("CAN receive FIFO queue full")
 	case checkBitSet(bs, 2):
@@ -401,7 +411,7 @@ func (*CanusbVCP) decodeFrame(buff []byte) (*gocan.CANFrame, error) {
 }
 
 // T 00000180 8 2D 12 09 DF 87 56 91 06
-func (*CanusbVCP) decodeFrame29bit(buff []byte) (*gocan.CANFrame, error) {
+func (*CanusbVCP) decodeExtendedFrame(buff []byte) (*gocan.CANFrame, error) {
 	id, err := strconv.ParseUint(string(buff[1:9]), 16, 32)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode identifier: %v", err)
@@ -422,7 +432,7 @@ func (*CanusbVCP) decodeFrame29bit(buff []byte) (*gocan.CANFrame, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode body: %v", err)
 	}
-	return gocan.NewFrame(
+	return gocan.NewExtendedFrame(
 		uint32(id),
 		data,
 		gocan.Incoming,

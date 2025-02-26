@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	_ "github.com/roffe/gocan/adapter"
 	"github.com/roffe/gocan/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"

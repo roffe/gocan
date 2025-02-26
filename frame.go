@@ -15,19 +15,10 @@ type CANFrameType struct {
 	Responses int
 }
 
-func (c *CANFrameType) SetResponseCount(no int) {
-	c.Responses = no
-}
-
-func (c *CANFrameType) GetResponseCount() int {
-	return c.Responses
-}
-
 var (
-	Incoming = CANFrameType{Type: 0, Responses: 0}
-	Outgoing = CANFrameType{Type: 1, Responses: 0}
-	// Used for ELM and STN adapters to signal we want the adapter to wait for a response
-	ResponseRequired = CANFrameType{Type: 2, Responses: 1}
+	Incoming         = CANFrameType{Type: 0, Responses: 0}
+	Outgoing         = CANFrameType{Type: 1, Responses: 0}
+	ResponseRequired = CANFrameType{Type: 2, Responses: 1} // Used for ELM and STN adapters to signal we want the adapter to wait for a response
 )
 
 type CANFrame struct {
@@ -58,6 +49,7 @@ func NewFrame(identifier uint32, data []byte, frameType CANFrameType) *CANFrame 
 	}
 }
 
+// Returns the length of the data (DLC)
 func (f *CANFrame) Length() int {
 	return len(f.Data)
 }
@@ -69,11 +61,14 @@ var (
 	//printable = regexp.MustCompile("[^A-Za-z0-9.,!?]+")
 )
 
+// returns the frame as a byte slice, 4 bytes for the identifier, 1 byte for the length and the data
+// if holding more than 8 bytes of data, it will be truncated
 func (f *CANFrame) Bytes() []byte {
 	data := make([]byte, 4, 13)
+	dataLen := min(len(f.Data), 8)
 	binary.LittleEndian.PutUint32(data, f.Identifier)
-	binary.Append(data, binary.LittleEndian, uint8(len(f.Data)))
-	data = append(data, f.Data...)
+	binary.Append(data, binary.LittleEndian, uint8(dataLen))
+	data = append(data, f.Data[:dataLen]...)
 	return data
 }
 

@@ -179,6 +179,7 @@ func (stn *STN) Open(ctx context.Context) error {
 	var initCmds = []string{
 		"ATE0",          // turn off echo
 		"ATS0",          // turn off spaces
+		"ATV1",          // variable DLC on
 		stn.protocolCMD, // Set canbus protocol
 		"ATH1",          // Headers on
 		"ATAT0",         // Set adaptive timing mode off
@@ -187,7 +188,8 @@ func (stn *STN) Open(ctx context.Context) error {
 		"ATAL",          // Allow long messages
 		"ATCFC0",        //Turn automatic CAN flow control off
 		//"ATAR",      // Automatically set the receive address.
-		//"ATCSM1",  //Turn CAN silent monitoring off
+		//"ATCSM0",  //Turn CAN silent monitoring off
+		//"STCMM1",   // Set CAN monitor monitor - Normal node – with CAN ACKs
 		"ATST32",   // Set timeout to 200msec
 		"ATR0",     // Turn off replies
 		stn.mask,   // mask
@@ -439,7 +441,7 @@ func (stn *STN) recvManager(ctx context.Context) {
 					select {
 					case stn.recvChan <- f:
 					default:
-						stn.cfg.OnMessage(gocan.ErrDroppedFrame.Error())
+						stn.SetError(gocan.ErrDroppedFrame)
 					}
 					buff.Reset()
 				}

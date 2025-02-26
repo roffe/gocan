@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 
 	"github.com/roffe/gocan"
@@ -25,6 +26,9 @@ func init() {
 			devDescr, err := canlib.GetChannelDataString(channel, canlib.CHANNELDATA_DEVDESCR_ASCII)
 			if err != nil {
 				panic(err)
+			}
+			if strings.HasPrefix(devDescr, "Kvaser Virtual") {
+				continue
 			}
 			name := fmt.Sprintf("CANlib #%d %v", channel, devDescr)
 			if err := gocan.RegisterAdapter(&gocan.AdapterInfo{
@@ -225,7 +229,7 @@ func (k *CANlib) recvManager(ctx context.Context) {
 		default:
 			msg, err := k.readHandle.ReadWait(k.timeoutRead)
 			if err != nil {
-				if err != canlib.ErrNoMsg {
+				if err == canlib.ErrNoMsg {
 					continue
 				}
 				k.SetError(gocan.Unrecoverable(fmt.Errorf("kvaser recvManager error: %v", err)))

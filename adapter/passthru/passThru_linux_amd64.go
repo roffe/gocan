@@ -6,12 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/bendikro/dl"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"unsafe"
+
+	"github.com/bendikro/dl"
 )
 
 type PassThru struct {
@@ -274,7 +275,7 @@ func FindConfigFiles(root string) ([]string, error) {
 	return files, err
 }
 
-func FindDLLs() (libs []J2534DLL) {
+func FindDLLs() (_ string, libs []J2534DLL) {
 	home, _ := os.UserHomeDir()
 	configDir := home + "/.passthru/"
 	if _, err := os.Stat(configDir); os.IsNotExist(err) {
