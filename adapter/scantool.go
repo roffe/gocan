@@ -18,8 +18,6 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-var stnAdapterSpeeds = []int{115200, 38400, 230400, 921600, 2000000, 1000000, 57600}
-
 const (
 	OBDLinkSX = "OBDLink SX"
 	OBDLinkEX = "OBDLink EX"
@@ -157,7 +155,7 @@ func (stn *STN) Open(ctx context.Context) error {
 
 	setSpeed := func() error {
 		to := stn.cfg.PortBaudrate
-		for _, from := range stnAdapterSpeeds {
+		for _, from := range [...]int{115200, 38400, 230400, 921600, 2000000, 1000000, 57600} {
 			if err := stn.setSpeed(stn.port, mode, from, to); err != nil {
 				if stn.cfg.Debug {
 					stn.cfg.OnMessage(err.Error())
