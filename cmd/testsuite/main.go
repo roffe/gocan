@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/roffe/gocan"
-	_ "github.com/roffe/gocan/adapter"
 )
 
 func init() {
@@ -81,7 +80,7 @@ func main() {
 			continue
 		}
 		log.Printf("conecting #%d: %s", i, name)
-		c, err := gocan.NewClient(ctx, adapter)
+		c, err := gocan.NewWithAdapter(ctx, adapter)
 		if err != nil {
 			log.Printf("Failed to create client %s: %v", name, err)
 			log.Fatalf("Failed to open %s: %v", name, err)

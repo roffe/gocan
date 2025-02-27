@@ -1,4 +1,4 @@
-package adapter
+package gocan
 
 import (
 	"context"
@@ -9,16 +9,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/roffe/gocan"
 	"github.com/roffe/gocan/pkg/dvi"
 )
 
 func init() {
-	if err := gocan.RegisterAdapter(&gocan.AdapterInfo{
+	if err := RegisterAdapter(&AdapterInfo{
 		Name:               "OBDX Pro Wifi",
 		Description:        "OBDX Pro Wifi",
 		RequiresSerialPort: false,
-		Capabilities: gocan.AdapterCapabilities{
+		Capabilities: AdapterCapabilities{
 			HSCAN: true,
 			KLine: true,
 			SWCAN: true,
@@ -36,7 +35,7 @@ type OBDXProWifi struct {
 	closeOnce sync.Once
 }
 
-func NewOBDXProWifi(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
+func NewOBDXProWifi(cfg *AdapterConfig) (Adapter, error) {
 	return &OBDXProWifi{
 		BaseAdapter: NewBaseAdapter("OBDX Pro Wifi", cfg),
 	}, nil
@@ -124,7 +123,7 @@ func (a *OBDXProWifi) sendManager() {
 			return
 		case frame := <-a.sendChan:
 			id := frame.Identifier
-			if id >= gocan.SystemMsg {
+			if id >= SystemMsg {
 				continue
 			}
 			sendCmd := dvi.New(dvi.CMD_SEND_TO_NETWORK_NORMAL, append([]byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)}, frame.Data...))
@@ -147,15 +146,15 @@ func (a *OBDXProWifi) recvManager() {
 		switch cmd.Command() {
 		case 0x08:
 			id := binary.BigEndian.Uint32(cmd.Data()[:4])
-			frame := gocan.NewFrame(
+			frame := NewFrame(
 				id,
 				cmd.Data()[4:],
-				gocan.Incoming,
+				Incoming,
 			)
 			select {
 			case a.recvChan <- frame:
 			default:
-				a.SetError(gocan.ErrDroppedFrame)
+				a.SetError(ErrDroppedFrame)
 			}
 			return
 		}
@@ -172,7 +171,7 @@ func (a *OBDXProWifi) recvManager() {
 				//if errors.Is(err, os.ErrDeadlineExceeded) {
 				//	continue
 				//}
-				a.SetError(gocan.Unrecoverable(fmt.Errorf("failed to read from com port: %w", err)))
+				a.SetError(Unrecoverable(fmt.Errorf("failed to read from com port: %w", err)))
 				return
 			}
 			if n == 0 {

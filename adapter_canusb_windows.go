@@ -1,6 +1,6 @@
 //go:build canusb
 
-package adapter
+package gocan
 
 import (
 	"context"
@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/roffe/gocan"
 	canusb "github.com/roffe/gocanusb"
 )
 
@@ -19,11 +18,11 @@ func init() {
 	if names, err := canusb.GetAdapters(); err == nil {
 		for _, name := range names {
 			nameStr := fmt.Sprintf("CANUSB %s", name)
-			if err := gocan.RegisterAdapter(&gocan.AdapterInfo{
+			if err := RegisterAdapter(&AdapterInfo{
 				Name:               nameStr,
 				New:                NewCanusbName(nameStr),
 				RequiresSerialPort: false,
-				Capabilities: gocan.AdapterCapabilities{
+				Capabilities: AdapterCapabilities{
 					HSCAN: true,
 					KLine: false,
 					SWCAN: false,
@@ -43,13 +42,13 @@ type Canusb struct {
 	closeOnce sync.Once
 }
 
-func NewCanusbName(name string) func(*gocan.AdapterConfig) (gocan.Adapter, error) {
-	return func(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
+func NewCanusbName(name string) func(*AdapterConfig) (Adapter, error) {
+	return func(cfg *AdapterConfig) (Adapter, error) {
 		return NewCanusb(name, cfg)
 	}
 }
 
-func NewCanusb(name string, cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
+func NewCanusb(name string, cfg *AdapterConfig) (Adapter, error) {
 	return &Canusb{
 		BaseAdapter: NewBaseAdapter(name, cfg),
 	}, nil
@@ -168,15 +167,15 @@ func (cu *Canusb) Open(ctx context.Context) error {
 
 func (cu *Canusb) callbackHandler(msg *canusb.CANMsg) uintptr {
 	select {
-	case cu.recvChan <- &gocan.CANFrame{
+	case cu.recvChan <- &CANFrame{
 		Identifier: msg.ID,
 		Data:       msg.Bytes(),
 		Extended:   msg.Flags&canusb.CANMSG_EXTENDED != 0,
 		RTR:        msg.Flags&canusb.CANMSG_RTR != 0,
-		FrameType:  gocan.Incoming,
+		FrameType:  Incoming,
 	}:
 	default:
-		cu.SetError(gocan.ErrDroppedFrame)
+		cu.SetError(ErrDroppedFrame)
 	}
 	return 1
 }
@@ -212,7 +211,7 @@ func (cu *Canusb) run(ctx context.Context) {
 				continue
 			}
 		case frame := <-cu.sendChan:
-			if frame.Identifier >= gocan.SystemMsg {
+			if frame.Identifier >= SystemMsg {
 				continue
 			}
 			msg := &canusb.CANMsg{

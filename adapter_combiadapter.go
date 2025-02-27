@@ -1,6 +1,6 @@
 //go:build combi
 
-package adapter
+package gocan
 
 import (
 	"context"
@@ -13,7 +13,6 @@ import (
 
 	"github.com/google/gousb"
 	"github.com/google/gousb/usbid"
-	"github.com/roffe/gocan"
 )
 
 const (
@@ -103,11 +102,11 @@ func init() {
 	//	return
 	//}
 	//defer dev.Close()
-	if err := gocan.RegisterAdapter(&gocan.AdapterInfo{
+	if err := RegisterAdapter(&AdapterInfo{
 		Name:               "CombiAdapter",
 		Description:        "libusb windows driver",
 		RequiresSerialPort: false,
-		Capabilities: gocan.AdapterCapabilities{
+		Capabilities: AdapterCapabilities{
 			HSCAN: true,
 			KLine: false,
 			SWCAN: false,
@@ -118,7 +117,7 @@ func init() {
 	}
 }
 
-func NewCombi(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
+func NewCombi(cfg *AdapterConfig) (Adapter, error) {
 	return &CombiAdapter{
 		BaseAdapter: NewBaseAdapter("CombiAdapter", cfg),
 		sendSem:     make(chan byte, 1),
@@ -417,10 +416,10 @@ func (ca *CombiAdapter) handleCANFrame(data []byte) error {
 	if len(data) != 16 {
 		return fmt.Errorf("invalid CAN frame size: %d", len(data))
 	}
-	frame := gocan.NewFrame(
+	frame := NewFrame(
 		binary.LittleEndian.Uint32(data[:4]),
 		data[4:4+data[12]],
-		gocan.Incoming,
+		Incoming,
 	)
 	frame.Extended = data[13] == 1
 	frame.RTR = data[14] == 1
@@ -428,7 +427,7 @@ func (ca *CombiAdapter) handleCANFrame(data []byte) error {
 	case ca.recvChan <- frame:
 		return nil
 	default:
-		return gocan.ErrDroppedFrame
+		return ErrDroppedFrame
 	}
 }
 
@@ -448,9 +447,9 @@ func (ca *CombiAdapter) sendManager(ctx context.Context) {
 	}
 }
 
-func (ca *CombiAdapter) sendMessage(ctx context.Context, frame *gocan.CANFrame) {
-	if frame.Identifier >= gocan.SystemMsg {
-		if frame.Identifier == gocan.SystemMsg {
+func (ca *CombiAdapter) sendMessage(ctx context.Context, frame *CANFrame) {
+	if frame.Identifier >= SystemMsg {
+		if frame.Identifier == SystemMsg {
 			ca.sendSem <- 'x'
 			if _, err := ca.out.WriteContext(ctx, frame.Data); err != nil {
 				ca.SetError(fmt.Errorf("failed to send frame: %w", err))
@@ -537,7 +536,7 @@ func (ca *CombiAdapter) setBitrate(ctx context.Context) error {
 }
 
 /*
-func frameToPacket(frame gocan.CANFrame) *CombiPacket {
+func frameToPacket(frame CANFrame) *CombiPacket {
 	buff := make([]byte, 15)
 	binary.LittleEndian.PutUint32(buff, frame.Identifier())
 	copy(buff[4:], frame.Data())
@@ -553,7 +552,7 @@ func frameToPacket(frame gocan.CANFrame) *CombiPacket {
 }
 */
 /*
-func (ca *CombiAdapter) sendFrame(ctx context.Context, frame gocan.CANFrame) error {
+func (ca *CombiAdapter) sendFrame(ctx context.Context, frame CANFrame) error {
 	buff := make([]byte, 15)
 	binary.LittleEndian.PutUint32(buff, frame.Identifier())
 	copy(buff[4:], frame.Data())
@@ -647,10 +646,10 @@ func (ca *CombiAdapter) recvManager() {
 
 			switch cmd {
 			case combiCmdrxFrame: //rx
-				ca.recv <- gocan.NewFrame(
+				ca.recv <- NewFrame(
 					binary.LittleEndian.Uint32(dataBuff[:4]),
 					dataBuff[4:4+dataBuff[12]],
-					gocan.Incoming,
+					Incoming,
 				)
 			}
 

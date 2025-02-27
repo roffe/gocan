@@ -22,16 +22,11 @@ func main() {
 	sigChan := make(chan os.Signal, 2)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
-	dev, err := gocan.NewAdapter("CANUSB", &gocan.AdapterConfig{
+	cl, err := gocan.New(ctx, "CANUSB", &gocan.AdapterConfig{
 		Port:         "COM11",
 		PortBaudrate: 2000000,
 		CANRate:      500,
 	})
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	cl, err := gocan.NewClient(ctx, dev)
 	if err != nil {
 		log.Fatal(err)
 	}

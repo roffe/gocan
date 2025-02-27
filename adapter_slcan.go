@@ -1,4 +1,4 @@
-package adapter
+package gocan
 
 import (
 	"bytes"
@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/roffe/gocan"
 	"go.bug.st/serial"
 )
 
@@ -21,11 +20,11 @@ type SLCan struct {
 }
 
 func init() {
-	if err := gocan.RegisterAdapter(&gocan.AdapterInfo{
+	if err := RegisterAdapter(&AdapterInfo{
 		Name:               "SLCan",
 		Description:        "Canable SLCan adapter",
 		RequiresSerialPort: true,
-		Capabilities: gocan.AdapterCapabilities{
+		Capabilities: AdapterCapabilities{
 			HSCAN: true,
 			KLine: false,
 			SWCAN: false,
@@ -36,7 +35,7 @@ func init() {
 	}
 }
 
-func NewSLCan(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
+func NewSLCan(cfg *AdapterConfig) (Adapter, error) {
 	sl := &SLCan{
 		BaseAdapter: NewBaseAdapter("SLCan", cfg),
 	}
@@ -112,7 +111,7 @@ func (sl *SLCan) recvManager(ctx context.Context) {
 		n, err := sl.port.Read(readBuffer)
 		if err != nil {
 			if !sl.closed {
-				sl.SetError(gocan.Unrecoverable(fmt.Errorf("failed to read com port: %w", err)))
+				sl.SetError(Unrecoverable(fmt.Errorf("failed to read com port: %w", err)))
 			}
 			return
 		}
@@ -140,14 +139,14 @@ func (sl *SLCan) sendManager(ctx context.Context) {
 }
 
 // handleSend processes a single send operation.
-func (sl *SLCan) handleSend(frame *gocan.CANFrame, f *bytes.Buffer) error {
-	if id := frame.Identifier; id >= gocan.SystemMsg {
-		if id == gocan.SystemMsg {
+func (sl *SLCan) handleSend(frame *CANFrame, f *bytes.Buffer) error {
+	if id := frame.Identifier; id >= SystemMsg {
+		if id == SystemMsg {
 			if sl.cfg.Debug {
 				log.Println(">> " + string(frame.Data))
 			}
 			if _, err := sl.port.Write(append(frame.Data, '\r')); err != nil {
-				return gocan.Unrecoverable(fmt.Errorf("failed to write to com port: %w", err))
+				return Unrecoverable(fmt.Errorf("failed to write to com port: %w", err))
 			}
 		}
 		return nil
@@ -194,7 +193,7 @@ func (sl *SLCan) parse(ctx context.Context, buff *bytes.Buffer, readBuffer []byt
 				case <-ctx.Done():
 					return
 				default:
-					sl.SetError(gocan.ErrDroppedFrame)
+					sl.SetError(ErrDroppedFrame)
 				}
 			} else {
 				sl.cfg.OnMessage("Unknown>> " + buff.String())
@@ -213,7 +212,7 @@ func (sl *SLCan) parse(ctx context.Context, buff *bytes.Buffer, readBuffer []byt
 	}
 }
 
-func (*SLCan) decodeFrame(buff []byte) (*gocan.CANFrame, error) {
+func (*SLCan) decodeFrame(buff []byte) (*CANFrame, error) {
 	id, err := strconv.ParseUint(string(buff[1:4]), 16, 32)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode identifier: %v", err)
@@ -229,9 +228,9 @@ func (*SLCan) decodeFrame(buff []byte) (*gocan.CANFrame, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode frame body: %v", err)
 	}
-	return gocan.NewFrame(
+	return NewFrame(
 		uint32(id),
 		data,
-		gocan.Incoming,
+		Incoming,
 	), nil
 }

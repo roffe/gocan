@@ -23,14 +23,9 @@ func main() {
 	sigChan := make(chan os.Signal, 2)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
-	dev, err := gocan.NewAdapter("CANlib #0 Kvaser Leaf Light v2", &gocan.AdapterConfig{
+	cl, err := gocan.New(ctx, "CANlib #0 Kvaser Leaf Light v2", &gocan.AdapterConfig{
 		CANRate: 500,
 	})
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	cl, err := gocan.NewClient(ctx, dev)
 	if err != nil {
 		log.Fatal(err)
 	}

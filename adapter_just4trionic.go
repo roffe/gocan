@@ -1,4 +1,4 @@
-package adapter
+package gocan
 
 import (
 	"context"
@@ -10,16 +10,15 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/roffe/gocan"
 	"go.bug.st/serial"
 )
 
 func init() {
-	if err := gocan.RegisterAdapter(&gocan.AdapterInfo{
+	if err := RegisterAdapter(&AdapterInfo{
 		Name:               "Just4Trionic",
 		Description:        "STM32F103C8T6 based CAN adapter",
 		RequiresSerialPort: true,
-		Capabilities: gocan.AdapterCapabilities{
+		Capabilities: AdapterCapabilities{
 			HSCAN: true,
 			KLine: false,
 			SWCAN: false,
@@ -37,7 +36,7 @@ type Just4Trionic struct {
 	closed  bool
 }
 
-func NewJust4Trionic(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
+func NewJust4Trionic(cfg *AdapterConfig) (Adapter, error) {
 	adapter := &Just4Trionic{
 		BaseAdapter: NewBaseAdapter("Just4Trionic", cfg),
 	}
@@ -78,10 +77,10 @@ func NewJust4Trionic(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 
 func (a *Just4Trionic) SetFilter(filters []uint32) error {
 	filter, mask := a.calcAcceptanceFilters(filters)
-	a.Send() <- gocan.NewFrame(gocan.SystemMsg, []byte{'C'}, gocan.Outgoing)
-	a.Send() <- gocan.NewFrame(gocan.SystemMsg, []byte(filter), gocan.Outgoing)
-	a.Send() <- gocan.NewFrame(gocan.SystemMsg, []byte(mask), gocan.Outgoing)
-	a.Send() <- gocan.NewFrame(gocan.SystemMsg, []byte{'O'}, gocan.Outgoing)
+	a.Send() <- NewFrame(SystemMsg, []byte{'C'}, Outgoing)
+	a.Send() <- NewFrame(SystemMsg, []byte(filter), Outgoing)
+	a.Send() <- NewFrame(SystemMsg, []byte(mask), Outgoing)
+	a.Send() <- NewFrame(SystemMsg, []byte{'O'}, Outgoing)
 	return nil
 }
 
@@ -243,7 +242,7 @@ func (a *Just4Trionic) parse(ctx context.Context, readBuffer []byte, buff *bytes
 				select {
 				case a.recvChan <- f:
 				default:
-					a.SetError(gocan.ErrDroppedFrame)
+					a.SetError(ErrDroppedFrame)
 				}
 				buff.Reset()
 			default:
@@ -256,7 +255,7 @@ func (a *Just4Trionic) parse(ctx context.Context, readBuffer []byte, buff *bytes
 	}
 }
 
-func (*Just4Trionic) decodeFrame(buff []byte) (*gocan.CANFrame, error) {
+func (*Just4Trionic) decodeFrame(buff []byte) (*CANFrame, error) {
 	id, err := strconv.ParseUint(string(buff[0:3]), 16, 32)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode identifier: %w", err)
@@ -265,10 +264,10 @@ func (*Just4Trionic) decodeFrame(buff []byte) (*gocan.CANFrame, error) {
 	if _, err := hex.Decode(data, buff[4:]); err != nil {
 		return nil, fmt.Errorf("failed to decode frame body: %w", err)
 	}
-	return gocan.NewFrame(
+	return NewFrame(
 		uint32(id),
 		data,
-		gocan.Incoming,
+		Incoming,
 	), nil
 }
 
@@ -277,13 +276,13 @@ func (a *Just4Trionic) sendManager(ctx context.Context) {
 	for {
 		select {
 		case v := <-a.sendChan:
-			if id := v.Identifier; id >= gocan.SystemMsg {
-				if id == gocan.SystemMsg {
+			if id := v.Identifier; id >= SystemMsg {
+				if id == SystemMsg {
 					if a.cfg.Debug {
 						log.Println(">> " + string(v.Data))
 					}
 					if _, err := a.port.Write(append(v.Data, '\r')); err != nil {
-						a.SetError(gocan.Unrecoverable(fmt.Errorf("failed to write to com port: %w", err)))
+						a.SetError(Unrecoverable(fmt.Errorf("failed to write to com port: %w", err)))
 						return
 					}
 				}

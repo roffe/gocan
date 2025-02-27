@@ -1,9 +1,7 @@
-package adapter
+package gocan
 
 import (
 	"context"
-
-	"github.com/roffe/gocan"
 )
 
 type Mock struct {
@@ -11,7 +9,7 @@ type Mock struct {
 }
 
 // Create a new Mock adapter used for testing
-func NewMock(name string, cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
+func NewMock(name string, cfg *AdapterConfig) (Adapter, error) {
 	return &Template{
 		BaseAdapter: NewBaseAdapter(name, cfg),
 	}, nil
@@ -47,11 +45,11 @@ func (v *Mock) sendManager(ctx context.Context) {
 		case <-v.closeChan:
 			return
 		case frame := <-v.sendChan:
-			frame.FrameType = gocan.Incoming
+			frame.FrameType = Incoming
 			select {
 			case v.recvChan <- frame:
 			default:
-				v.SetError(gocan.ErrDroppedFrame)
+				v.SetError(ErrDroppedFrame)
 			}
 		}
 	}

@@ -1,4 +1,4 @@
-package adapter
+package gocan
 
 import (
 	"context"
@@ -9,18 +9,17 @@ import (
 	"net"
 	"time"
 
-	"github.com/roffe/gocan"
 	"github.com/roffe/gocan/pkg/serialcommand"
 	"go.bug.st/serial"
 	"golang.org/x/mod/semver"
 )
 
 func init() {
-	if err := gocan.RegisterAdapter(&gocan.AdapterInfo{
+	if err := RegisterAdapter(&AdapterInfo{
 		Name:               "txbridge wifi",
 		Description:        "txbridge over wifi",
 		RequiresSerialPort: false,
-		Capabilities: gocan.AdapterCapabilities{
+		Capabilities: AdapterCapabilities{
 			HSCAN: true,
 			KLine: false,
 			SWCAN: false,
@@ -30,11 +29,11 @@ func init() {
 		panic(err)
 	}
 
-	if err := gocan.RegisterAdapter(&gocan.AdapterInfo{
+	if err := RegisterAdapter(&AdapterInfo{
 		Name:               "txbridge bluetooth",
 		Description:        "txbridge over bluetooth",
 		RequiresSerialPort: false,
-		Capabilities: gocan.AdapterCapabilities{
+		Capabilities: AdapterCapabilities{
 			HSCAN: true,
 			KLine: false,
 			SWCAN: false,
@@ -50,8 +49,8 @@ type Txbridge struct {
 	port io.ReadWriteCloser
 }
 
-func NewTxbridge(name string) func(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
-	return func(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
+func NewTxbridge(name string) func(cfg *AdapterConfig) (Adapter, error) {
+	return func(cfg *AdapterConfig) (Adapter, error) {
 		return &Txbridge{
 			BaseAdapter: NewBaseAdapter(name, cfg),
 		}, nil
@@ -176,7 +175,7 @@ func (tx *Txbridge) sendManager(_ context.Context) {
 		case <-tx.closeChan:
 			return
 		case frame := <-tx.sendChan:
-			if frame.Identifier == gocan.SystemMsg {
+			if frame.Identifier == SystemMsg {
 				_, err := tx.port.Write(frame.Data)
 				if err != nil {
 					tx.SetError(err)
@@ -232,7 +231,7 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 			if errors.Is(err, net.ErrClosed) {
 				return
 			}
-			tx.SetError(gocan.Unrecoverable(err))
+			tx.SetError(Unrecoverable(err))
 			return
 		}
 		if n == 0 {
@@ -272,13 +271,13 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 					cmdbuffPtr = 0
 					continue
 				}
-				var frame *gocan.CANFrame
+				var frame *CANFrame
 				switch command {
 				case 'T', 't':
-					frame = gocan.NewFrame(
+					frame = NewFrame(
 						uint32(cmd.Data[0])<<8|uint32(cmd.Data[1]),
 						cmd.Data[2:],
-						gocan.Incoming,
+						Incoming,
 					)
 				case 'e':
 					switch cmd.Data[0] {
@@ -296,29 +295,29 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 					continue
 
 				case 'R':
-					frame = gocan.NewFrame(
-						gocan.SystemMsgDataRequest,
+					frame = NewFrame(
+						SystemMsgDataRequest,
 						cmd.Data[:commandSize],
-						gocan.Incoming,
+						Incoming,
 					)
 				case 'r':
-					frame = gocan.NewFrame(
-						gocan.SystemMsgDataResponse,
+					frame = NewFrame(
+						SystemMsgDataResponse,
 						cmd.Data[:commandSize],
-						gocan.Incoming,
+						Incoming,
 					)
 				case 'w':
 					// log.Printf("WBLReading: % X", cmd.Data[:commandSize])
-					frame = gocan.NewFrame(
-						gocan.SystemMsgWBLReading,
+					frame = NewFrame(
+						SystemMsgWBLReading,
 						cmd.Data[:commandSize],
-						gocan.Incoming,
+						Incoming,
 					)
 				case 'W':
-					frame = gocan.NewFrame(
-						gocan.SystemMsgWriteResponse,
+					frame = NewFrame(
+						SystemMsgWriteResponse,
 						cmd.Data[:commandSize],
-						gocan.Incoming,
+						Incoming,
 					)
 				default:
 					tx.cfg.OnMessage(fmt.Sprintf("unknown command: %q: %x", cmd.Command, cmd.Data))
@@ -331,7 +330,7 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 				select {
 				case tx.recvChan <- frame:
 				default:
-					tx.SetError(gocan.ErrDroppedFrame)
+					tx.SetError(ErrDroppedFrame)
 				}
 
 				cmdbuffPtr = 0

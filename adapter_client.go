@@ -1,4 +1,4 @@
-package adapter
+package gocan
 
 import (
 	"bytes"
@@ -14,7 +14,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/roffe/gocan"
 	"github.com/roffe/gocan/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -24,30 +23,15 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-var (
-	socketFile string
-	kacp       = keepalive.ClientParameters{
-		Time:                10 * time.Second, // send pings every 10 seconds if there is no activity
-		Timeout:             time.Second,      // wait 1 second for ping ack before considering the connection dead
-		PermitWithoutStream: true,             // send pings even without active streams
-	}
-)
+var _ Adapter = (*GWClient)(nil)
 
-func init() {
-	if cacheDir, err := os.UserCacheDir(); err == nil {
-		socketFile = filepath.Join(cacheDir, "gocan.sock")
-	}
-}
-
-var _ gocan.Adapter = (*Client)(nil)
-
-type Client struct {
+type GWClient struct {
 	BaseAdapter
 	closeOnce sync.Once
 	conn      *grpc.ClientConn
 }
 
-func NewClient(adapterName string, cfg *gocan.AdapterConfig) (*Client, error) {
+func NewGWClient(adapterName string, cfg *AdapterConfig) (*GWClient, error) {
 	if cfg.OnMessage == nil {
 		cfg.OnMessage = func(msg string) {
 			_, file, no, ok := runtime.Caller(1)
@@ -58,12 +42,12 @@ func NewClient(adapterName string, cfg *gocan.AdapterConfig) (*Client, error) {
 			}
 		}
 	}
-	return &Client{
+	return &GWClient{
 		BaseAdapter: NewBaseAdapter(adapterName, cfg),
 	}, nil
 }
 
-func createStreamMeta(adapterName string, cfg *gocan.AdapterConfig) metadata.MD {
+func createStreamMeta(adapterName string, cfg *AdapterConfig) metadata.MD {
 	// comma separated list of uint32s as a string c.cfg.CANFilter
 	filterIDs := make([]string, 0, len(cfg.CANFilter))
 	for _, id := range cfg.CANFilter {
@@ -82,10 +66,19 @@ func createStreamMeta(adapterName string, cfg *gocan.AdapterConfig) metadata.MD 
 }
 
 func NewGRPCClient() (*grpc.ClientConn, proto.GocanClient, error) {
+	var socketFile string = "gocan.sock"
+	if cacheDir, err := os.UserCacheDir(); err == nil {
+		socketFile = filepath.Join(cacheDir, socketFile)
+	}
+
 	conn, err := grpc.NewClient(
 		"unix:"+socketFile,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithKeepaliveParams(kacp),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Time:                10 * time.Second, // send pings every 10 seconds if there is no activity
+			Timeout:             time.Second,      // wait 1 second for ping ack before considering the connection dead
+			PermitWithoutStream: true,             // send pings even without active streams
+		}),
 	)
 	if err != nil {
 		return nil, nil, err
@@ -93,7 +86,7 @@ func NewGRPCClient() (*grpc.ClientConn, proto.GocanClient, error) {
 	return conn, proto.NewGocanClient(conn), nil
 }
 
-func (c *Client) Open(gctx context.Context) error {
+func (c *GWClient) Open(gctx context.Context) error {
 	conn, cl, err := NewGRPCClient()
 	if err != nil {
 		return fmt.Errorf("could not connect to GoCAN Gateway: %w", err)
@@ -123,7 +116,7 @@ func (c *Client) Open(gctx context.Context) error {
 	return nil
 }
 
-func (c *Client) sendManager(ctx context.Context, stream grpc.BidiStreamingClient[proto.CANFrame, proto.CANFrame]) {
+func (c *GWClient) sendManager(ctx context.Context, stream grpc.BidiStreamingClient[proto.CANFrame, proto.CANFrame]) {
 	if c.cfg.Debug {
 		log.Println("sendManager started")
 		defer log.Println("sendManager done")
@@ -143,7 +136,7 @@ func (c *Client) sendManager(ctx context.Context, stream grpc.BidiStreamingClien
 	}
 }
 
-func (c *Client) sendMessage(stream grpc.BidiStreamingClient[proto.CANFrame, proto.CANFrame], msg *gocan.CANFrame) error {
+func (c *GWClient) sendMessage(stream grpc.BidiStreamingClient[proto.CANFrame, proto.CANFrame], msg *CANFrame) error {
 	var id uint32 = msg.Identifier
 	typ := proto.CANFrameTypeEnum(msg.FrameType.Type)
 	resps := uint32(msg.FrameType.Responses)
@@ -158,7 +151,7 @@ func (c *Client) sendMessage(stream grpc.BidiStreamingClient[proto.CANFrame, pro
 	return stream.Send(frame)
 }
 
-func (c *Client) recvManager(_ context.Context, stream grpc.BidiStreamingClient[proto.CANFrame, proto.CANFrame]) {
+func (c *GWClient) recvManager(_ context.Context, stream grpc.BidiStreamingClient[proto.CANFrame, proto.CANFrame]) {
 	for {
 		in, err := stream.Recv()
 		if err != nil {
@@ -178,7 +171,7 @@ func (c *Client) recvManager(_ context.Context, stream grpc.BidiStreamingClient[
 				}
 			}
 
-			c.SetError(gocan.Unrecoverable(err))
+			c.SetError(Unrecoverable(err))
 			return
 		}
 
@@ -186,21 +179,21 @@ func (c *Client) recvManager(_ context.Context, stream grpc.BidiStreamingClient[
 	}
 }
 
-func (c *Client) recvMessage(identifier uint32, data []byte) {
+func (c *GWClient) recvMessage(identifier uint32, data []byte) {
 
 	switch identifier {
-	case gocan.SystemMsg:
+	case SystemMsg:
 		c.cfg.OnMessage(string(data))
 		return
-	case gocan.SystemMsgError:
+	case SystemMsgError:
 		c.SetError(errors.New(string(data)))
 		return
-	case gocan.SystemMsgUnrecoverableError:
-		c.SetError(gocan.Unrecoverable(errors.New(string(data))))
+	case SystemMsgUnrecoverableError:
+		c.SetError(Unrecoverable(errors.New(string(data))))
 		return
 	}
 
-	frame := gocan.NewFrame(identifier, data, gocan.Incoming)
+	frame := NewFrame(identifier, data, Incoming)
 	select {
 	case c.recvChan <- frame:
 	default:
@@ -208,7 +201,7 @@ func (c *Client) recvMessage(identifier uint32, data []byte) {
 	}
 }
 
-func (c *Client) Close() (err error) {
+func (c *GWClient) Close() (err error) {
 	c.closeOnce.Do(func() {
 		close(c.closeChan)
 	})
@@ -218,6 +211,6 @@ func (c *Client) Close() (err error) {
 	return
 }
 
-func (c *Client) SetFilter([]uint32) error {
+func (c *GWClient) SetFilter([]uint32) error {
 	return nil
 }

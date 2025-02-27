@@ -1,4 +1,4 @@
-package adapter
+package gocan
 
 import (
 	"fmt"
@@ -6,25 +6,23 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
-
-	"github.com/roffe/gocan"
 )
 
 type BaseAdapter struct {
 	name               string
-	cfg                *gocan.AdapterConfig
-	sendChan, recvChan chan *gocan.CANFrame
+	cfg                *AdapterConfig
+	sendChan, recvChan chan *CANFrame
 	errChan            chan error
 	closeChan          chan struct{}
 	closeOnce          sync.Once
 }
 
-func NewBaseAdapter(name string, cfg *gocan.AdapterConfig) BaseAdapter {
+func NewBaseAdapter(name string, cfg *AdapterConfig) BaseAdapter {
 	return BaseAdapter{
 		name:      name,
 		cfg:       cfg,
-		sendChan:  make(chan *gocan.CANFrame, 10),
-		recvChan:  make(chan *gocan.CANFrame, 1024),
+		sendChan:  make(chan *CANFrame, 10),
+		recvChan:  make(chan *CANFrame, 1024),
 		errChan:   make(chan error, 10),
 		closeChan: make(chan struct{}),
 	}
@@ -34,11 +32,11 @@ func (base *BaseAdapter) Name() string {
 	return base.name
 }
 
-func (base *BaseAdapter) Send() chan<- *gocan.CANFrame {
+func (base *BaseAdapter) Send() chan<- *CANFrame {
 	return base.sendChan
 }
 
-func (base *BaseAdapter) Recv() <-chan *gocan.CANFrame {
+func (base *BaseAdapter) Recv() <-chan *CANFrame {
 	return base.recvChan
 }
 

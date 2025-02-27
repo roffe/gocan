@@ -2,76 +2,32 @@ package gocan
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"log"
-	"slices"
 	"sync"
-	"time"
 )
 
-type Sub struct {
-	ctx          context.Context
-	c            *Client
-	identifiers  map[uint32]struct{}
-	filterCount  int
-	responseChan chan *CANFrame
-	closeOnce    sync.Once
-}
-
-func (s *Sub) Close() {
-	s.c.fh.unregister <- s
-	s.closeOnce.Do(func() {
-		close(s.responseChan)
-	})
-}
-
-func (s *Sub) Chan() <-chan *CANFrame {
-	return s.responseChan
-}
-
-func (s *Sub) Wait(ctx context.Context, timeout time.Duration) (*CANFrame, error) {
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case f := <-s.responseChan:
-		if f == nil {
-			return nil, errors.New("got nil frame")
-		}
-		return f, nil
-	case <-time.After(timeout):
-		identifiers := make([]uint32, 0, len(s.identifiers))
-		for id := range s.identifiers {
-			identifiers = append(identifiers, id)
-		}
-		slices.Sort(identifiers)
-		return nil, fmt.Errorf("wait timeout (%dms) for frame 0x%03X", timeout.Milliseconds(), identifiers)
-
-	}
-}
-
-// Handler takes care of faning out incoming frames to any subs
-type Handler struct {
+// handler takes care of faning out incoming frames to any subs
+type handler struct {
 	adapter    Adapter
-	subs       map[*Sub]bool
-	register   chan *Sub
-	unregister chan *Sub
+	subs       map[*Subscriber]bool
+	register   chan *Subscriber
+	unregister chan *Subscriber
 	close      chan struct{}
 	closeOnce  sync.Once
 }
 
-func newHandler(adapter Adapter) *Handler {
-	f := &Handler{
-		subs:       make(map[*Sub]bool),
-		register:   make(chan *Sub, 40),
-		unregister: make(chan *Sub, 40),
+func newHandler(adapter Adapter) *handler {
+	f := &handler{
+		subs:       make(map[*Subscriber]bool),
+		register:   make(chan *Subscriber, 40),
+		unregister: make(chan *Subscriber, 40),
 		close:      make(chan struct{}),
 		adapter:    adapter,
 	}
 	return f
 }
 
-func (h *Handler) run(ctx context.Context) {
+func (h *handler) run(ctx context.Context) {
 	defer func() {
 		for sub := range h.subs {
 			delete(h.subs, sub)
@@ -109,13 +65,13 @@ func (h *Handler) run(ctx context.Context) {
 	}
 }
 
-func (h *Handler) Close() {
+func (h *handler) Close() {
 	h.closeOnce.Do(func() {
 		close(h.close)
 	})
 }
 
-func (h *Handler) processFrame(frame *CANFrame) {
+func (h *handler) processFrame(frame *CANFrame) {
 	for sub := range h.subs {
 		select {
 		case <-sub.ctx.Done():
@@ -133,7 +89,7 @@ func (h *Handler) processFrame(frame *CANFrame) {
 	}
 }
 
-func (h *Handler) deliver(sub *Sub, frame *CANFrame) {
+func (h *handler) deliver(sub *Subscriber, frame *CANFrame) {
 	select {
 	case sub.responseChan <- frame:
 	default:

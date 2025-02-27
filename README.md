@@ -15,10 +15,12 @@ Get goCAN
 
 	go get github.com/roffe/gocan@latest
 
-Import the adapters package together with goCAN
+Import the package in your imports
 
-	"github.com/roffe/gocan"
-	_ "github.com/roffe/gocan/adapter"
+	import (
+		...
+		"github.com/roffe/gocan"
+	)
 
 ## Showcase
 

@@ -1,4 +1,4 @@
-package adapter
+package gocan
 
 import (
 	"bytes"
@@ -13,7 +13,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/roffe/gocan"
 	"go.bug.st/serial"
 	"golang.org/x/sync/errgroup"
 )
@@ -26,11 +25,11 @@ const (
 )
 
 func init() {
-	if err := gocan.RegisterAdapter(&gocan.AdapterInfo{
+	if err := RegisterAdapter(&AdapterInfo{
 		Name:               OBDLinkSX,
 		Description:        OBDLinkSX,
 		RequiresSerialPort: true,
-		Capabilities: gocan.AdapterCapabilities{
+		Capabilities: AdapterCapabilities{
 			HSCAN: true,
 			KLine: false,
 			SWCAN: false,
@@ -39,11 +38,11 @@ func init() {
 	}); err != nil {
 		panic(err)
 	}
-	if err := gocan.RegisterAdapter(&gocan.AdapterInfo{
+	if err := RegisterAdapter(&AdapterInfo{
 		Name:               OBDLinkEX,
 		Description:        OBDLinkEX,
 		RequiresSerialPort: true,
-		Capabilities: gocan.AdapterCapabilities{
+		Capabilities: AdapterCapabilities{
 			HSCAN: true,
 			KLine: false,
 			SWCAN: false,
@@ -52,11 +51,11 @@ func init() {
 	}); err != nil {
 		panic(err)
 	}
-	if err := gocan.RegisterAdapter(&gocan.AdapterInfo{
+	if err := RegisterAdapter(&AdapterInfo{
 		Name:               STN1170,
 		Description:        "ScanTool.net STN1170 based adapter",
 		RequiresSerialPort: true,
-		Capabilities: gocan.AdapterCapabilities{
+		Capabilities: AdapterCapabilities{
 			HSCAN: true,
 			KLine: true,
 			SWCAN: true,
@@ -65,11 +64,11 @@ func init() {
 	}); err != nil {
 		panic(err)
 	}
-	if err := gocan.RegisterAdapter(&gocan.AdapterInfo{
+	if err := RegisterAdapter(&AdapterInfo{
 		Name:               STN2120,
 		Description:        "ScanTool.net STN2120 based adapter",
 		RequiresSerialPort: true,
-		Capabilities: gocan.AdapterCapabilities{
+		Capabilities: AdapterCapabilities{
 			HSCAN: true,
 			KLine: true,
 			SWCAN: true,
@@ -90,8 +89,8 @@ type STN struct {
 	sendLock     sync.Mutex
 }
 
-func NewSTN(name string) func(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
-	return func(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
+func NewSTN(name string) func(cfg *AdapterConfig) (Adapter, error) {
+	return func(cfg *AdapterConfig) (Adapter, error) {
 		stn := &STN{
 			BaseAdapter: NewBaseAdapter(name, cfg),
 		}
@@ -106,11 +105,11 @@ func NewSTN(name string) func(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 	}
 }
 
-/* func NewSTN(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
+/* func NewSTN(cfg *AdapterConfig) (Adapter, error) {
 	sx := &STN{
 		cfg:      cfg,
-		outgoing: make(chan gocan.CANFrame, 10),
-		incoming: make(chan gocan.CANFrame, 20),
+		outgoing: make(chan CANFrame, 10),
+		incoming: make(chan CANFrame, 20),
 		close:    make(chan struct{}),
 	}
 
@@ -125,10 +124,10 @@ func NewSTN(name string) func(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 
 func (stn *STN) SetFilter(filters []uint32) error {
 	stn.setCANfilter(filters)
-	stn.Send() <- gocan.NewFrame(gocan.SystemMsg, []byte("STPC"), gocan.Outgoing)
-	stn.Send() <- gocan.NewFrame(gocan.SystemMsg, []byte(stn.mask), gocan.Outgoing)
-	stn.Send() <- gocan.NewFrame(gocan.SystemMsg, []byte(stn.filter), gocan.Outgoing)
-	stn.Send() <- gocan.NewFrame(gocan.SystemMsg, []byte("STPO"), gocan.Outgoing)
+	stn.Send() <- NewFrame(SystemMsg, []byte("STPC"), Outgoing)
+	stn.Send() <- NewFrame(SystemMsg, []byte(stn.mask), Outgoing)
+	stn.Send() <- NewFrame(SystemMsg, []byte(stn.filter), Outgoing)
+	stn.Send() <- NewFrame(SystemMsg, []byte("STPO"), Outgoing)
 	return nil
 }
 
@@ -337,14 +336,14 @@ func (stn *STN) sendManager(ctx context.Context) {
 	for {
 		select {
 		case v := <-stn.sendChan:
-			if id := v.Identifier; id >= gocan.SystemMsg {
-				if id == gocan.SystemMsg {
+			if id := v.Identifier; id >= SystemMsg {
+				if id == SystemMsg {
 					if stn.cfg.Debug {
 						stn.cfg.OnMessage("<o> " + f.String())
 					}
 					stn.sendLock.Lock()
 					if _, err := stn.port.Write(append(v.Data, '\r')); err != nil {
-						stn.SetError(gocan.Unrecoverable(fmt.Errorf("failed to write: %q %w", f.String(), err)))
+						stn.SetError(Unrecoverable(fmt.Errorf("failed to write: %q %w", f.String(), err)))
 						return
 					}
 				}
@@ -367,7 +366,7 @@ func (stn *STN) sendManager(ctx context.Context) {
 			}
 			stn.sendLock.Lock()
 			if _, err := stn.port.Write(f.Bytes()); err != nil {
-				stn.SetError(gocan.Unrecoverable(fmt.Errorf("failed to write: %q %w", f.String(), err)))
+				stn.SetError(Unrecoverable(fmt.Errorf("failed to write: %q %w", f.String(), err)))
 				return
 			}
 			f.Reset()
@@ -439,7 +438,7 @@ func (stn *STN) recvManager(ctx context.Context) {
 					select {
 					case stn.recvChan <- f:
 					default:
-						stn.SetError(gocan.ErrDroppedFrame)
+						stn.SetError(ErrDroppedFrame)
 					}
 					buff.Reset()
 				}
@@ -450,7 +449,7 @@ func (stn *STN) recvManager(ctx context.Context) {
 	}
 }
 
-func (*STN) decodeFrame(buff []byte) (*gocan.CANFrame, error) {
+func (*STN) decodeFrame(buff []byte) (*CANFrame, error) {
 	id, err := strconv.ParseUint(string(buff[:3]), 16, 32)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode identifier: %v", err)
@@ -459,5 +458,5 @@ func (*STN) decodeFrame(buff []byte) (*gocan.CANFrame, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode frame body: %v", err)
 	}
-	return gocan.NewFrame(uint32(id), data, gocan.Incoming), nil
+	return NewFrame(uint32(id), data, Incoming), nil
 }

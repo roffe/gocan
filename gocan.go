@@ -24,12 +24,20 @@ const (
 type Opts func(*Client)
 
 type Client struct {
-	fh        *Handler
+	fh        *handler
 	adapter   Adapter
 	closeOnce sync.Once
 }
 
-func NewClient(ctx context.Context, adapter Adapter) (*Client, error) {
+func New(ctx context.Context, adapterName string, cfg *AdapterConfig) (*Client, error) {
+	adapter, err := NewAdapter(adapterName, cfg)
+	if err != nil {
+		return nil, err
+	}
+	return NewWithAdapter(ctx, adapter)
+}
+
+func NewWithAdapter(ctx context.Context, adapter Adapter) (*Client, error) {
 	return NewWithOpts(ctx, adapter)
 }
 
@@ -125,7 +133,7 @@ func (c *Client) Wait(ctx context.Context, timeout time.Duration, identifiers ..
 	return sub.Wait(ctx, timeout)
 }
 
-func (c *Client) SubscribeFunc(ctx context.Context, f func(*CANFrame), identifiers ...uint32) *Sub {
+func (c *Client) SubscribeFunc(ctx context.Context, f func(*CANFrame), identifiers ...uint32) *Subscriber {
 	sub := newSub(ctx, c, 20, identifiers...)
 	c.fh.register <- sub
 	go func() {
@@ -148,7 +156,7 @@ func (c *Client) SubscribeFunc(ctx context.Context, f func(*CANFrame), identifie
 }
 
 // Subscribe to CAN identifiers and return a message channel
-func (c *Client) SubscribeChan(ctx context.Context, channel chan *CANFrame, identifiers ...uint32) *Sub {
+func (c *Client) SubscribeChan(ctx context.Context, channel chan *CANFrame, identifiers ...uint32) *Subscriber {
 	sub := newSub(ctx, c, 20, identifiers...)
 	sub.responseChan = channel
 	c.fh.register <- sub
@@ -156,14 +164,14 @@ func (c *Client) SubscribeChan(ctx context.Context, channel chan *CANFrame, iden
 }
 
 // Subscribe to CAN identifiers and return a message channel
-func (c *Client) Subscribe(ctx context.Context, identifiers ...uint32) *Sub {
+func (c *Client) Subscribe(ctx context.Context, identifiers ...uint32) *Subscriber {
 	sub := newSub(ctx, c, 20, identifiers...)
 	c.fh.register <- sub
 	return sub
 }
 
-func newSub(ctx context.Context, c *Client, bufferSize int, identifiers ...uint32) *Sub {
-	return &Sub{
+func newSub(ctx context.Context, c *Client, bufferSize int, identifiers ...uint32) *Subscriber {
+	return &Subscriber{
 		ctx:          ctx,
 		c:            c,
 		identifiers:  toSet(identifiers),

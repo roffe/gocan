@@ -1,4 +1,4 @@
-package adapter
+package gocan
 
 import (
 	"bytes"
@@ -10,16 +10,15 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/roffe/gocan"
 	"go.bug.st/serial"
 )
 
 func init() {
-	if err := gocan.RegisterAdapter(&gocan.AdapterInfo{
+	if err := RegisterAdapter(&AdapterInfo{
 		Name:               "YACA",
 		Description:        "Yet Another CANBus Adapter",
 		RequiresSerialPort: true,
-		Capabilities: gocan.AdapterCapabilities{
+		Capabilities: AdapterCapabilities{
 			HSCAN: true,
 			KLine: false,
 			SWCAN: true,
@@ -36,7 +35,7 @@ type YACA struct {
 	closed bool
 }
 
-func NewYACA(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
+func NewYACA(cfg *AdapterConfig) (Adapter, error) {
 	ya := &YACA{
 		BaseAdapter: NewBaseAdapter("YACA", cfg),
 	}
@@ -45,10 +44,10 @@ func NewYACA(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
 
 func (ya *YACA) SetFilter(filters []uint32) error {
 	code, mask := ya.calculateCanFilterCodeAndMask(filters)
-	ya.Send() <- gocan.NewFrame(gocan.SystemMsg, []byte{'C'}, gocan.Outgoing)
-	ya.Send() <- gocan.NewFrame(gocan.SystemMsg, []byte(code), gocan.Outgoing)
-	ya.Send() <- gocan.NewFrame(gocan.SystemMsg, []byte(mask), gocan.Outgoing)
-	ya.Send() <- gocan.NewFrame(gocan.SystemMsg, []byte{'O'}, gocan.Outgoing)
+	ya.Send() <- NewFrame(SystemMsg, []byte{'C'}, Outgoing)
+	ya.Send() <- NewFrame(SystemMsg, []byte(code), Outgoing)
+	ya.Send() <- NewFrame(SystemMsg, []byte(mask), Outgoing)
+	ya.Send() <- NewFrame(SystemMsg, []byte{'O'}, Outgoing)
 
 	return nil
 }
@@ -184,7 +183,7 @@ func (ya *YACA) parse(ctx context.Context, buff *bytes.Buffer, readBuffer []byte
 				select {
 				case ya.recvChan <- f:
 				default:
-					ya.SetError(gocan.ErrDroppedFrame)
+					ya.SetError(ErrDroppedFrame)
 				}
 				buff.Reset()
 			case 0x07: // bell, last command was unknown
@@ -204,13 +203,13 @@ func (ya *YACA) sendManager(ctx context.Context) {
 	for {
 		select {
 		case v := <-ya.sendChan:
-			if id := v.Identifier; id >= gocan.SystemMsg {
-				if id == gocan.SystemMsg {
+			if id := v.Identifier; id >= SystemMsg {
+				if id == SystemMsg {
 					if ya.cfg.Debug {
 						ya.cfg.OnMessage(">> " + string(v.Data))
 					}
 					if _, err := ya.port.Write(append(v.Data, '\r')); err != nil {
-						ya.SetError(gocan.Unrecoverable(fmt.Errorf("failed to write to com port: %w", err)))
+						ya.SetError(Unrecoverable(fmt.Errorf("failed to write to com port: %w", err)))
 						return
 					}
 				}
@@ -237,7 +236,7 @@ func (ya *YACA) sendManager(ctx context.Context) {
 	}
 }
 
-func (*YACA) decodeFrame(buff []byte) (*gocan.CANFrame, error) {
+func (*YACA) decodeFrame(buff []byte) (*CANFrame, error) {
 	id, err := strconv.ParseUint(string(buff[1:4]), 16, 32)
 	if err != nil {
 		return nil, fmt.Errorf("filed to decode identifier: %v", err)
@@ -246,10 +245,10 @@ func (*YACA) decodeFrame(buff []byte) (*gocan.CANFrame, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode frame body: %v", err)
 	}
-	return gocan.NewFrame(
+	return NewFrame(
 		uint32(id),
 		data,
-		gocan.Incoming,
+		Incoming,
 	), nil
 }
 

@@ -1,16 +1,14 @@
-package adapter
+package gocan
 
 import (
 	"context"
-
-	"github.com/roffe/gocan"
 )
 
 type Template struct {
 	BaseAdapter
 }
 
-func NewTemplate(name string, cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
+func NewTemplate(name string, cfg *AdapterConfig) (Adapter, error) {
 	return &Template{
 		BaseAdapter: NewBaseAdapter(name, cfg),
 	}, nil

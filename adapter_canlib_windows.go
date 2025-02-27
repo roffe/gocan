@@ -1,6 +1,6 @@
 //go:build canlib
 
-package adapter
+package gocan
 
 import (
 	"context"
@@ -10,7 +10,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/roffe/gocan"
 	"github.com/roffe/gocan/pkg/canlib"
 )
 
@@ -31,11 +30,11 @@ func init() {
 				continue
 			}
 			name := fmt.Sprintf("CANlib #%d %v", channel, devDescr)
-			if err := gocan.RegisterAdapter(&gocan.AdapterInfo{
+			if err := RegisterAdapter(&AdapterInfo{
 				Name:               name,
 				Description:        "Canlib driver for Kvaser devices",
 				RequiresSerialPort: false,
-				Capabilities: gocan.AdapterCapabilities{
+				Capabilities: AdapterCapabilities{
 					HSCAN: true,
 					KLine: false,
 					SWCAN: false,
@@ -48,7 +47,7 @@ func init() {
 	}
 }
 
-var _ gocan.Adapter = (*CANlib)(nil)
+var _ Adapter = (*CANlib)(nil)
 
 type CANlib struct {
 	BaseAdapter
@@ -61,8 +60,8 @@ type CANlib struct {
 	// notifyChannel chan canlib.NotifyFlag
 }
 
-func NewCANlib(channel int, name string) func(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
-	return func(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
+func NewCANlib(channel int, name string) func(cfg *AdapterConfig) (Adapter, error) {
+	return func(cfg *AdapterConfig) (Adapter, error) {
 		return &CANlib{
 			channel:      channel,
 			BaseAdapter:  NewBaseAdapter(name, cfg),
@@ -206,7 +205,7 @@ func (k *CANlib) sendManager(ctx context.Context) {
 		case <-k.closeChan:
 			return
 		case msg := <-k.sendChan:
-			if msg.Identifier >= gocan.SystemMsg {
+			if msg.Identifier >= SystemMsg {
 				continue
 			}
 			if err := k.writeHandle.WriteWait(msg.Identifier, msg.Data, canlib.MSG_STD, k.timeoutWrite); err != nil {
@@ -232,7 +231,7 @@ func (k *CANlib) recvManager(ctx context.Context) {
 				if err == canlib.ErrNoMsg {
 					continue
 				}
-				k.SetError(gocan.Unrecoverable(fmt.Errorf("kvaser recvManager error: %v", err)))
+				k.SetError(Unrecoverable(fmt.Errorf("kvaser recvManager error: %v", err)))
 				return
 			}
 			if err := k.recvMessage(msg); err != nil {
@@ -246,7 +245,7 @@ func (k *CANlib) recvMessage(msg *canlib.CANMessage) error {
 	if len(msg.Data) < int(msg.DLC) {
 		return errors.New("kvaser recvManager invalid data length")
 	}
-	frame := gocan.NewFrame(uint32(msg.Identifier), msg.Data[:msg.DLC], gocan.Incoming)
+	frame := NewFrame(uint32(msg.Identifier), msg.Data[:msg.DLC], Incoming)
 	if msg.Flags&uint32(canlib.MSG_EXT) != 0 {
 		frame.Extended = true
 	}

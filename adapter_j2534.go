@@ -1,6 +1,6 @@
 //go:build j2534
 
-package adapter
+package gocan
 
 import (
 	"context"
@@ -12,19 +12,18 @@ import (
 	"sync"
 	"time"
 
-	"github.com/roffe/gocan"
-	"github.com/roffe/gocan/adapter/passthru"
+	"github.com/roffe/gocan/pkg/passthru"
 )
 
 func init() {
 	prefix, dlls := passthru.FindDLLs()
 	for i, dll := range dlls {
 		name := fmt.Sprintf("%sJ2534 #%d %s", prefix, i, dll.Name)
-		if err := gocan.RegisterAdapter(&gocan.AdapterInfo{
+		if err := RegisterAdapter(&AdapterInfo{
 			Name:               name,
 			Description:        "J2534 Interface",
 			RequiresSerialPort: false,
-			Capabilities: gocan.AdapterCapabilities{
+			Capabilities: AdapterCapabilities{
 				HSCAN: dll.Capabilities.CAN || dll.Capabilities.CANPS,
 				KLine: dll.Capabilities.ISO9141 || dll.Capabilities.ISO14230,
 				SWCAN: dll.Capabilities.SWCANPS,
@@ -54,14 +53,14 @@ type J2534 struct {
 
 // J2534-1 v04.04 Connect Flags
 
-func NewJ2534FromDLLName(name, dllPath string) func(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
-	return func(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
+func NewJ2534FromDLLName(name, dllPath string) func(cfg *AdapterConfig) (Adapter, error) {
+	return func(cfg *AdapterConfig) (Adapter, error) {
 		cfg.Port = dllPath
 		return NewJ2534(name, cfg)
 	}
 }
 
-func NewJ2534(name string, cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
+func NewJ2534(name string, cfg *AdapterConfig) (Adapter, error) {
 	ma := &J2534{
 		BaseAdapter: NewBaseAdapter(name, cfg),
 		channelID:   0,
@@ -290,10 +289,10 @@ func (ma *J2534) recvManager(ctx context.Context) {
 				ma.SetError(errors.New("empty message"))
 				continue
 			}
-			frame := gocan.NewFrame(
+			frame := NewFrame(
 				binary.BigEndian.Uint32(msg.Data[0:4]),
 				msg.Data[4:4+(msg.DataSize-4)],
-				gocan.Incoming,
+				Incoming,
 			)
 
 			frame.Extended = msg.RxStatus&passthru.CAN_29BIT_ID != 0
@@ -301,7 +300,7 @@ func (ma *J2534) recvManager(ctx context.Context) {
 			select {
 			case ma.recvChan <- frame:
 			default:
-				ma.SetError(gocan.ErrDroppedFrame)
+				ma.SetError(ErrDroppedFrame)
 			}
 		}
 	}
@@ -340,7 +339,7 @@ func (ma *J2534) sendManager(ctx context.Context) {
 		case <-ma.closeChan:
 			return
 		case f := <-ma.sendChan:
-			if f.Identifier >= gocan.SystemMsg {
+			if f.Identifier >= SystemMsg {
 				continue
 			}
 
