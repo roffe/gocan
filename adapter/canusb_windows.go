@@ -205,6 +205,9 @@ func (cu *Canusb) run(ctx context.Context) {
 			log.Println(st.String())
 		case <-status.C:
 			if err := cu.h.Status(); err != nil {
+				if err == canusb.ErrArbitrationLost {
+					continue
+				}
 				cu.SetError(err)
 				continue
 			}
