@@ -20,6 +20,10 @@ const (
 )
 
 var adapters = map[string]*gocan.AdapterConfig{
+	"FTDI OBDLink EX": &gocan.AdapterConfig{
+		CANFilter: []uint32{0x100},
+		CANRate:   DefaultCANRate,
+	},
 	"OBDLink EX": &gocan.AdapterConfig{
 		Port:         "COM6",
 		CANFilter:    []uint32{0x100},
@@ -63,7 +67,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	adapterOrder := []string{"OBDLink SX", "CANlib #0 Kvaser Leaf Light v2", "CombiAdapter", "CANUSB LW5ZEIRK" /*, "x64 J2534 #1 PCANPT32"*/}
+	adapterOrder := []string{"FTDI OBDLink EX", "CANlib #0 Kvaser Leaf Light v2", "CombiAdapter", "CANUSB LW5ZEIRK" /*, "x64 J2534 #1 PCANPT32"*/}
 	noAdapters := len(adapterOrder)
 	log.Println("No of adapters used in test:", noAdapters)
 

@@ -20,6 +20,8 @@ require (
 	google.golang.org/protobuf v1.36.5
 )
 
+require github.com/roffe/goftdi v0.0.0-20250228221801-eae53f893c5a
+
 require (
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/roffe/gocanusb v1.1.1
