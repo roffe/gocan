@@ -1,3 +1,5 @@
+//go:build socketcan
+
 package gocan
 
 import (
@@ -7,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/roffe/gocan"
 	"go.einride.tech/can"
 	"go.einride.tech/can/pkg/candevice"
 	"go.einride.tech/can/pkg/socketcan"
@@ -44,14 +45,14 @@ func (a *SocketCAN) SetFilter(uint32s []uint32) error {
 	return nil
 }
 
-func NewSocketCANFromDevName(dev string) func(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
-	return func(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
+func NewSocketCANFromDevName(dev string) func(cfg *AdapterConfig) (Adapter, error) {
+	return func(cfg *AdapterConfig) (Adapter, error) {
 		cfg.Port = dev
 		return NewSocketCAN(cfg)
 	}
 }
 
-func NewSocketCAN(cfg *gocan.AdapterConfig) (gocan.Adapter, error) {
+func NewSocketCAN(cfg *AdapterConfig) (Adapter, error) {
 	return &SocketCAN{
 		BaseAdapter: NewBaseAdapter("SocketCAN", cfg),
 	}, nil
@@ -104,10 +105,10 @@ func (a *SocketCAN) recvManager(ctx context.Context) {
 				f := a.rx.Frame()
 				for i := 0; i < len(a.cfg.CANFilter); i++ {
 					if f.ID == a.cfg.CANFilter[i] {
-						frame := gocan.NewFrame(
+						frame := NewFrame(
 							f.ID,
 							f.Data[0:f.Length],
-							gocan.Incoming,
+							Incoming,
 						)
 						select {
 						case a.recv <- frame:

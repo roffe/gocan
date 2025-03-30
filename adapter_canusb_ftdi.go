@@ -1,3 +1,5 @@
+//go:build ftdi
+
 package gocan
 
 import (
@@ -10,50 +12,37 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/albenik/bcd"
-	"go.bug.st/serial"
+	ftdi "github.com/roffe/goftdi"
 )
 
-func init() {
-	if err := RegisterAdapter(&AdapterInfo{
-		Name:               "CANUSB VCP",
-		Description:        "Lawicell CANUSB",
-		RequiresSerialPort: true,
-		Capabilities: AdapterCapabilities{
-			HSCAN: true,
-			KLine: false,
-			SWCAN: true,
-		},
-		New: NewCanusbVCP,
-	}); err != nil {
-		panic(err)
-	}
-}
-
-type CanusbVCP struct {
+type CanusbFTDI struct {
 	BaseAdapter
-	port         serial.Port
+	port         *ftdi.Device
 	canRate      string
 	filter, mask string
 	buff         *bytes.Buffer
 	sendSem      chan struct{}
+	devIndex     uint64
 }
 
-func NewCanusbVCP(cfg *AdapterConfig) (Adapter, error) {
-	cu := &CanusbVCP{
-		BaseAdapter: NewBaseAdapter("CANUSB VCP", cfg),
-		buff:        bytes.NewBuffer(nil),
-		//sendMutex: make(chan token, 1),
-		sendSem: make(chan struct{}, 1),
+func NewCanusbFTDI(name string, index uint64) func(cfg *AdapterConfig) (Adapter, error) {
+	return func(cfg *AdapterConfig) (Adapter, error) {
+		cu := &CanusbFTDI{
+			BaseAdapter: NewBaseAdapter(name, cfg),
+			buff:        bytes.NewBuffer(nil),
+			//sendMutex: make(chan token, 1),
+			sendSem:  make(chan struct{}, 1),
+			devIndex: index,
+		}
+		if err := cu.setCANrate(cfg.CANRate); err != nil {
+			return nil, err
+		}
+		cu.filter, cu.mask = cu.calcAcceptanceFilters(cfg.CANFilter)
+		return cu, nil
 	}
-	if err := cu.setCANrate(cfg.CANRate); err != nil {
-		return nil, err
-	}
-	cu.filter, cu.mask = cu.calcAcceptanceFilters(cfg.CANFilter)
-	return cu, nil
 }
 
-func (cu *CanusbVCP) SetFilter(filters []uint32) error {
+func (cu *CanusbFTDI) SetFilter(filters []uint32) error {
 	filter, mask := cu.calcAcceptanceFilters(filters)
 	cu.Send() <- NewFrame(SystemMsg, []byte{'C'}, Outgoing)
 	cu.Send() <- NewFrame(SystemMsg, []byte(filter), Outgoing)
@@ -62,19 +51,34 @@ func (cu *CanusbVCP) SetFilter(filters []uint32) error {
 	return nil
 }
 
-func (cu *CanusbVCP) Open(ctx context.Context) error {
-	mode := &serial.Mode{
-		BaudRate: cu.cfg.PortBaudrate,
-		Parity:   serial.NoParity,
-		DataBits: 8,
-		StopBits: serial.OneStopBit,
+func (cu *CanusbFTDI) Open(ctx context.Context) error {
+
+	if p, err := ftdi.Open(ftdi.DeviceInfo{
+		Index: cu.devIndex,
+	}); err != nil {
+		return fmt.Errorf("failed to open ftdi device: %w", err)
+	} else {
+		cu.port = p
+		if err := p.SetLineProperty(ftdi.LineProperties{Bits: 8, StopBits: 0, Parity: ftdi.NONE}); err != nil {
+			p.Close()
+			return err
+		}
+
+		if err := p.SetBaudRate(3000000); err != nil {
+			p.Close()
+			return err
+		}
+
+		if err := p.SetLatency(2); err != nil {
+			p.Close()
+			return err
+		}
+
+		if err := p.SetTimeout(10, 10); err != nil {
+			p.Close()
+			return err
+		}
 	}
-	p, err := serial.Open(cu.cfg.Port, mode)
-	if err != nil {
-		return fmt.Errorf("failed to open com port %q : %v", cu.cfg.Port, err)
-	}
-	p.SetReadTimeout(4 * time.Millisecond)
-	cu.port = p
 
 	var cmds = []string{
 		"C", "", "", // Empty buffer
@@ -96,8 +100,7 @@ func (cu *CanusbVCP) Open(ctx context.Context) error {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	p.ResetOutputBuffer()
-	p.ResetInputBuffer()
+	cu.port.Purge(ftdi.FT_PURGE_BOTH)
 
 	go cu.recvManager(ctx)
 	go cu.sendManager(ctx)
@@ -105,7 +108,7 @@ func (cu *CanusbVCP) Open(ctx context.Context) error {
 	return nil
 }
 
-func (cu *CanusbVCP) setCANrate(rate float64) error {
+func (cu *CanusbFTDI) setCANrate(rate float64) error {
 	switch rate {
 	case 10:
 		cu.canRate = "S0"
@@ -138,12 +141,10 @@ func (cu *CanusbVCP) setCANrate(rate float64) error {
 	return nil
 }
 
-func (cu *CanusbVCP) Close() error {
+func (cu *CanusbFTDI) Close() error {
 	cu.BaseAdapter.Close()
 	if cu.port != nil {
-		cu.port.Write([]byte("C\r"))
-		cu.port.ResetInputBuffer()
-		cu.port.ResetOutputBuffer()
+		cu.port.Purge(ftdi.FT_PURGE_BOTH)
 		if err := cu.port.Close(); err != nil {
 			return fmt.Errorf("failed to close com port: %w", err)
 		}
@@ -152,7 +153,7 @@ func (cu *CanusbVCP) Close() error {
 	return nil
 }
 
-func (*CanusbVCP) calcAcceptanceFilters(idList []uint32) (string, string) {
+func (*CanusbFTDI) calcAcceptanceFilters(idList []uint32) (string, string) {
 	if len(idList) == 1 && idList[0] == 0 {
 		return "\r", "\r"
 	}
@@ -175,7 +176,7 @@ func (*CanusbVCP) calcAcceptanceFilters(idList []uint32) (string, string) {
 	return fmt.Sprintf("M%08X", code), fmt.Sprintf("m%08X", mask)
 }
 
-func (cu *CanusbVCP) sendManager(ctx context.Context) {
+func (cu *CanusbFTDI) sendManager(ctx context.Context) {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	idBuff := make([]byte, 4)
@@ -230,7 +231,7 @@ func (cu *CanusbVCP) sendManager(ctx context.Context) {
 	}
 }
 
-func (cu *CanusbVCP) recvManager(ctx context.Context) {
+func (cu *CanusbFTDI) recvManager(ctx context.Context) {
 	//readBuffer := make([]byte, 16)
 	rx_cnt := int32(16)
 	for {
@@ -239,6 +240,18 @@ func (cu *CanusbVCP) recvManager(ctx context.Context) {
 			return
 		default:
 		}
+
+		var err error
+		rx_cnt, err = cu.port.GetQueueStatus()
+		if err != nil {
+			cu.SetError(Unrecoverable(fmt.Errorf("failed to get queue status: %w", err)))
+			return
+		}
+		if rx_cnt == 0 {
+			time.Sleep(400 * time.Microsecond)
+			continue
+		}
+
 		readBuffer := make([]byte, rx_cnt)
 		n, err := cu.port.Read(readBuffer)
 		if err != nil {
@@ -261,7 +274,7 @@ func (cu *CanusbVCP) recvManager(ctx context.Context) {
 	}
 }
 
-func (cu *CanusbVCP) parse(data []byte) {
+func (cu *CanusbFTDI) parse(data []byte) {
 	for _, b := range data {
 		if b == 0x07 { // BELL
 			cu.SetError(errors.New("command error"))
@@ -337,50 +350,7 @@ func (cu *CanusbVCP) parse(data []byte) {
 	}
 }
 
-/*
-Bit 0 CAN receive FIFO queue full
-Bit 1 CAN transmit FIFO queue full
-Bit 2 Error warning (EI), see SJA1000 datasheet
-Bit 3 Data Overrun (DOI), see SJA1000 datasheet
-Bit 4 Not used.
-Bit 5 Error Passive (EPI), see SJA1000 datasheet
-Bit 6 Arbitration Lost (ALI), see SJA1000 datasheet *
-Bit 7 Bus Error (BEI), see SJA1000 datasheet **
-* Arbitration lost doesn’t generate a blinking RED light!
-** Bus Error generates a constant RED ligh
-*/
-
-func decodeStatus(b []byte) error {
-	bs := int(bcd.ToUint16(b[1:]))
-	//log.Printf("%08b\n", bs)
-	switch {
-	case checkBitSet(bs, 1):
-		return errors.New("CAN receive FIFO queue full")
-	case checkBitSet(bs, 2):
-		return errors.New("CAN transmit FIFO queue full")
-	case checkBitSet(bs, 3):
-		return errors.New("error warning (EI)")
-	case checkBitSet(bs, 4):
-		return errors.New("data overrun (DOI)") // see SJA1000 datasheet
-	case checkBitSet(bs, 5):
-		return errors.New("not used")
-	case checkBitSet(bs, 6):
-		return errors.New("error passive (EPI)") // see SJA1000 datasheet
-	case checkBitSet(bs, 7):
-		return errors.New("arbitration lost (ALI)") // see SJA1000 datasheet *
-	case checkBitSet(bs, 8):
-		return errors.New("bus error (BEI)") // see SJA1000 datasheet **"
-
-	}
-	return nil
-}
-
-func checkBitSet(n, k int) bool {
-	v := n & (1 << (k - 1))
-	return v == 1
-}
-
-func (*CanusbVCP) decodeFrame(buff []byte) (*CANFrame, error) {
+func (*CanusbFTDI) decodeFrame(buff []byte) (*CANFrame, error) {
 	id, err := strconv.ParseUint(string(buff[1:4]), 16, 32)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode identifier: %v", err)
@@ -409,7 +379,7 @@ func (*CanusbVCP) decodeFrame(buff []byte) (*CANFrame, error) {
 }
 
 // T 00000180 8 2D 12 09 DF 87 56 91 06
-func (*CanusbVCP) decodeExtendedFrame(buff []byte) (*CANFrame, error) {
+func (*CanusbFTDI) decodeExtendedFrame(buff []byte) (*CANFrame, error) {
 	id, err := strconv.ParseUint(string(buff[1:9]), 16, 32)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode identifier: %v", err)

@@ -15,6 +15,10 @@ import (
 )
 
 func init() {
+	if canusb.InitErr != nil {
+		log.Println("CANUSB driver not loaded:", canusb.InitErr)
+		return
+	}
 	if names, err := canusb.GetAdapters(); err == nil {
 		for _, name := range names {
 			nameStr := fmt.Sprintf("CANUSB %s", name)

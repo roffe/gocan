@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -22,8 +23,8 @@ func main() {
 	sigChan := make(chan os.Signal, 2)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
-	cl, err := gocan.New(ctx, "CANUSB", &gocan.AdapterConfig{
-		Port:         "COM11",
+	cl, err := gocan.New(ctx, "CANUSB VCP", &gocan.AdapterConfig{
+		Port:         "COM7",
 		PortBaudrate: 2000000,
 		CANRate:      500,
 	})
@@ -44,7 +45,7 @@ func main() {
 			log.Println(frame.String())
 			err := cl.Send(0x124, []byte("pong"), gocan.Outgoing)
 			if err != nil {
-				log.Println(err)
+				fmt.Println(err)
 			}
 		case <-ctx.Done():
 			return

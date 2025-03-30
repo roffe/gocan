@@ -259,12 +259,14 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 			}
 
 			if cmdbuffPtr == commandSize {
-				cmd := &serialcommand.SerialCommand{
-					Command: command,
-					Data:    append([]byte(nil), cmdbuff[:cmdbuffPtr]...),
-				}
+				//cmd := &serialcommand.SerialCommand{
+				//	Command: command,
+				//	Data:    make([]byte, commandSize),
+				//}
+				data := make([]byte, commandSize)
+				copy(data, cmdbuff[:cmdbuffPtr])
 				if commandChecksum != b {
-					tx.cfg.OnMessage(fmt.Sprintf("checksum error %q %02X != %02X", cmd.Command, commandChecksum, b))
+					tx.cfg.OnMessage(fmt.Sprintf("checksum error %q %02X != %02X", command, commandChecksum, b))
 					parsingCommand = false
 					commandSize = 0
 					commandChecksum = 0
@@ -275,18 +277,18 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 				switch command {
 				case 'T', 't':
 					frame = NewFrame(
-						uint32(cmd.Data[0])<<8|uint32(cmd.Data[1]),
-						cmd.Data[2:],
+						uint32(data[0])<<8|uint32(data[1]),
+						data[2:],
 						Incoming,
 					)
 				case 'e':
-					switch cmd.Data[0] {
+					switch data[0] {
 					case 0x31:
 						tx.SetError(fmt.Errorf("read timeout"))
 					case 0x06:
 						tx.SetError(fmt.Errorf("invalid sequence"))
 					default:
-						tx.SetError(fmt.Errorf("xerror: %X", cmd.Data))
+						tx.SetError(fmt.Errorf("xerror: %X", data))
 					}
 					cmdbuffPtr = 0
 					commandChecksum = 0
@@ -297,30 +299,30 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 				case 'R':
 					frame = NewFrame(
 						SystemMsgDataRequest,
-						cmd.Data[:commandSize],
+						data,
 						Incoming,
 					)
 				case 'r':
 					frame = NewFrame(
 						SystemMsgDataResponse,
-						cmd.Data[:commandSize],
+						data,
 						Incoming,
 					)
 				case 'w':
 					// log.Printf("WBLReading: % X", cmd.Data[:commandSize])
 					frame = NewFrame(
 						SystemMsgWBLReading,
-						cmd.Data[:commandSize],
+						data,
 						Incoming,
 					)
 				case 'W':
 					frame = NewFrame(
 						SystemMsgWriteResponse,
-						cmd.Data[:commandSize],
+						data,
 						Incoming,
 					)
 				default:
-					tx.cfg.OnMessage(fmt.Sprintf("unknown command: %q: %x", cmd.Command, cmd.Data))
+					tx.cfg.OnMessage(fmt.Sprintf("unknown command: %q: %x", command, data))
 					cmdbuffPtr = 0
 					commandChecksum = 0
 					commandSize = 0
@@ -416,8 +418,8 @@ func readSerialCommand(port io.Reader, timeout time.Duration) (*serialcommand.Se
 	return nil, fmt.Errorf("timeout after %v", timeout)
 }
 
-// writeSerialCommand writes a single command to the serial port
-func writeSerialCommand(port io.Writer, command byte, data []byte) error {
+// WriteSerialCommand writes a single command to the serial port
+func WriteSerialCommand(port io.Writer, command byte, data []byte) error {
 	cmd := &serialcommand.SerialCommand{
 		Command: command,
 		Data:    data,

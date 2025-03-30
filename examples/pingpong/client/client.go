@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -34,12 +35,12 @@ func main() {
 	t := time.NewTicker(1 * time.Second)
 	defer t.Stop()
 
-	onMsg := func(f *gocan.CANFrame) {
-		log.Println("Got frame: ", f.String())
-	}
-
-	subFunc := cl.SubscribeFunc(ctx, onMsg, 0x124)
-	defer subFunc.Close()
+	//onMsg := func(f *gocan.CANFrame) {
+	//	log.Println("Got frame: ", f.String())
+	//}
+	//
+	//subFunc := cl.SubscribeFunc(ctx, onMsg, 0x124)
+	//defer subFunc.Close()
 
 	for {
 		select {
@@ -50,8 +51,9 @@ func main() {
 			frame, err := cl.SendAndWait(ctx, gocan.NewFrame(0x123, []byte("ping"), gocan.ResponseRequired), 100*time.Millisecond, 0x124)
 			if err != nil {
 				log.Println(err)
+				continue
 			}
-			log.Println(frame.String())
+			fmt.Println(frame.String())
 		case <-ctx.Done():
 			return
 		}

@@ -4,7 +4,6 @@ package gocan
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"time"
 )
@@ -87,7 +86,11 @@ func (c *Client) SendFrame(msg *CANFrame) error {
 		return nil
 	case <-time.After(5 * time.Second):
 		// default:
-		return errors.New("timeout sending frame (5s)")
+		return &TimeoutError{
+			Timeout: 5,
+			Frames:  []uint32{msg.Identifier},
+			Type:    "send",
+		}
 	}
 }
 
@@ -103,7 +106,7 @@ func (c *Client) SendExtended(identifier uint32, data []byte, f CANFrameType) er
 
 // Send and wait up to <timeout> for a answer on given identifiers
 func (c *Client) SendAndWait(ctx context.Context, frame *CANFrame, timeout time.Duration, identifiers ...uint32) (*CANFrame, error) {
-	frame.Timeout = timeout
+	frame.Timeout = uint32(timeout.Milliseconds())
 	sub := newSub(ctx, c, 1, identifiers...)
 	select {
 	case c.fh.register <- sub:
@@ -133,12 +136,11 @@ func (c *Client) Wait(ctx context.Context, timeout time.Duration, identifiers ..
 	return sub.Wait(ctx, timeout)
 }
 
-func (c *Client) SubscribeFunc(ctx context.Context, f func(*CANFrame), identifiers ...uint32) *Subscriber {
-	sub := newSub(ctx, c, 20, identifiers...)
-	c.fh.register <- sub
+func (c *Client) SubscribeFunc(ctx context.Context, fn func(*CANFrame), identifiers ...uint32) *Subscriber {
+	sub := c.Subscribe(ctx, identifiers...)
 	go func() {
 		defer func() {
-			c.fh.unregister <- sub
+			sub.Close()
 		}()
 		for {
 			select {
@@ -148,17 +150,22 @@ func (c *Client) SubscribeFunc(ctx context.Context, f func(*CANFrame), identifie
 				if !ok {
 					return
 				}
-				f(frame)
+				fn(frame)
 			}
 		}
 	}()
 	return sub
 }
 
-// Subscribe to CAN identifiers and return a message channel
+// Subscribe to CAN identifiers with provided channel
 func (c *Client) SubscribeChan(ctx context.Context, channel chan *CANFrame, identifiers ...uint32) *Subscriber {
-	sub := newSub(ctx, c, 20, identifiers...)
-	sub.responseChan = channel
+	sub := &Subscriber{
+		ctx:          ctx,
+		c:            c,
+		identifiers:  toSet(identifiers),
+		filterCount:  len(identifiers),
+		responseChan: channel,
+	}
 	c.fh.register <- sub
 	return sub
 }

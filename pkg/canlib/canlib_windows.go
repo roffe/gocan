@@ -2,48 +2,96 @@ package canlib
 
 import (
 	"fmt"
-	"log"
 	"syscall"
 	"unsafe"
 )
 
+var (
+	InitErr  error
+	dllFuncs = map[string]**syscall.Proc{
+		"canInitializeLibrary":   &procInitializeLibrary,
+		"canUnloadLibrary":       &procUnloadLibrary,
+		"canGetNumberOfChannels": &procGetNumberOfChannels,
+		"canGetChannelData":      &procGetChannelData,
+		"canGetErrorText":        &procGetErrorText,
+		"canOpenChannel":         &procOpenChannel,
+		"canGetVersion":          &procGetVersion,
+		"canAccept":              &procAccept,
+		"canClose":               &procClose,
+		"canBusOn":               &procBusOn,
+		"canBusOff":              &procBusOff,
+		"canFlushReceiveQueue":   &procFlushReceiveQueue,
+		"canFlushTransmitQueue":  &procFlushTransmitQueue,
+		"canObjBufAllocate":      &procObjBufAllocate,
+		"canObjBufWrite":         &procObjBufWrite,
+		"canResetBus":            &procResetBus,
+		"canSetAcceptanceFilter": &procSetAcceptanceFilter,
+		"canSetBitrate":          &procSetBitrate,
+		"canSetBusParams":        &procSetBusParams,
+		"canSetBusParamsC200":    &procSetBusParamsC200,
+		"canSetBusOutputControl": &procSetBusOutputControl,
+		"canReadErrorCounters":   &procReadErrorCounters,
+		"canRead":                &procRead,
+		"canReadWait":            &procReadWait,
+		"canWrite":               &procWrite,
+		"canWriteSync":           &procWriteSync,
+		"canWriteWait":           &procWriteWait,
+		"kvSetNotifyCallback":    &prockvSetNotifyCallback,
+	}
+)
+
 func init() {
+	canlib32, err := syscall.LoadDLL("canlib32.dll")
+	if err != nil {
+		InitErr = err
+		return
+	}
+
+	for funcName, procPtr := range dllFuncs {
+		proc, err := canlib32.FindProc(funcName)
+		if err != nil {
+			InitErr = fmt.Errorf("failed to find procedure %s: %w", funcName, err)
+			canlib32.Release()
+			return
+		}
+		*procPtr = proc
+	}
+
 	if err := InitializeLibrary(); err != nil {
-		log.Println("canlib InitializeLibrary() error:", err)
+		InitErr = fmt.Errorf("canlib InitializeLibrary error: %w", err)
 		return
 	}
 }
 
 var (
-	canlib32                = syscall.NewLazyDLL("canlib32.dll")
-	procInitializeLibrary   = canlib32.NewProc("canInitializeLibrary")
-	procUnloadLibrary       = canlib32.NewProc("canUnloadLibrary")
-	procGetNumberOfChannels = canlib32.NewProc("canGetNumberOfChannels")
-	procGetChannelData      = canlib32.NewProc("canGetChannelData")
-	procGetErrorText        = canlib32.NewProc("canGetErrorText")
-	procOpenChannel         = canlib32.NewProc("canOpenChannel")
-	procGetVersion          = canlib32.NewProc("canGetVersion")
-	procAccept              = canlib32.NewProc("canAccept")
-	procClose               = canlib32.NewProc("canClose")
-	procBusOn               = canlib32.NewProc("canBusOn")
-	procBusOff              = canlib32.NewProc("canBusOff")
-	procFlushReceiveQueue   = canlib32.NewProc("canFlushReceiveQueue")
-	procFlushTransmitQueue  = canlib32.NewProc("canFlushTransmitQueue")
-	procObjBufAllocate      = canlib32.NewProc("canObjBufAllocate")
-	procObjBufWrite         = canlib32.NewProc("canObjBufWrite")
-	procResetBus            = canlib32.NewProc("canResetBus")
-	procSetAcceptanceFilter = canlib32.NewProc("canSetAcceptanceFilter")
-	procSetBitrate          = canlib32.NewProc("canSetBitrate")
-	procSetBusParams        = canlib32.NewProc("canSetBusParams")
-	procSetBusParamsC200    = canlib32.NewProc("canSetBusParamsC200")
-	procSetBusOutputControl = canlib32.NewProc("canSetBusOutputControl")
-	procReadErrorCounters   = canlib32.NewProc("canReadErrorCounters")
-	procRead                = canlib32.NewProc("canRead")
-	procReadWait            = canlib32.NewProc("canReadWait")
-	procWrite               = canlib32.NewProc("canWrite")
-	procWriteSync           = canlib32.NewProc("canWriteSync")
-	procWriteWait           = canlib32.NewProc("canWriteWait")
-	prockvSetNotifyCallback = canlib32.NewProc("kvSetNotifyCallback")
+	procInitializeLibrary   *syscall.Proc
+	procUnloadLibrary       *syscall.Proc
+	procGetNumberOfChannels *syscall.Proc
+	procGetChannelData      *syscall.Proc
+	procGetErrorText        *syscall.Proc
+	procOpenChannel         *syscall.Proc
+	procGetVersion          *syscall.Proc
+	procAccept              *syscall.Proc
+	procClose               *syscall.Proc
+	procBusOn               *syscall.Proc
+	procBusOff              *syscall.Proc
+	procFlushReceiveQueue   *syscall.Proc
+	procFlushTransmitQueue  *syscall.Proc
+	procObjBufAllocate      *syscall.Proc
+	procObjBufWrite         *syscall.Proc
+	procResetBus            *syscall.Proc
+	procSetAcceptanceFilter *syscall.Proc
+	procSetBitrate          *syscall.Proc
+	procSetBusParams        *syscall.Proc
+	procSetBusParamsC200    *syscall.Proc
+	procSetBusOutputControl *syscall.Proc
+	procReadErrorCounters   *syscall.Proc
+	procRead                *syscall.Proc
+	procReadWait            *syscall.Proc
+	procWrite               *syscall.Proc
+	procWriteSync           *syscall.Proc
+	procWriteWait           *syscall.Proc
+	prockvSetNotifyCallback *syscall.Proc
 )
 
 // Handle is a handle to a CAN channel (circuit).
@@ -355,14 +403,33 @@ func (hnd Handle) Read() (*CANMessage, error) {
 
 // Reads a message from the receive buffer. If no message is available, the function waits until a message arrives or a timeout occurs.
 func (hnd Handle) ReadWait(timeout uint32) (*CANMessage, error) {
-	msg := &CANMessage{
-		Data: make([]byte, 64),
-	}
-	r1, _, _ := procReadWait.Call(uintptr(hnd), uintptr(unsafe.Pointer(&msg.Identifier)), uintptr(unsafe.Pointer(&msg.Data[0])), uintptr(unsafe.Pointer(&msg.DLC)), uintptr(unsafe.Pointer(&msg.Flags)), uintptr(unsafe.Pointer(&msg.Timestamp)), uintptr(timeout))
+	var (
+		identifier uint32
+		data       [64]byte
+		dlc        uint32
+		flags      uint32
+		timestamp  uint32
+	)
+
+	r1, _, _ := procReadWait.Call(
+		uintptr(hnd),
+		uintptr(unsafe.Pointer(&identifier)),
+		uintptr(unsafe.Pointer(&data[0])),
+		uintptr(unsafe.Pointer(&dlc)),
+		uintptr(unsafe.Pointer(&flags)),
+		uintptr(unsafe.Pointer(&timestamp)),
+		uintptr(timeout),
+	)
 	if err := NewError(int32(r1)); err != nil {
 		return nil, err
 	}
-	return msg, nil
+	return &CANMessage{
+		Identifier: identifier,
+		Data:       data[:dlc],
+		DLC:        dlc,
+		Flags:      flags,
+		Timestamp:  timestamp,
+	}, nil
 }
 
 // This function sends a CAN message.

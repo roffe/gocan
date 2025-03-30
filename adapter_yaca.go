@@ -5,11 +5,13 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
 	"time"
 
+	"github.com/albenik/bcd"
 	"go.bug.st/serial"
 )
 
@@ -21,7 +23,7 @@ func init() {
 		Capabilities: AdapterCapabilities{
 			HSCAN: true,
 			KLine: false,
-			SWCAN: true,
+			SWCAN: false,
 		},
 		New: NewYACA,
 	}); err != nil {
@@ -168,7 +170,7 @@ func (ya *YACA) parse(ctx context.Context, buff *bytes.Buffer, readBuffer []byte
 			by := buff.Bytes()
 			switch by[0] {
 			case 'F':
-				if err := decodeStatus(by); err != nil {
+				if err := ya.decodeStatus(by); err != nil {
 					ya.cfg.OnMessage(fmt.Sprintf("CAN status error: %v", err))
 				}
 			case 't':
@@ -196,6 +198,36 @@ func (ya *YACA) parse(ctx context.Context, buff *bytes.Buffer, readBuffer []byte
 		}
 		buff.WriteByte(b)
 	}
+}
+
+func (ya *YACA) decodeStatus(b []byte) error {
+	bs := int(bcd.ToUint16(b[1:]))
+	//log.Printf("%08b\n", bs)
+	switch {
+	case ya.checkBitSet(bs, 1):
+		return errors.New("CAN receive FIFO queue full")
+	case ya.checkBitSet(bs, 2):
+		return errors.New("CAN transmit FIFO queue full")
+	case ya.checkBitSet(bs, 3):
+		return errors.New("error warning (EI)")
+	case ya.checkBitSet(bs, 4):
+		return errors.New("data overrun (DOI)") // see SJA1000 datasheet
+	case ya.checkBitSet(bs, 5):
+		return errors.New("not used")
+	case ya.checkBitSet(bs, 6):
+		return errors.New("error passive (EPI)") // see SJA1000 datasheet
+	case ya.checkBitSet(bs, 7):
+		return errors.New("arbitration lost (ALI)") // see SJA1000 datasheet *
+	case ya.checkBitSet(bs, 8):
+		return errors.New("bus error (BEI)") // see SJA1000 datasheet **"
+
+	}
+	return nil
+}
+
+func (ya *YACA) checkBitSet(n, k int) bool {
+	v := n & (1 << (k - 1))
+	return v == 1
 }
 
 func (ya *YACA) sendManager(ctx context.Context) {

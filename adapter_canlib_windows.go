@@ -14,11 +14,15 @@ import (
 )
 
 const (
-	defaultReadTimeoutMs  = 100
+	defaultReadTimeoutMs  = 20
 	defaultWriteTimeoutMs = defaultReadTimeoutMs
 )
 
 func init() {
+	if canlib.InitErr != nil {
+		log.Println("Kvaser driver not loaded:", canlib.InitErr)
+		return
+	}
 	channels, err := canlib.GetNumberOfChannels()
 	if err == nil {
 		for channel := range channels {

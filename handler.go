@@ -54,13 +54,26 @@ func (h *handler) run(ctx context.Context) {
 				return
 			}
 			delete(h.subs, sub)
-
 		case frame, ok := <-h.adapter.Recv():
 			if !ok {
 				log.Println("incoming channel closed")
 				return
 			}
-			h.processFrame(frame)
+			for sub := range h.subs {
+				select {
+				case <-sub.ctx.Done():
+					h.unregister <- sub
+					continue
+				default:
+					if sub.filterCount == 0 {
+						sub.Deliver(frame)
+						continue
+					}
+					if _, ok := sub.identifiers[frame.Identifier]; ok {
+						sub.Deliver(frame)
+					}
+				}
+			}
 		}
 	}
 }
@@ -69,32 +82,4 @@ func (h *handler) Close() {
 	h.closeOnce.Do(func() {
 		close(h.close)
 	})
-}
-
-func (h *handler) processFrame(frame *CANFrame) {
-	for sub := range h.subs {
-		select {
-		case <-sub.ctx.Done():
-			h.unregister <- sub
-			continue
-		default:
-			if sub.filterCount == 0 {
-				h.deliver(sub, frame)
-				continue
-			}
-			if _, ok := sub.identifiers[frame.Identifier]; ok {
-				h.deliver(sub, frame)
-			}
-		}
-	}
-}
-
-func (h *handler) deliver(sub *Subscriber, frame *CANFrame) {
-	select {
-	case sub.responseChan <- frame:
-	default:
-		//if atomic.AddUint32(&sub.errcount, 1) > 10 {
-		//	h.unregister <- sub
-		//}
-	}
 }

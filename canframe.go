@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/fatih/color"
 )
@@ -27,14 +26,16 @@ type CANFrame struct {
 	RTR        bool
 	Data       []byte
 	FrameType  CANFrameType
-	Timeout    time.Duration
+	Timeout    uint32
 }
 
 // NewExtendedFrame creates a new CANFrame and copies the data slice
 func NewExtendedFrame(identifier uint32, data []byte, frameType CANFrameType) *CANFrame {
+	d := make([]byte, len(data))
+	copy(d, data)
 	return &CANFrame{
 		Identifier: identifier,
-		Data:       append([]byte(nil), data...),
+		Data:       d,
 		FrameType:  frameType,
 		Extended:   true,
 	}
@@ -42,9 +43,11 @@ func NewExtendedFrame(identifier uint32, data []byte, frameType CANFrameType) *C
 
 // NewFrame creates a new CANFrame and copies the data slice
 func NewFrame(identifier uint32, data []byte, frameType CANFrameType) *CANFrame {
+	d := make([]byte, len(data))
+	copy(d, data)
 	return &CANFrame{
 		Identifier: identifier,
-		Data:       append([]byte(nil), data...),
+		Data:       d,
 		FrameType:  frameType,
 	}
 }

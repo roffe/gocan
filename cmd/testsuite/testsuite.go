@@ -226,15 +226,14 @@ func createProducer(ctx context.Context, cl *gocan.Client, idx int) {
 
 func createChainer(ctx context.Context, cl *gocan.Client, idx int, last bool) {
 	nodeID := uint32(0x100 + idx)
-	incoming := make(chan *gocan.CANFrame, 10)
-	sub := cl.SubscribeChan(ctx, incoming, nodeID)
+	sub := cl.Subscribe(ctx, nodeID)
 	defer sub.Close()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case frame := <-incoming:
+		case frame := <-sub.Chan():
 			log.Printf("#%d Frame: %v\n", idx, frame)
 			if !last {
 				frame.Identifier = nodeID + 1

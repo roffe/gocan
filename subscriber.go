@@ -3,7 +3,6 @@ package gocan
 import (
 	"context"
 	"errors"
-	"fmt"
 	"slices"
 	"sync"
 	"time"
@@ -33,7 +32,10 @@ func (s *Subscriber) Wait(ctx context.Context, timeout time.Duration) (*CANFrame
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case f := <-s.responseChan:
+	case f, ok := <-s.responseChan:
+		if !ok {
+			return nil, ErrResponsechannelClosed
+		}
 		if f == nil {
 			return nil, errors.New("got nil frame")
 		}
@@ -44,7 +46,17 @@ func (s *Subscriber) Wait(ctx context.Context, timeout time.Duration) (*CANFrame
 			identifiers = append(identifiers, id)
 		}
 		slices.Sort(identifiers)
-		return nil, fmt.Errorf("wait timeout (%dms) for frame 0x%03X", timeout.Milliseconds(), identifiers)
+		return nil, &TimeoutError{
+			Timeout: timeout.Milliseconds(),
+			Frames:  identifiers,
+			Type:    "wait",
+		}
+	}
+}
 
+func (s *Subscriber) Deliver(f *CANFrame) {
+	select {
+	case s.responseChan <- f:
+	default:
 	}
 }

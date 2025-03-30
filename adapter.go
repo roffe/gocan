@@ -32,10 +32,18 @@ type AdapterInfo struct {
 	New                func(*AdapterConfig) (Adapter, error)
 }
 
+func (a *AdapterInfo) String() string {
+	return fmt.Sprintf("%s | %s, requires serial port: %v ", a.Name, a.Description, a.RequiresSerialPort)
+}
+
 type AdapterCapabilities struct {
 	HSCAN bool
 	SWCAN bool
 	KLine bool
+}
+
+func (a *AdapterCapabilities) String() string {
+	return fmt.Sprintf("HSCAN: %v, SWCAN: %v, KLine: %v", a.HSCAN, a.SWCAN, a.KLine)
 }
 
 type AdapterConfig struct {
