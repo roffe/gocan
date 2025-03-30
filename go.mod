@@ -4,7 +4,7 @@ module github.com/roffe/gocan
 
 // replace github.com/roffe/gocanlib => ..\gocanlib
 
-replace github.com/roffe/goftdi => ..\goftdi
+// replace github.com/roffe/goftdi => ..\goftdi
 
 go 1.24.0
 
