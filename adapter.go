@@ -56,6 +56,7 @@ type AdapterConfig struct {
 	PrintVersion           bool
 	OnMessage              func(string)
 	MinimumFirmwareVersion string
+	AdditionalConfig       map[string]string // for future use
 }
 
 var adapterMap = make(map[string]*AdapterInfo)
