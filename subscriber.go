@@ -8,8 +8,13 @@ import (
 	"time"
 )
 
+var subtimeoutPool = sync.Pool{
+	New: func() any {
+		return time.NewTimer(0)
+	},
+}
+
 type Subscriber struct {
-	ctx          context.Context
 	c            *Client
 	identifiers  map[uint32]struct{}
 	filterCount  int
@@ -29,6 +34,10 @@ func (s *Subscriber) Chan() <-chan *CANFrame {
 }
 
 func (s *Subscriber) Wait(ctx context.Context, timeout time.Duration) (*CANFrame, error) {
+	wait := subtimeoutPool.Get().(*time.Timer)
+	wait.Reset(timeout)
+	defer subtimeoutPool.Put(wait)
+
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -40,7 +49,7 @@ func (s *Subscriber) Wait(ctx context.Context, timeout time.Duration) (*CANFrame
 			return nil, errors.New("got nil frame")
 		}
 		return f, nil
-	case <-time.After(timeout):
+	case <-wait.C:
 		identifiers := make([]uint32, 0, len(s.identifiers))
 		for id := range s.identifiers {
 			identifiers = append(identifiers, id)
