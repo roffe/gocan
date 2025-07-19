@@ -3,6 +3,7 @@ package passthru
 import "fmt"
 
 const (
+	MSG_DATA_SIZE = 4128
 	//
 	// J2534-1 v04.04 ProtocolID Values
 	//
@@ -41,6 +42,10 @@ const (
 	J1850PWM_CH128        = (J1850PWM_CH1 + 127)
 	ISO9141_CH1           = 0x00009240
 	ISO9141_CH2           = (ISO9141_CH1 + 1)
+	ISO9141_CH3           = 0x00009242
+	ISO9141_K             = ISO9141_CH1
+	ISO9141_L             = ISO9141_CH2
+	ISO9141_INNO          = ISO9141_CH3
 	ISO9141_CH128         = (ISO9141_CH1 + 127)
 	ISO14230_CH1          = 0x00009320
 	ISO14230_CH2          = (ISO14230_CH1 + 1)
@@ -93,14 +98,18 @@ const (
 	ERR_NOT_UNIQUE            = 0x18 // A CAN ID in pPatternMsg or pFlowControlMsg matches either ID in an existing FLOW_CONTROL_FILTER
 	ERR_INVALID_BAUDRATE      = 0x19 // The desired baud rate cannot be achieved within the tolerance specified in SAE J2534-1 Section 6.5
 	ERR_INVALID_DEVICE_ID     = 0x1A // Device ID invalid.
+	// OP2.0 Tactrix specific
+	ERR_OEM_VOLTAGE_TOO_LOW  = 0x78 // OP2.0: the requested output voltage is lower than the OP2.0 capabilities
+	ERR_OEM_VOLTAGE_TOO_HIGH = 0x77 // OP2.0: the requested output voltage is higher than the OP2.0 capabilities
 
 	//
 	// J2534-1 v04.04 Connect Flags
 	//
 	CAN_29BIT_ID        = 0x0100
-	ISO9141_NO_CHECKSUM = 0x0200
+	ISO9141_NO_CHECKSUM = 0x00000200
 	CAN_ID_BOTH         = 0x0800
 	ISO9141_K_LINE_ONLY = 0x1000
+	SNIFF_MODE          = 0x10000000 // OP2.0: listens to a bus (e.g. CAN) without acknowledging
 
 	//
 	// J2534-1 v04.04 Filter Type Values
@@ -315,7 +324,7 @@ type PassThruMsg struct {
 	// extra data bytes are present in the message, ExtraDataIndex shall be set equal to
 	// DataSize. Therefore, if DataSize equals ExtraDataIndex, there are no extra data
 	// bytes. If ExtraDataIndex=0, then all bytes in the data array are extra bytes.
-	Data [4128]byte
+	Data [MSG_DATA_SIZE]byte
 }
 
 type Capabilities struct {

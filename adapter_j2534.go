@@ -220,14 +220,14 @@ func (ma *J2534) allowAll() {
 		ProtocolID:     ma.protocol,
 		DataSize:       4,
 		ExtraDataIndex: 4,
-		Data:           [4128]byte{0x00, 0x00, 0x00, 0x00},
+		Data:           [passthru.MSG_DATA_SIZE]byte{0x00, 0x00, 0x00, 0x00},
 		TxFlags:        txflags,
 	}
 	patternMsg := &passthru.PassThruMsg{
 		ProtocolID:     ma.protocol,
 		DataSize:       4,
 		ExtraDataIndex: 4,
-		Data:           [4128]byte{0x00, 0x00, 0x00, 0x00},
+		Data:           [passthru.MSG_DATA_SIZE]byte{0x00, 0x00, 0x00, 0x00},
 		TxFlags:        txflags,
 	}
 	if err := ma.h.PassThruStartMsgFilter(ma.channelID, passthru.PASS_FILTER, maskMsg, patternMsg, nil, &filterID); err != nil {
@@ -249,7 +249,7 @@ func (ma *J2534) setupFilters() error {
 		ProtocolID:     ma.protocol,
 		DataSize:       4,
 		ExtraDataIndex: 4,
-		Data:           [4128]byte{0x00, 0x00, 0xff, 0xff},
+		Data:           [passthru.MSG_DATA_SIZE]byte{0x00, 0x00, 0xff, 0xff},
 		TxFlags:        txflags,
 	}
 	for i, filter := range ma.cfg.CANFilter {
