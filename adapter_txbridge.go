@@ -7,12 +7,15 @@ import (
 	"io"
 	"log"
 	"net"
+	"os"
 	"time"
 
 	"github.com/roffe/gocan/pkg/serialcommand"
 	"go.bug.st/serial"
 	"golang.org/x/mod/semver"
 )
+
+var txAddress = "192.168.4.1:1337"
 
 func init() {
 	if err := RegisterAdapter(&AdapterInfo{
@@ -60,8 +63,15 @@ func NewTxbridge(name string) func(cfg *AdapterConfig) (Adapter, error) {
 func (tx *Txbridge) Open(ctx context.Context) error {
 	switch tx.name {
 	case "txbridge wifi":
+		address := txAddress
+		if value, exists := tx.cfg.AdditionalConfig["address"]; exists && value != "" {
+			address = value
+		}
+		if value := os.Getenv("TXBRIDGE_ADDRESS"); value != "" {
+			address = value
+		}
 		d := net.Dialer{Timeout: 2 * time.Second}
-		port, err := d.Dial("tcp", "192.168.4.1:1337")
+		port, err := d.Dial("tcp", address)
 		if err != nil {
 			return err
 		}
@@ -93,6 +103,7 @@ func (tx *Txbridge) Open(ctx context.Context) error {
 
 	if tx.cfg.MinimumFirmwareVersion != "" {
 		cmd := serialcommand.NewSerialCommand('v', []byte{0x10})
+
 		buf, err := cmd.MarshalBinary()
 		if err != nil {
 			tx.port.Close()
@@ -117,7 +128,7 @@ func (tx *Txbridge) Open(ctx context.Context) error {
 
 		if cmd.Command != 'v' {
 			tx.port.Close()
-			return fmt.Errorf("unexpected response: %X %X", cmd.Command, cmd.Data)
+			return fmt.Errorf("unexpected version response: %X %X", cmd.Command, cmd.Data)
 		}
 
 		tx.cfg.OnMessage("txbridge firmware version: " + string(cmd.Data))
