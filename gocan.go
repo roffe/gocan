@@ -107,7 +107,7 @@ func (c *Client) SendExtended(identifier uint32, data []byte, f CANFrameType) er
 // Send and wait up to <timeout> for a answer on given identifiers
 func (c *Client) SendAndWait(ctx context.Context, frame *CANFrame, timeout time.Duration, identifiers ...uint32) (*CANFrame, error) {
 	frame.Timeout = uint32(timeout.Milliseconds())
-	sub := newSub(ctx, c, 1, identifiers...)
+	sub := newSub(c, 1, identifiers...)
 	select {
 	case c.fh.register <- sub:
 	default:
@@ -124,7 +124,7 @@ func (c *Client) SendAndWait(ctx context.Context, frame *CANFrame, timeout time.
 
 // Wait for a certain CAN identifier for up to <timeout>
 func (c *Client) Wait(ctx context.Context, timeout time.Duration, identifiers ...uint32) (*CANFrame, error) {
-	sub := newSub(ctx, c, 1, identifiers...)
+	sub := newSub(c, 1, identifiers...)
 	select {
 	case c.fh.register <- sub:
 	default:
@@ -160,7 +160,6 @@ func (c *Client) SubscribeFunc(ctx context.Context, fn func(*CANFrame), identifi
 // Subscribe to CAN identifiers with provided channel
 func (c *Client) SubscribeChan(ctx context.Context, channel chan *CANFrame, identifiers ...uint32) *Subscriber {
 	sub := &Subscriber{
-		ctx:          ctx,
 		c:            c,
 		identifiers:  toSet(identifiers),
 		filterCount:  len(identifiers),
@@ -172,14 +171,13 @@ func (c *Client) SubscribeChan(ctx context.Context, channel chan *CANFrame, iden
 
 // Subscribe to CAN identifiers and return a message channel
 func (c *Client) Subscribe(ctx context.Context, identifiers ...uint32) *Subscriber {
-	sub := newSub(ctx, c, 20, identifiers...)
+	sub := newSub(c, 20, identifiers...)
 	c.fh.register <- sub
 	return sub
 }
 
-func newSub(ctx context.Context, c *Client, bufferSize int, identifiers ...uint32) *Subscriber {
+func newSub(c *Client, bufferSize int, identifiers ...uint32) *Subscriber {
 	return &Subscriber{
-		ctx:          ctx,
 		c:            c,
 		identifiers:  toSet(identifiers),
 		filterCount:  len(identifiers),
