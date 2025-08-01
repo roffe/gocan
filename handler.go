@@ -34,6 +34,8 @@ func (h *handler) run(ctx context.Context) {
 			//close(sub.callback)
 		}
 	}()
+
+	recvChan := h.adapter.Recv()
 	for {
 		select {
 		case <-h.close:
@@ -54,24 +56,18 @@ func (h *handler) run(ctx context.Context) {
 				return
 			}
 			delete(h.subs, sub)
-		case frame, ok := <-h.adapter.Recv():
+		case frame, ok := <-recvChan:
 			if !ok {
 				log.Println("incoming channel closed")
 				return
 			}
 			for sub := range h.subs {
-				select {
-				case <-sub.ctx.Done():
-					h.unregister <- sub
+				if sub.filterCount == 0 {
+					sub.Deliver(frame)
 					continue
-				default:
-					if sub.filterCount == 0 {
-						sub.Deliver(frame)
-						continue
-					}
-					if _, ok := sub.identifiers[frame.Identifier]; ok {
-						sub.Deliver(frame)
-					}
+				}
+				if _, ok := sub.identifiers[frame.Identifier]; ok {
+					sub.Deliver(frame)
 				}
 			}
 		}
