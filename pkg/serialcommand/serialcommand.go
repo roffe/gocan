@@ -19,11 +19,19 @@ func (sc *SerialCommand) MarshalBinary() ([]byte, error) {
 		return nil, fmt.Errorf("data size is too big")
 	}
 	checksum := sc.Checksum()
-	buf := make([]byte, 0, 3+len(sc.Data))
-	buf = append(buf, sc.Command, byte(len(sc.Data)))
-	buf = append(buf, sc.Data...)
-	buf = append(buf, checksum)
-	return buf, nil
+
+	data := make([]byte, len(sc.Data)+3)
+	data[0] = sc.Command
+	data[1] = byte(len(sc.Data))
+	copy(data[2:], sc.Data)
+	data[len(data)-1] = checksum
+
+	// buf := make([]byte, 0, 3+len(sc.Data))
+	// buf = append(buf, sc.Command, byte(len(sc.Data)))
+	// buf = append(buf, sc.Data...)
+	// buf = append(buf, checksum)
+
+	return data, nil
 }
 
 func (sc *SerialCommand) UnmarshalBinary(data []byte) error {
