@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"sync"
 	"time"
 
@@ -28,9 +29,6 @@ var (
 
 const (
 	MaxCommandSize = 1024
-	ReadBufferSize = 32
-	TermNAK        = 0xff
-	TermACK        = 0x00
 )
 
 const (
@@ -91,6 +89,10 @@ type CombiAdapter struct {
 	cmdBuffer []byte
 	closeOnce sync.Once
 	txPool    sync.Pool
+
+	adcFilterChan   chan bool
+	adcValueChan    chan float32
+	thermoValueChan chan float32
 }
 
 func init() {
@@ -119,16 +121,14 @@ func init() {
 
 func NewCombi(cfg *AdapterConfig) (Adapter, error) {
 	return &CombiAdapter{
-		BaseAdapter: NewBaseAdapter("CombiAdapter", cfg),
-		sendSem:     make(chan byte, 1),
+		BaseAdapter:     NewBaseAdapter("CombiAdapter", cfg),
+		sendSem:         make(chan byte, 1),
+		adcFilterChan:   make(chan bool, 1),
+		adcValueChan:    make(chan float32),
+		thermoValueChan: make(chan float32, 1),
 		txPool: sync.Pool{
 			New: func() any {
-				b := make([]byte, 19)
-				b[0] = cmd_can_txframe
-				// b[1] = 0x00
-				b[2] = 0x0F // length always same
-				// b[18] = 0x00
-				return b
+				return []byte{cmd_can_txframe, 0x00, 0x0F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
 			},
 		},
 	}, nil
@@ -144,7 +144,6 @@ func (ca *CombiAdapter) Open(ctx context.Context) error {
 	ca.dev, err = ca.usbCtx.OpenDeviceWithVIDPID(combiVid, combiPid)
 	if err != nil {
 		if ca.dev == nil {
-			ca.dev.Close()
 			return errors.New("CombiAdapter not found")
 		} else {
 			ca.dev.Close()
@@ -158,9 +157,9 @@ func (ca *CombiAdapter) Open(ctx context.Context) error {
 		return errors.New("CombiAdapter not found 2")
 	}
 
-	if err := ca.dev.SetAutoDetach(true); err != nil {
-		ca.cfg.OnMessage(fmt.Sprintf("failed to set auto detach: %v", err))
-	}
+	//if err := ca.dev.SetAutoDetach(true); err != nil {
+	//	ca.cfg.OnMessage(fmt.Sprintf("failed to set auto detach: %v", err))
+	//}
 
 	ca.devCfg, err = ca.dev.Config(1)
 	if err != nil {
@@ -225,24 +224,25 @@ func (ca *CombiAdapter) Open(ctx context.Context) error {
 		}
 	}
 
-	// Set can bitrate
-	if err := ca.setBitrate(ctx); err != nil {
-		ca.iface.Close()
-		ca.devCfg.Close()
-		ca.dev.Close()
-		ca.usbCtx.Close()
-		return err
-	}
+	if ca.cfg.AdditionalConfig["NoConnect"] != "true" {
+		// Set can bitrate
+		if err := ca.setBitrate(ctx); err != nil {
+			ca.iface.Close()
+			ca.devCfg.Close()
+			ca.dev.Close()
+			ca.usbCtx.Close()
+			return err
+		}
 
-	// Open canbus
-	if err := ca.canCtrl(1); err != nil {
-		ca.iface.Close()
-		ca.devCfg.Close()
-		ca.dev.Close()
-		ca.usbCtx.Close()
-		return fmt.Errorf("failed to open canbus: %w", err)
+		// Open canbus
+		if err := ca.canCtrl(1); err != nil {
+			ca.iface.Close()
+			ca.devCfg.Close()
+			ca.dev.Close()
+			ca.usbCtx.Close()
+			return fmt.Errorf("failed to open canbus: %w", err)
+		}
 	}
-
 	go ca.sendManager(ctx)
 	go ca.recvManager(ctx)
 
@@ -259,7 +259,7 @@ func (ca *CombiAdapter) Close() error {
 }
 
 func (ca *CombiAdapter) ReadVersion(ctx context.Context) (string, error) {
-	rctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	rctx, cancel := context.WithTimeout(ctx, 20*time.Millisecond)
 	defer cancel()
 	if _, err := ca.out.WriteContext(rctx, []byte{cmd_brd_fwversion, 0x00, 0x00, 0x00}); err != nil {
 		return "", err
@@ -271,6 +271,85 @@ func (ca *CombiAdapter) ReadVersion(ctx context.Context) (string, error) {
 	}
 	//  20 00 02 01 01 00
 	return fmt.Sprintf("CombiAdapter v%d.%d", vers[4], vers[3]), nil
+}
+
+func (ca *CombiAdapter) GetADCFiltering(ctx context.Context, channel int) (bool, error) {
+	if err := ca.sendCommand(ctx, cmd_brd_adcfilter, []byte{byte(channel)}, 10); err != nil {
+		return false, err
+	}
+	select {
+	case b := <-ca.adcFilterChan:
+		return b, nil
+	case <-time.After(5 * time.Millisecond):
+		return false, fmt.Errorf("timeout waiting for ADC filter response")
+	}
+}
+
+func (ca *CombiAdapter) SetADCFiltering(ctx context.Context, channel int, enabled bool) error {
+	var enableByte byte
+	if enabled {
+		enableByte = 0x01
+	}
+	return ca.sendCommand(ctx, cmd_brd_adcfilter, []byte{byte(channel), enableByte}, 10)
+}
+
+func (ca *CombiAdapter) GetADCValue(ctx context.Context, channel int) (float64, error) {
+	//ca.sendChan <- &CANFrame{
+	//	Identifier: SystemMsg,
+	//	Data:       []byte{cmd_brd_adc, 0x00, 0x01, byte(channel), 0x00},
+	//}
+
+	if err := ca.sendCommand(ctx, cmd_brd_adc, []byte{byte(channel)}, 10); err != nil {
+		return 0, fmt.Errorf("failed to send ADC value request: %w", err)
+	}
+
+	select {
+	case f := <-ca.adcValueChan:
+		return float64(f), nil
+	case <-time.After(200 * time.Millisecond):
+		return 0, fmt.Errorf("timeout waiting for ADC value response")
+	}
+}
+
+func (ca *CombiAdapter) GetThermoValue(ctx context.Context) (float32, error) {
+	ca.sendChan <- &CANFrame{
+		Identifier: SystemMsg,
+		Data:       []byte{cmd_brd_egt, 0x00, 0x00, 0x00},
+	}
+	select {
+	case f := <-ca.thermoValueChan:
+		return f, nil
+	case <-time.After(5 * time.Millisecond):
+		return 0, fmt.Errorf("timeout waiting for thermo value response")
+	}
+}
+
+func (ca *CombiAdapter) sendCommand(ctx context.Context, cmd byte, data []byte, timeout int) error {
+	if len(data) > MaxCommandSize {
+		return fmt.Errorf("%w: %d", ErrCommandSizeTooLarge, len(data))
+	}
+
+	select {
+	case ca.sendSem <- cmd:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
+	gctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Millisecond)
+	defer cancel()
+
+	length := len(data)
+	payload := make([]byte, 3+length+1) // cmd + size (2 bytes) + data + terminator
+	payload[0] = cmd
+	payload[1] = byte(length >> 8)   // size high byte
+	payload[2] = byte(length & 0xff) // size low byte
+	copy(payload[3:], data)
+	payload[3+length] = term_ack // terminator
+
+	if _, err := ca.out.WriteContext(gctx, payload); err != nil {
+		return fmt.Errorf("failed to send cmd %2X %2X: %w", cmd, data, err)
+	}
+	return nil
 }
 
 func (ca *CombiAdapter) closeAdapter() error {
@@ -303,18 +382,22 @@ func (ca *CombiAdapter) closeAdapter() error {
 }
 
 var combiValidCommands = map[byte]struct{}{
+	cmd_can_open:    {},
+	cmd_can_bitrate: {},
+	cmd_can_frame:   {},
+	cmd_can_txframe: {},
+
 	cmd_brd_fwversion: {},
-	cmd_can_open:      {},
-	cmd_can_bitrate:   {},
-	cmd_can_frame:     {},
-	cmd_can_txframe:   {},
+	cmd_brd_adcfilter: {},
+	cmd_brd_adc:       {},
+	cmd_brd_egt:       {},
 }
 
 func (ca *CombiAdapter) recvManager(ctx context.Context) {
 	if ca.cfg.Debug {
 		defer log.Println("recvManager exited")
 	}
-	var readBuff [ReadBufferSize * 4]byte
+	var readBuff [MaxCommandSize]byte
 	var parseStep int
 	var command byte
 	var commandSize uint16
@@ -339,11 +422,14 @@ func (ca *CombiAdapter) recvManager(ctx context.Context) {
 					continue
 				}
 			}
+			//if n == 0 {
+			//	time.Sleep(5 * time.Millisecond)
+			//	continue
+			//}
 			for _, b := range readBuff[:n] {
 				switch parseStep {
 				case stepCommand:
-					_, valid := combiValidCommands[b]
-					if !valid {
+					if _, valid := combiValidCommands[b]; !valid {
 						ca.SetError(fmt.Errorf("%w: %02X", ErrInvalidCommand, b))
 						parseStep = stepCommand // Explicit reset
 						continue
@@ -374,8 +460,25 @@ func (ca *CombiAdapter) recvManager(ctx context.Context) {
 						parseStep = stepTermination
 					}
 				case stepTermination:
-					commandData[commandPointer] = b
-					commandPointer++
+					if b == term_nak {
+						ca.SetError(fmt.Errorf("%w: %02X", ErrCommandTermination, b))
+						parseStep = stepCommand
+						continue
+					} else if b != term_ack {
+						ca.SetError(fmt.Errorf("unexpected termination byte: %02X, expected: %02X", b, term_ack))
+						parseStep = stepCommand
+						continue
+					}
+					//commandData[commandPointer] = b
+					//commandPointer++
+					if command == cmd_brd_adcfilter && commandSize == 1 {
+						commandData[3] = 0x01
+					}
+					if ca.cfg.Debug {
+						pkg := []byte{command, byte(commandSize >> 8), byte(commandSize)}
+						pkg = append(pkg, commandData[:commandPointer]...)
+						log.Printf("recv cmd: % 02X", pkg)
+					}
 					if err := ca.processCommand(command, commandData[:commandPointer]); err != nil {
 						ca.SetError(err)
 					}
@@ -387,8 +490,43 @@ func (ca *CombiAdapter) recvManager(ctx context.Context) {
 }
 
 func (ca *CombiAdapter) processCommand(cmd byte, data []byte) error {
-	// log.Printf("cmd: %02X, data: %X", cmd, data)
 	switch cmd {
+	case cmd_brd_adcfilter:
+		// log.Printf("ADC filter RAW: %X", data)
+		switch len(data) {
+		case 1:
+			if data[0] == 0xFF {
+				log.Printf("ADC filter err: %X", data)
+			}
+		case 2:
+			if data[0] == 0x01 {
+				ca.adcFilterChan <- true
+			} else {
+				ca.adcFilterChan <- false
+			}
+		case 3:
+			log.Printf("ADC filter: %X", data)
+		default:
+			log.Println("invalid ADC filter size", len(data))
+		}
+		return ca.handleControlCommand(cmd, data)
+	case cmd_brd_egt:
+		//log.Printf("EGT: %02X, data: %X", cmd, data)
+		select {
+		case ca.thermoValueChan <- math.Float32frombits(binary.LittleEndian.Uint32(data[1:5])):
+		default:
+			log.Println("thermoValueChan full, dropping value")
+		}
+		return ca.handleControlCommand(cmd, data)
+	case cmd_brd_adc:
+		// log.Printf("ADC: %02X, data: %X", cmd, data)
+		select {
+		case ca.adcValueChan <- math.Float32frombits(binary.LittleEndian.Uint32(data[0:4])):
+		default:
+			log.Println("adcValueChan full, dropping value")
+		}
+		//return ca.handleADC(cmd, data)
+		return ca.handleControlCommand(cmd, data)
 	case cmd_brd_fwversion, cmd_can_open, cmd_can_bitrate, cmd_can_txframe:
 		return ca.handleControlCommand(cmd, data)
 	case cmd_can_frame:
@@ -401,19 +539,17 @@ func (ca *CombiAdapter) processCommand(cmd byte, data []byte) error {
 func (ca *CombiAdapter) handleControlCommand(cmd byte, data []byte) error {
 	select {
 	case b := <-ca.sendSem:
-		if b != cmd && b != 'x' {
+		if b != cmd {
 			return fmt.Errorf("unexpected command: %02X, expected: %02X", cmd, b)
 		}
 	default:
 	}
-	if data[0] == term_nak {
-		return fmt.Errorf("%w: %2X", ErrCommandTermination, cmd)
-	}
+
 	return nil
 }
 
 func (ca *CombiAdapter) handleCANFrame(data []byte) error {
-	if len(data) != 16 {
+	if len(data) != 15 {
 		return fmt.Errorf("invalid CAN frame size: %d", len(data))
 	}
 	frame := NewFrame(
@@ -442,21 +578,20 @@ func (ca *CombiAdapter) sendManager(ctx context.Context) {
 		case <-ca.closeChan:
 			return
 		case frame := <-ca.sendChan:
-			ca.sendMessage(ctx, frame)
+			if frame.Identifier == SystemMsg {
+				ca.sendSem <- frame.Data[0]
+				_, err := ca.out.WriteContext(ctx, frame.Data)
+				if err != nil {
+					ca.SetError(fmt.Errorf("failed to send frame: %w", err))
+				}
+				continue
+			}
+			ca.sendCANMessage(ctx, frame)
 		}
 	}
 }
 
-func (ca *CombiAdapter) sendMessage(ctx context.Context, frame *CANFrame) {
-	if frame.Identifier >= SystemMsg {
-		if frame.Identifier == SystemMsg {
-			ca.sendSem <- 'x'
-			if _, err := ca.out.WriteContext(ctx, frame.Data); err != nil {
-				ca.SetError(fmt.Errorf("failed to send frame: %w", err))
-			}
-		}
-		return
-	}
+func (ca *CombiAdapter) sendCANMessage(ctx context.Context, frame *CANFrame) {
 	buff := ca.txPool.Get().([]byte)
 	defer ca.txPool.Put(buff)
 
@@ -481,8 +616,12 @@ func (ca *CombiAdapter) sendMessage(ctx context.Context, frame *CANFrame) {
 	//buff[18] = 0x00 // terminator
 
 	ca.sendSem <- cmd_can_txframe
-	if _, err := ca.out.WriteContext(ctx, buff); err != nil {
+	n, err := ca.out.WriteContext(ctx, buff)
+	if err != nil {
 		ca.SetError(fmt.Errorf("failed to send frame: %w", err))
+	}
+	if n != 19 {
+		ca.SetError(fmt.Errorf("sent %d bytes of data out of 19", n))
 	}
 }
 
@@ -492,17 +631,6 @@ func (ca *CombiAdapter) canCtrl(mode byte) error {
 	if _, err := ca.out.WriteContext(ctx, []byte{cmd_can_open, 0x00, 0x01, mode, 0x00}); err != nil {
 		return fmt.Errorf("failed to write to usb device: %w", err)
 	}
-
-	/*
-		resp := make([]byte, 4)
-		n, err := ca.in.ReadContext(ctx, resp)
-		if err != nil {
-			return fmt.Errorf("failed to read response: %w", err)
-		}
-		if !bytes.HasPrefix(resp, []byte{cmd_can_open, 0x00, 0x00, term_ack}) {
-			return fmt.Errorf("failed to open canbus: %X", resp[:n])
-		}
-	*/
 	return nil
 }
 
@@ -513,25 +641,11 @@ func (ca *CombiAdapter) setBitrate(ctx context.Context) error {
 	} else {
 		canrate = uint32(ca.cfg.CANRate * 1000)
 	}
-
-	payload := []byte{cmd_can_bitrate, 0x00, 0x04, byte(canrate >> 24), byte(canrate >> 16), byte(canrate >> 8), byte(canrate), 0x00}
-
-	wctx, cancel := context.WithTimeout(ctx, 400*time.Millisecond)
+	wctx, cancel := context.WithTimeout(ctx, 40*time.Millisecond)
 	defer cancel()
-	if _, err := ca.out.WriteContext(wctx, payload); err != nil {
+	if _, err := ca.out.WriteContext(wctx, []byte{cmd_can_bitrate, 0x00, 0x04, byte(canrate >> 24), byte(canrate >> 16), byte(canrate >> 8), byte(canrate), 0x00}); err != nil {
 		return fmt.Errorf("failed to write to usb device: %w", err)
 	}
-	/*
-		resp := make([]byte, 4)
-		n, err := ca.in.ReadContext(ctx, resp)
-		if err != nil {
-			return fmt.Errorf("failed to read response: %w", err)
-		}
-		if !bytes.HasPrefix(resp, []byte{cmd_can_bitrate, 0x00, 0x00, term_ack}) {
-			return fmt.Errorf("failed to set bitrate: %X", resp[:n])
-		}
-	*/
-
 	return nil
 }
 
