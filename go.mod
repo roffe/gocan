@@ -13,7 +13,7 @@ require (
 	github.com/bendikro/dl v0.0.0-20190410215913-e41fdb9069d4
 	github.com/fatih/color v1.18.0
 	github.com/google/gousb v1.1.3
-	go.bug.st/serial v1.6.2
+	go.bug.st/serial v1.6.4
 	go.einride.tech/can v0.12.1
 	golang.org/x/sync v0.11.0
 	google.golang.org/grpc v1.70.0
@@ -25,7 +25,6 @@ require github.com/roffe/goftdi v0.0.0-20250330120219-31feb988cb73
 require (
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/roffe/gocanusb v1.1.2
-	github.com/stretchr/testify v1.8.0 // indirect
 	golang.org/x/text v0.22.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250207221924-e9438ea467c6 // indirect
 )

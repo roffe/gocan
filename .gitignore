@@ -5,6 +5,7 @@
 *.exe
 *.zip
 *.rar
+*.dll
 tmp
 tmp/*
 dump
