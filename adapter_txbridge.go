@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/roffe/gocan/pkg/serialcommand"
@@ -66,9 +67,11 @@ func (tx *Txbridge) Open(ctx context.Context) error {
 		address := txAddress
 		if value, exists := tx.cfg.AdditionalConfig["address"]; exists && value != "" {
 			address = value
-		}
-		if value := os.Getenv("TXBRIDGE_ADDRESS"); value != "" {
+		} else if value := os.Getenv("TXBRIDGE_ADDRESS"); value != "" {
 			address = value
+		}
+		if !strings.HasSuffix(address, ":1337") {
+			address += ":1337" // Ensure the port is always set
 		}
 		d := net.Dialer{Timeout: 2 * time.Second}
 		port, err := d.Dial("tcp", address)
@@ -277,26 +280,27 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 				data := make([]byte, commandSize)
 				copy(data, cmdbuff[:cmdbuffPtr])
 				if commandChecksum != b {
-					tx.cfg.OnMessage(fmt.Sprintf("checksum error %q %02X != %02X", command, commandChecksum, b))
+					tx.SetError(fmt.Errorf("checksum error: expected %02X, got %02X", commandChecksum, b))
+					//tx.cfg.OnMessage(fmt.Sprintf("checksum error %q %02X != %02X", command, commandChecksum, b))
 					parsingCommand = false
 					commandSize = 0
 					commandChecksum = 0
 					cmdbuffPtr = 0
 					continue
 				}
-				var frame *CANFrame
+
 				switch command {
 				case 'T', 't':
-					frame = NewFrame(
+					tx.sendFrame(NewFrame(
 						uint32(data[0])<<8|uint32(data[1]),
 						data[2:],
 						Incoming,
-					)
+					))
 				case 'e':
-					switch data[0] {
+					switch data[1] {
 					case 0x31:
 						tx.SetError(fmt.Errorf("read timeout"))
-					case 0x06:
+					case 0x32:
 						tx.SetError(fmt.Errorf("invalid sequence"))
 					default:
 						tx.SetError(fmt.Errorf("xerror: %X", data))
@@ -308,30 +312,30 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 					continue
 
 				case 'R':
-					frame = NewFrame(
+					tx.sendFrame(NewFrame(
 						SystemMsgDataRequest,
 						data,
 						Incoming,
-					)
+					))
 				case 'r':
-					frame = NewFrame(
+					tx.sendFrame(NewFrame(
 						SystemMsgDataResponse,
 						data,
 						Incoming,
-					)
+					))
 				case 'w':
 					// log.Printf("WBLReading: % X", cmd.Data[:commandSize])
-					frame = NewFrame(
+					tx.sendFrame(NewFrame(
 						SystemMsgWBLReading,
 						data,
 						Incoming,
-					)
+					))
 				case 'W':
-					frame = NewFrame(
+					tx.sendFrame(NewFrame(
 						SystemMsgWriteResponse,
 						data,
 						Incoming,
-					)
+					))
 				default:
 					tx.cfg.OnMessage(fmt.Sprintf("unknown command: %q: %x", command, data))
 					cmdbuffPtr = 0
@@ -340,12 +344,6 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 					parsingCommand = false
 					continue
 				}
-				select {
-				case tx.recvChan <- frame:
-				default:
-					tx.SetError(ErrDroppedFrame)
-				}
-
 				cmdbuffPtr = 0
 				commandChecksum = 0
 				commandSize = 0
@@ -360,6 +358,14 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 				continue
 			}
 		}
+	}
+}
+
+func (tx *Txbridge) sendFrame(frame *CANFrame) {
+	select {
+	case tx.recvChan <- frame:
+	default:
+		tx.SetError(ErrDroppedFrame)
 	}
 }
 
