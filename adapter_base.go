@@ -21,7 +21,7 @@ func NewBaseAdapter(name string, cfg *AdapterConfig) BaseAdapter {
 	return BaseAdapter{
 		name:      name,
 		cfg:       cfg,
-		sendChan:  make(chan *CANFrame, 10),
+		sendChan:  make(chan *CANFrame, 40),
 		recvChan:  make(chan *CANFrame, 1024),
 		errChan:   make(chan error, 10),
 		closeChan: make(chan struct{}),
