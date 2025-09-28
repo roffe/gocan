@@ -1,12 +1,17 @@
 package gocan
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"path/filepath"
 	"runtime"
 	"sync"
 )
+
+type ADCCapable interface {
+	GetADCValue(ctx context.Context, channel int) (float64, error)
+}
 
 type BaseAdapter struct {
 	name               string
