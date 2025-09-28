@@ -255,7 +255,7 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 		for _, b := range readbuf[:n] {
 			if !parsingCommand {
 				switch b {
-				case 'e', 't', 'r', 'R', 'w', 'W':
+				case 'e', 't', 'r', 'R', 'w', 'W', 'G':
 					parsingCommand = true
 					command = b
 					commandSize = 0
