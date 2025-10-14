@@ -52,7 +52,6 @@ func (cu *CanusbFTDI) SetFilter(filters []uint32) error {
 }
 
 func (cu *CanusbFTDI) Open(ctx context.Context) error {
-
 	if p, err := ftdi.Open(ftdi.DeviceInfo{
 		Index: cu.devIndex,
 	}); err != nil {
@@ -144,6 +143,8 @@ func (cu *CanusbFTDI) setCANrate(rate float64) error {
 func (cu *CanusbFTDI) Close() error {
 	cu.BaseAdapter.Close()
 	if cu.port != nil {
+		cu.port.Write([]byte("C\r"))
+		time.Sleep(100 * time.Millisecond)
 		cu.port.Purge(ftdi.FT_PURGE_BOTH)
 		if err := cu.port.Close(); err != nil {
 			return fmt.Errorf("failed to close com port: %w", err)
