@@ -603,105 +603,45 @@ func (cl *Client) WriteDataByIdentifier(ctx context.Context, pid byte, data []by
 	return nil
 }
 
-//func (cl *Client) WriteDataByAddress(ctx context.Context, address uint32, data []byte) error {
-// 	payload := []byte{0x10, WRITE_DATA_BY_IDENTIFIER, 0x15, byte(address >> 16), byte(address >> 8), byte(address)}
-// 	frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
-// 	resp, err := cl.c.SendAndWait(ctx, frame, cl.defaultTimeout, cl.recvID...)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	log.Println(resp.String())
-// 	return nil
-// }
-
 // $15 - WDBA - Write Data By Address
 // This service is used to write data to a memory location in the ECU. All memory locations start with $15 so this is just a apptool call path inside the WriteDataBIdentifier
-// func (cl *Client) WriteDataByAddress22(ctx context.Context, address uint32, data []byte) error {
-// 	if len(data) > 2 {
-// 		return cl.writeDataByAddressMultiframe(ctx, 0x15, data)
-// 	}
-
-// 	payload := []byte{byte(len(data) + 2), WRITE_DATA_BY_IDENTIFIER, 0x15, byte(address >> 16), byte(address >> 8), byte(address)}
-// 	payload = append(payload, data...)
-// 	//for i := len(payload); i < 8; i++ {
-// 	//	payload = append(payload, 0x00)
-// 	//}
-// 	frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
-// 	resp, err := cl.c.SendAndWait(ctx, frame, cl.defaultTimeout, cl.recvID...)
-// 	if err != nil {
-// 		return fmt.Errorf("WriteDataByIdentifier: %w", err)
-// 	}
-// 	if err := CheckErr(resp); err != nil {
-// 		//		log.Println(frame.String())
-// 		//		log.Println(resp.String())
-// 		return err
-// 	}
-
-// 	return nil
-// }
-
 func (cl *Client) WriteDataByAddress(ctx context.Context, address uint32, data []byte) error {
-	leng := byte(len(data)) + 6
-	payload := []byte{0x10, leng, WRITE_DATA_BY_IDENTIFIER, 0x15, byte(address >> 16), byte(address >> 8), byte(address), byte(len(data))}
-	frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
-	//	log.Println(frame.String())
-	resp, err := cl.c.SendAndWait(ctx, frame, cl.defaultTimeout, cl.recvID...)
+	writeRequest := gocan.NewFrame(cl.canID, []byte{0x10, byte(len(data)) + 6, WRITE_DATA_BY_IDENTIFIER, 0x15, byte(address >> 16), byte(address >> 8), byte(address), byte(len(data))}, gocan.ResponseRequired)
+	resp, err := cl.c.SendAndWait(ctx, writeRequest, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
 		return err
 	}
-
 	if err := CheckErr(resp); err != nil {
-		// log.Println(resp.String())
 		return err
 	}
-
-	if resp.Data[0] != 0x30 || resp.Data[1] > 0x01 {
-		// log.Println(resp.String())
+	if resp.Data[0] != 0x30 || resp.Data[1] != 0x01 {
 		return errors.New("invalid response to initial writeDataByIdentifier")
 	}
-
-	delay := resp.Data[2]
-
-	r := bytes.NewReader(data)
-	var seq byte = 0x21
-	for r.Len() > 0 {
-		pkg := []byte{seq}
-	inner:
-		for i := 1; i < 8; i++ {
-			b, err := r.ReadByte()
-			if err != nil {
-				if err == io.EOF {
-					//pkg = append(pkg, 0x00)
-					break inner
-				}
-				return err
-			}
-			pkg = append(pkg, b)
+	seq := byte(0x21)
+	for offset := 0; offset < len(data); {
+		n := 7
+		remaining := len(data) - offset
+		if remaining < n {
+			n = remaining
 		}
-
-		if r.Len() > 0 {
-			//log.Println(frame.String())
-			cl.c.Send(cl.canID, pkg, gocan.Outgoing)
-			time.Sleep(time.Duration(delay) * time.Millisecond)
-		} else {
-			frame := gocan.NewFrame(cl.canID, pkg, gocan.ResponseRequired)
-			// log.Println(frame.String())
-			resp, err := cl.c.SendAndWait(ctx, frame, cl.defaultTimeout, cl.recvID...)
-			if err != nil {
-				return err
-			}
-			// log.Println(resp.String())
-			if err := CheckErr(resp); err != nil {
-				// log.Println(resp.String())
-				return err
-			}
+		pkg := make([]byte, 1+n)
+		pkg[0] = seq
+		copy(pkg[1:], data[offset:offset+n])
+		offset += n
+		dataFrame := gocan.NewFrame(cl.canID, pkg, gocan.ResponseRequired)
+		resp, err := cl.c.SendAndWait(ctx, dataFrame, cl.defaultTimeout, cl.recvID...)
+		if err != nil {
+			return err
 		}
-
+		if err := CheckErr(resp); err != nil {
+			return err
+		}
 		seq++
 		if seq == 0x30 {
 			seq = 0x20
 		}
 	}
+
 	return nil
 }
 
