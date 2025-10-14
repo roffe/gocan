@@ -21,7 +21,7 @@ func CheckErr(frame *gocan.CANFrame) error {
 		return &GMError{TranslateServiceCode(frame.Data[2]), TranslateErrorCode(frame.Data[3])}
 	}
 	if bytes.Equal(frame.Data, []byte{0x01, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}) {
-		return errors.New("Busy, repeat request")
+		return errors.New("busy, repeat request")
 	}
 	return nil
 }
