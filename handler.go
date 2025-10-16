@@ -9,35 +9,28 @@ import (
 // handler takes care of faning out incoming frames to any subs
 type handler struct {
 	adapter    Adapter
-	subs       map[*Subscriber]bool
 	register   chan *Subscriber
 	unregister chan *Subscriber
 	close      chan struct{}
 	closeOnce  sync.Once
 
-	//submap map[uint32]map[*Subscriber]bool
+	submap     map[uint32]map[*Subscriber]struct{}
+	globalSubs []*Subscriber
 }
 
 func newHandler(adapter Adapter) *handler {
 	f := &handler{
-		subs:       make(map[*Subscriber]bool),
+		//subs:       make(map[*Subscriber]bool),
 		register:   make(chan *Subscriber, 40),
 		unregister: make(chan *Subscriber, 40),
 		close:      make(chan struct{}),
 		adapter:    adapter,
-		//submap:     make(map[uint32]map[*Subscriber]bool),
+		submap:     make(map[uint32]map[*Subscriber]struct{}),
 	}
 	return f
 }
 
 func (h *handler) run(ctx context.Context) {
-	defer func() {
-		for sub := range h.subs {
-			delete(h.subs, sub)
-			//close(sub.callback)
-		}
-	}()
-
 	recvChan := h.adapter.Recv()
 	for {
 		select {
@@ -50,33 +43,59 @@ func (h *handler) run(ctx context.Context) {
 				log.Println("register channel closed")
 				return
 			}
-			h.subs[sub] = true
+			if sub.filterCount == 0 {
+				h.globalSubs = append(h.globalSubs, sub)
+				continue
+			}
+			for id := range sub.identifiers {
+				if _, ok := h.submap[id]; !ok {
+					h.submap[id] = make(map[*Subscriber]struct{})
+				}
+				h.submap[id][sub] = struct{}{}
+			}
 		case sub, ok := <-h.unregister:
 			if !ok {
 				log.Println("unregister channel closed")
 				return
 			}
-			delete(h.subs, sub)
+			if sub.filterCount == 0 {
+				for i, s := range h.globalSubs {
+					if s == sub {
+						h.globalSubs = append(h.globalSubs[:i], h.globalSubs[i+1:]...)
+						break
+					}
+				}
+			} else {
+				for id := range sub.identifiers {
+					if subs, ok := h.submap[id]; ok {
+						if _, exists := subs[sub]; exists {
+							delete(subs, sub)
+							if len(subs) == 0 {
+								delete(h.submap, id)
+							}
+						}
+					}
+				}
+			}
 			close(sub.responseChan)
 		case frame, ok := <-recvChan:
 			if !ok {
 				log.Println("incoming channel closed")
 				return
 			}
-			for sub := range h.subs {
-				if sub.filterCount == 0 {
-					select {
-					case sub.responseChan <- frame:
-					default:
-						log.Println("failed to deliver 0X%02X", frame.Identifier)
-					}
-					continue
+			for _, sub := range h.globalSubs {
+				select {
+				case sub.responseChan <- frame:
+				default:
+					log.Printf("failed to deliver 0X%02X", frame.Identifier)
 				}
-				if _, ok := sub.identifiers[frame.Identifier]; ok {
+			}
+			if subs, ok := h.submap[frame.Identifier]; ok {
+				for sub := range subs {
 					select {
 					case sub.responseChan <- frame:
 					default:
-						log.Println("failed to deliver 0X%02X", frame.Identifier)
+						log.Printf("failed to deliver 0X%02X", frame.Identifier)
 					}
 				}
 			}
