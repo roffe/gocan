@@ -14,6 +14,8 @@ type handler struct {
 	unregister chan *Subscriber
 	close      chan struct{}
 	closeOnce  sync.Once
+
+	//submap map[uint32]map[*Subscriber]bool
 }
 
 func newHandler(adapter Adapter) *handler {
@@ -23,6 +25,7 @@ func newHandler(adapter Adapter) *handler {
 		unregister: make(chan *Subscriber, 40),
 		close:      make(chan struct{}),
 		adapter:    adapter,
+		//submap:     make(map[uint32]map[*Subscriber]bool),
 	}
 	return f
 }
@@ -39,10 +42,8 @@ func (h *handler) run(ctx context.Context) {
 	for {
 		select {
 		case <-h.close:
-			// log.Println("close channel closed")
 			return
 		case <-ctx.Done():
-			// log.Println("context done")
 			return
 		case sub, ok := <-h.register:
 			if !ok {
@@ -56,6 +57,7 @@ func (h *handler) run(ctx context.Context) {
 				return
 			}
 			delete(h.subs, sub)
+			close(sub.responseChan)
 		case frame, ok := <-recvChan:
 			if !ok {
 				log.Println("incoming channel closed")
@@ -63,11 +65,19 @@ func (h *handler) run(ctx context.Context) {
 			}
 			for sub := range h.subs {
 				if sub.filterCount == 0 {
-					sub.Deliver(frame)
+					select {
+					case sub.responseChan <- frame:
+					default:
+						log.Println("failed to deliver 0X%02X", frame.Identifier)
+					}
 					continue
 				}
 				if _, ok := sub.identifiers[frame.Identifier]; ok {
-					sub.Deliver(frame)
+					select {
+					case sub.responseChan <- frame:
+					default:
+						log.Println("failed to deliver 0X%02X", frame.Identifier)
+					}
 				}
 			}
 		}

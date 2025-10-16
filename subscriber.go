@@ -2,20 +2,11 @@ package gocan
 
 import (
 	"context"
-	"errors"
-	"slices"
 	"sync"
-	"time"
 )
 
-var subtimeoutPool = sync.Pool{
-	New: func() any {
-		return time.NewTimer(0)
-	},
-}
-
 type Subscriber struct {
-	c            *Client
+	cl           *Client
 	identifiers  map[uint32]struct{}
 	filterCount  int
 	responseChan chan *CANFrame
@@ -23,9 +14,8 @@ type Subscriber struct {
 }
 
 func (s *Subscriber) Close() {
-	s.c.fh.unregister <- s
 	s.closeOnce.Do(func() {
-		close(s.responseChan)
+		s.cl.fh.unregister <- s
 	})
 }
 
@@ -33,39 +23,24 @@ func (s *Subscriber) Chan() <-chan *CANFrame {
 	return s.responseChan
 }
 
-func (s *Subscriber) Wait(ctx context.Context, timeout time.Duration) (*CANFrame, error) {
-	wait := subtimeoutPool.Get().(*time.Timer)
-	wait.Reset(timeout)
-	defer subtimeoutPool.Put(wait)
-
+func (s *Subscriber) wait(ctx context.Context) (*CANFrame, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case f, ok := <-s.responseChan:
+	case frame, ok := <-s.responseChan:
 		if !ok {
 			return nil, ErrResponsechannelClosed
 		}
-		if f == nil {
-			return nil, errors.New("got nil frame")
-		}
-		return f, nil
-	case <-wait.C:
-		identifiers := make([]uint32, 0, len(s.identifiers))
-		for id := range s.identifiers {
-			identifiers = append(identifiers, id)
-		}
-		slices.Sort(identifiers)
-		return nil, &TimeoutError{
-			Timeout: timeout.Milliseconds(),
-			Frames:  identifiers,
-			Type:    "wait",
-		}
+		return frame, nil
 	}
 }
 
-func (s *Subscriber) Deliver(f *CANFrame) {
+/*
+func (s *Subscriber) deliver(f *CANFrame) {
 	select {
 	case s.responseChan <- f:
 	default:
+		log.Println("failed to deliver 0X%02X", f.Identifier)
 	}
 }
+*/

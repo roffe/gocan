@@ -79,7 +79,7 @@ func (stn *STNFTDI) Open(ctx context.Context) error {
 				return err
 			}
 
-			if err := p.SetLatency(2); err != nil {
+			if err := p.SetLatency(1); err != nil {
 				p.Close()
 				return err
 			}

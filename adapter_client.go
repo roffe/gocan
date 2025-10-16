@@ -155,7 +155,6 @@ func (c *GWClient) recvManager(_ context.Context, stream grpc.BidiStreamingClien
 }
 
 func (c *GWClient) recvMessage(identifier uint32, data []byte) {
-
 	switch identifier {
 	case SystemMsg:
 		c.cfg.OnMessage(string(data))
@@ -167,7 +166,6 @@ func (c *GWClient) recvMessage(identifier uint32, data []byte) {
 		c.SetError(Unrecoverable(errors.New(string(data))))
 		return
 	}
-
 	frame := NewFrame(identifier, data, Incoming)
 	select {
 	case c.recvChan <- frame:
