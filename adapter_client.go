@@ -6,19 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/roffe/gocan/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
@@ -63,27 +59,6 @@ func createStreamMeta(adapterName string, cfg *AdapterConfig) metadata.MD {
 		"useextendedid", strconv.FormatBool(cfg.UseExtendedID),
 		"minversion", cfg.MinimumFirmwareVersion,
 	)
-}
-
-func NewGRPCClient() (*grpc.ClientConn, proto.GocanClient, error) {
-	var socketFile string = "gocan.sock"
-	if cacheDir, err := os.UserCacheDir(); err == nil {
-		socketFile = filepath.Join(cacheDir, socketFile)
-	}
-
-	conn, err := grpc.NewClient(
-		"unix:"+socketFile,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Time:                10 * time.Second, // send pings every 10 seconds if there is no activity
-			Timeout:             time.Second,      // wait 1 second for ping ack before considering the connection dead
-			PermitWithoutStream: true,             // send pings even without active streams
-		}),
-	)
-	if err != nil {
-		return nil, nil, err
-	}
-	return conn, proto.NewGocanClient(conn), nil
 }
 
 func (c *GWClient) Open(gctx context.Context) error {
@@ -201,14 +176,14 @@ func (c *GWClient) recvMessage(identifier uint32, data []byte) {
 	}
 }
 
-func (c *GWClient) Close() (err error) {
+func (c *GWClient) Close() error {
 	c.closeOnce.Do(func() {
 		close(c.closeChan)
 	})
 	if c.conn != nil {
-		err = c.conn.Close()
+		return c.conn.Close()
 	}
-	return
+	return nil
 }
 
 func (c *GWClient) SetFilter([]uint32) error {
