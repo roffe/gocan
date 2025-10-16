@@ -87,10 +87,12 @@ func (s *Server) SendCommand(ctx context.Context, in *proto.Command) (*proto.Com
 	case bytes.Equal(in.GetData(), []byte("quit")):
 		if !ignoreQuit {
 			go func() {
-				time.Sleep(5 * time.Millisecond)
+				log.Println("stopping server")
+				time.Sleep(10 * time.Millisecond)
 				if err := s.Close(); err != nil {
 					log.Fatalf("failed to close server: %v", err)
 				}
+
 			}()
 		}
 		return &proto.CommandResponse{Data: []byte("OK")}, nil
