@@ -22,6 +22,8 @@ require (
 
 require github.com/roffe/goftdi v0.0.0-20250330120219-31feb988cb73
 
+require github.com/Microsoft/go-winio v0.6.2
+
 require (
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/roffe/gocanusb v1.1.2
