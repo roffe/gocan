@@ -215,7 +215,7 @@ func (ca *CombiAdapter) Open(ctx context.Context) error {
 		return fmt.Errorf("failed to close canbus: %w", err)
 	}
 
-	dump := make([]byte, 1024)
+	dump := make([]byte, ca.in.Desc.MaxPacketSize)
 	ca.in.ReadContext(ctx, dump)
 
 	if ca.cfg.PrintVersion {
@@ -223,6 +223,8 @@ func (ca *CombiAdapter) Open(ctx context.Context) error {
 			ca.cfg.OnMessage(ver)
 		}
 	}
+
+	go ca.recvManager(ctx)
 
 	if ca.cfg.AdditionalConfig["NoConnect"] != "true" {
 		// Set can bitrate
@@ -243,8 +245,8 @@ func (ca *CombiAdapter) Open(ctx context.Context) error {
 			return fmt.Errorf("failed to open canbus: %w", err)
 		}
 	}
+	time.Sleep(500 * time.Millisecond)
 	go ca.sendManager(ctx)
-	go ca.recvManager(ctx)
 
 	return nil
 }
@@ -331,6 +333,7 @@ func (ca *CombiAdapter) sendCommand(ctx context.Context, cmd byte, data []byte, 
 
 	select {
 	case ca.sendSem <- cmd:
+		log.Println("sendCommand acquired sendSem for cmd", cmd)
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -626,7 +629,7 @@ func (ca *CombiAdapter) sendCANMessage(ctx context.Context, frame *CANFrame) {
 }
 
 func (ca *CombiAdapter) canCtrl(mode byte) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 	if _, err := ca.out.WriteContext(ctx, []byte{cmd_can_open, 0x00, 0x01, mode, 0x00}); err != nil {
 		return fmt.Errorf("failed to write to usb device: %w", err)
