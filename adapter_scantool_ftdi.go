@@ -9,14 +9,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"strconv"
 	"strings"
 	"time"
 
 	ftdi "github.com/roffe/goftdi"
-	"go.bug.st/serial"
 )
 
 type STNFTDI struct {
@@ -25,9 +23,8 @@ type STNFTDI struct {
 	baseName string
 
 	devIndex uint64
-	useD2xx  bool
 
-	port io.ReadWriteCloser
+	port *ftdi.Device
 
 	canrateCMD   string
 	protocolCMD  string
@@ -43,22 +40,23 @@ func NewSTNFTDI(name string, idx uint64) func(cfg *AdapterConfig) (Adapter, erro
 			devIndex:    idx,
 			sendSem:     make(chan struct{}, 1),
 			baseName:    strings.TrimPrefix(name, "d2xx "),
-			useD2xx:     true,
 		}
 
-		if err := stn.setCANrate(cfg.CANRate); err != nil {
+		protocolCMD, canrateCMD, err := scantoolCalculateCANrate(stn.baseName, cfg.CANRate)
+		if err != nil {
 			return nil, err
 		}
+		stn.protocolCMD = protocolCMD
+		stn.canrateCMD = canrateCMD
 
-		stn.setCANfilter(cfg.CANFilter)
-		//stn.setCANfilter([]uint32{0x222, 0x258, 0x270})
+		stn.filter, stn.mask = scantoolCANfilter(cfg.CANFilter)
 
 		return stn, nil
 	}
 }
 
 func (stn *STNFTDI) SetFilter(filters []uint32) error {
-	stn.setCANfilter(filters)
+	stn.filter, stn.mask = scantoolCANfilter(stn.cfg.CANFilter)
 	stn.Send() <- NewFrame(SystemMsg, []byte("STPC"), Outgoing)
 	stn.Send() <- NewFrame(SystemMsg, []byte(stn.mask), Outgoing)
 	stn.Send() <- NewFrame(SystemMsg, []byte(stn.filter), Outgoing)
@@ -67,49 +65,27 @@ func (stn *STNFTDI) SetFilter(filters []uint32) error {
 }
 
 func (stn *STNFTDI) Open(ctx context.Context) error {
-	if stn.useD2xx {
-		if p, err := ftdi.Open(ftdi.DeviceInfo{
-			Index: stn.devIndex,
-		}); err != nil {
-			return fmt.Errorf("failed to open ftdi device: %w", err)
-		} else {
-			stn.port = p
-			if err := p.SetLineProperty(ftdi.LineProperties{Bits: 8, StopBits: 0, Parity: ftdi.NONE}); err != nil {
-				p.Close()
-				return err
-			}
 
-			if err := p.SetLatency(1); err != nil {
-				p.Close()
-				return err
-			}
-
-			if err := p.SetTimeout(10, 10); err != nil {
-				p.Close()
-				return err
-			}
-		}
+	if p, err := ftdi.Open(ftdi.DeviceInfo{
+		Index: stn.devIndex,
+	}); err != nil {
+		return fmt.Errorf("failed to open ftdi device: %w", err)
 	} else {
-		mode := &serial.Mode{
-			BaudRate: stn.cfg.PortBaudrate,
-			Parity:   serial.NoParity,
-			DataBits: 8,
-			StopBits: serial.OneStopBit,
-		}
-
-		p, err := serial.Open(stn.cfg.Port, mode)
-		if err != nil {
-			return fmt.Errorf("failed to open com port %q : %v", stn.cfg.Port, err)
-		}
 		stn.port = p
-
-		if err := p.SetReadTimeout(10 * time.Millisecond); err != nil {
+		if err := p.SetLineProperty(ftdi.LineProperties{Bits: 8, StopBits: 0, Parity: ftdi.NONE}); err != nil {
 			p.Close()
 			return err
 		}
 
-		p.ResetOutputBuffer()
-		p.ResetInputBuffer()
+		if err := p.SetLatency(1); err != nil {
+			p.Close()
+			return err
+		}
+
+		if err := p.SetTimeout(10, 10); err != nil {
+			p.Close()
+			return err
+		}
 	}
 
 	to := uint(2000000)
@@ -163,12 +139,8 @@ func (stn *STNFTDI) Open(ctx context.Context) error {
 		}
 		time.Sleep(delay)
 	}
-	switch pp := stn.port.(type) {
-	case *ftdi.Device:
-		pp.Purge(ftdi.FT_PURGE_BOTH)
-	case serial.Port:
-		pp.ResetInputBuffer()
-	}
+
+	stn.port.Purge(ftdi.FT_PURGE_BOTH)
 
 	go stn.sendManager(ctx)
 	go stn.recvManager(ctx)
@@ -177,20 +149,9 @@ func (stn *STNFTDI) Open(ctx context.Context) error {
 }
 
 func (stn *STNFTDI) trySpeed(from, to uint) error {
-	switch pp := stn.port.(type) {
-	case *ftdi.Device:
-		if err := pp.SetBaudRate(uint(from)); err != nil {
-			return err
-		}
-	case serial.Port:
-		if err := pp.SetMode(&serial.Mode{
-			BaudRate: int(from),
-			Parity:   serial.NoParity,
-			DataBits: 8,
-			StopBits: serial.OneStopBit,
-		}); err != nil {
-			return err
-		}
+
+	if err := stn.port.SetBaudRate(uint(from)); err != nil {
+		return err
 	}
 
 	if _, err := stn.port.Write([]byte("\r\r\r")); err != nil {
@@ -204,25 +165,13 @@ func (stn *STNFTDI) trySpeed(from, to uint) error {
 	}
 	time.Sleep(10 * time.Millisecond)
 
-	switch pp := stn.port.(type) {
-	case *ftdi.Device:
-		if err := pp.Purge(ftdi.FT_PURGE_RX); err != nil {
-			return err
-		}
-		if err := pp.SetBaudRate(uint(to)); err != nil {
-			return err
-		}
-	case serial.Port:
-		pp.ResetInputBuffer()
-		if err := pp.SetMode(&serial.Mode{
-			BaudRate: int(to),
-			Parity:   serial.NoParity,
-			DataBits: 8,
-			StopBits: serial.OneStopBit,
-		}); err != nil {
-			return err
-		}
+	if err := stn.port.Purge(ftdi.FT_PURGE_RX); err != nil {
+		return err
 	}
+	if err := stn.port.SetBaudRate(uint(to)); err != nil {
+		return err
+	}
+
 	buff := bytes.NewBuffer(nil)
 	defer buff.Reset()
 
@@ -259,58 +208,12 @@ func (stn *STNFTDI) trySpeed(from, to uint) error {
 	return fmt.Errorf("failed to change adapter baudrate from %d to %d bps", from, to)
 }
 
-func (stn *STNFTDI) setCANrate(rate float64) error {
-	switch rate {
-	case 33.3: // STN1170 & STN2120 feature only
-		stn.protocolCMD = "STP61"
-		stn.canrateCMD = "STCSWM2"
-	case 500:
-		stn.protocolCMD = "STP33"
-	case 615.384:
-		stn.protocolCMD = "STP33"
-		switch stn.baseName {
-		case OBDLinkSX, STN1170:
-			stn.canrateCMD = "STCTR8101FC"
-		case OBDLinkEX, STN2120:
-			stn.canrateCMD = "STCTR42039F"
-		default:
-			return fmt.Errorf("unhandled adapter: %s", stn.name)
-		}
-	default:
-		return fmt.Errorf("unhandled CANBus rate: %f", rate)
-	}
-	return nil
-}
-
-func (stn *STNFTDI) setCANfilter(ids []uint32) {
-	var filt uint32 = 0xFFF
-	var mask uint32 = 0x000
-	for _, id := range ids {
-		filt &= id
-		mask |= id
-	}
-	mask = (^mask & 0x7FF) | filt
-	if len(ids) == 0 {
-		filt = 0
-		mask = 0x7FF
-	}
-	stn.filter = fmt.Sprintf("ATCF%03X", filt)
-	stn.mask = fmt.Sprintf("ATCM%03X", mask)
-}
-
 func (stn *STNFTDI) Close() error {
 	stn.BaseAdapter.Close()
 	time.Sleep(50 * time.Millisecond)
 	stn.port.Write([]byte("ATZ\r"))
 	time.Sleep(100 * time.Millisecond)
-
-	switch pp := stn.port.(type) {
-	case *ftdi.Device:
-		pp.Purge(ftdi.FT_PURGE_BOTH)
-	case serial.Port:
-		pp.ResetInputBuffer()
-		pp.ResetOutputBuffer()
-	}
+	stn.port.Purge(ftdi.FT_PURGE_BOTH)
 	return stn.port.Close()
 }
 
@@ -370,18 +273,18 @@ func (stn *STNFTDI) recvManager(ctx context.Context) {
 			return
 		default:
 		}
-		if stn.useD2xx {
-			var err error
-			rx_cnt, err = stn.port.(*ftdi.Device).GetQueueStatus()
-			if err != nil {
-				stn.SetError(Unrecoverable(fmt.Errorf("failed to get queue status: %w", err)))
-				return
-			}
-			if rx_cnt == 0 {
-				time.Sleep(400 * time.Microsecond)
-				continue
-			}
+
+		var err error
+		rx_cnt, err = stn.port.GetQueueStatus()
+		if err != nil {
+			stn.SetError(Unrecoverable(fmt.Errorf("failed to get queue status: %w", err)))
+			return
 		}
+		if rx_cnt == 0 {
+			time.Sleep(400 * time.Microsecond)
+			continue
+		}
+
 		readBuffer := make([]byte, rx_cnt)
 		n, err := stn.port.Read(readBuffer)
 		if err != nil {
@@ -428,7 +331,7 @@ func (stn *STNFTDI) recvManager(ctx context.Context) {
 				case "NO DATA", "OK":
 					buff.Reset()
 				default:
-					f, err := stn.decodeFrame(buff.Bytes())
+					f, err := scantoolDecodeFrame(buff.Bytes())
 					if err != nil {
 						stn.cfg.OnMessage(fmt.Sprintf("failed to decode frame: %s %v", buff.String(), err))
 						buff.Reset()
@@ -446,16 +349,4 @@ func (stn *STNFTDI) recvManager(ctx context.Context) {
 			buff.WriteByte(b)
 		}
 	}
-}
-
-func (*STNFTDI) decodeFrame(buff []byte) (*CANFrame, error) {
-	id, err := strconv.ParseUint(string(buff[:3]), 16, 32)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode identifier: %v", err)
-	}
-	data, err := hex.DecodeString(string(buff[3:]))
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode frame body: %v", err)
-	}
-	return NewFrame(uint32(id), data, Incoming), nil
 }
