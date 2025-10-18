@@ -2,6 +2,7 @@ package gocan
 
 import (
 	"context"
+	"fmt"
 	"sync"
 )
 
@@ -15,7 +16,7 @@ type Subscriber struct {
 
 func (s *Subscriber) Close() {
 	s.closeOnce.Do(func() {
-		s.cl.fh.unregister <- s
+		s.cl.fh.unregisterSubscriber(s)
 	})
 }
 
@@ -26,7 +27,7 @@ func (s *Subscriber) Chan() <-chan *CANFrame {
 func (s *Subscriber) wait(ctx context.Context) (*CANFrame, error) {
 	select {
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return nil, fmt.Errorf("timeout: %w", ctx.Err())
 	case frame, ok := <-s.responseChan:
 		if !ok {
 			return nil, ErrResponsechannelClosed
@@ -34,13 +35,3 @@ func (s *Subscriber) wait(ctx context.Context) (*CANFrame, error) {
 		return frame, nil
 	}
 }
-
-/*
-func (s *Subscriber) deliver(f *CANFrame) {
-	select {
-	case s.responseChan <- f:
-	default:
-		log.Println("failed to deliver 0X%02X", f.Identifier)
-	}
-}
-*/

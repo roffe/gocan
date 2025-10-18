@@ -112,7 +112,7 @@ func (c *Client) SendAndWait(ctx context.Context, frame *CANFrame, timeout time.
 		return nil, err
 	}
 	defer func() {
-		c.fh.unregister <- sub
+		c.fh.unregisterSubscriber(sub)
 	}()
 	if err := c.SendFrame(frame); err != nil {
 		return nil, err
@@ -129,7 +129,7 @@ func (c *Client) Wait(ctx context.Context, timeout time.Duration, identifiers ..
 		return nil, err
 	}
 	defer func() {
-		c.fh.unregister <- sub
+		c.fh.unregisterSubscriber(sub)
 	}()
 
 	waitCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -165,7 +165,7 @@ func (c *Client) SubscribeChan(ctx context.Context, channel chan *CANFrame, iden
 		filterCount:  len(identifiers),
 		responseChan: channel,
 	}
-	c.fh.register <- sub
+	c.fh.registerSubscriber(sub)
 	return sub
 }
 
@@ -185,12 +185,8 @@ func (c *Client) newSub(bufferSize int, identifiers ...uint32) (*Subscriber, err
 		filterCount:  len(identifiers),
 		responseChan: make(chan *CANFrame, bufferSize),
 	}
-	select {
-	case c.fh.register <- sub:
-		return sub, nil
-	default:
-		return nil, ErrFramhandlerRegisterSub
-	}
+	c.fh.registerSubscriber(sub)
+	return sub, nil
 }
 
 func toSet(identifiers []uint32) map[uint32]struct{} {
