@@ -14,7 +14,7 @@ import (
 	ftdi "github.com/roffe/goftdi"
 )
 
-type STNFTDI struct {
+type ScantoolFTDI struct {
 	BaseAdapter
 
 	baseName     string
@@ -27,9 +27,9 @@ type STNFTDI struct {
 	devIndex uint64
 }
 
-func NewSTNFTDI(name string, idx uint64) func(cfg *AdapterConfig) (Adapter, error) {
+func NewScantoolFTDI(name string, idx uint64) func(cfg *AdapterConfig) (Adapter, error) {
 	return func(cfg *AdapterConfig) (Adapter, error) {
-		stn := &STNFTDI{
+		stn := &ScantoolFTDI{
 			BaseAdapter: NewBaseAdapter(name, cfg),
 			devIndex:    idx,
 			sendSem:     make(chan struct{}, 1),
@@ -45,12 +45,12 @@ func NewSTNFTDI(name string, idx uint64) func(cfg *AdapterConfig) (Adapter, erro
 	}
 }
 
-func (stn *STNFTDI) SetFilter(filters []uint32) error {
+func (stn *ScantoolFTDI) SetFilter(filters []uint32) error {
 	stn.filter, stn.mask = scantoolCANfilter(stn.cfg.CANFilter)
 	return scantoolSetFilter(&stn.BaseAdapter, stn.filter, stn.mask)
 }
 
-func (stn *STNFTDI) Open(ctx context.Context) error {
+func (stn *ScantoolFTDI) Open(ctx context.Context) error {
 	var err error
 	stn.port, err = ftdi.Open(ftdi.DeviceInfo{Index: stn.devIndex})
 	if err != nil {
@@ -106,27 +106,24 @@ func (stn *STNFTDI) Open(ctx context.Context) error {
 	return nil
 }
 
-func (stn *STNFTDI) Close() error {
+func (stn *ScantoolFTDI) Close() error {
 	stn.BaseAdapter.Close()
-	time.Sleep(50 * time.Millisecond)
-	stn.port.Write([]byte("ATZ\r"))
-	time.Sleep(100 * time.Millisecond)
+	scantoolReset(stn.port)
 	stn.port.Purge(ftdi.FT_PURGE_BOTH)
 	return stn.port.Close()
 }
 
-func (stn *STNFTDI) recvManager(ctx context.Context) {
+func (stn *ScantoolFTDI) recvManager(ctx context.Context) {
 	buff := bytes.NewBuffer(nil)
 	buf := make([]byte, 64)
 	var rx_cnt int32
 	var err error
 	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
+		//select {
+		//case <-ctx.Done():
+		//	return
+		//default:
+		//}
 		rx_cnt, err = stn.port.GetQueueStatus()
 		if err != nil {
 			stn.SetError(Unrecoverable(fmt.Errorf("failed to get queue status: %w", err)))
@@ -150,11 +147,6 @@ func (stn *STNFTDI) recvManager(ctx context.Context) {
 			continue
 		}
 		for _, b := range readBuffer[:n] {
-			//select {
-			//case <-ctx.Done():
-			//	return
-			//default:
-			//}
 			if b == '>' {
 				select {
 				case <-stn.sendSem:
@@ -162,7 +154,6 @@ func (stn *STNFTDI) recvManager(ctx context.Context) {
 				}
 				continue
 			}
-
 			if b == 0x0D {
 				if buff.Len() == 0 {
 					continue

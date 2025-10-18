@@ -59,6 +59,12 @@ func scantoolInit(debug bool, port io.Writer, protocolCMD, canrateCMD, filter, m
 	}
 }
 
+func scantoolReset(port io.Writer) {
+	time.Sleep(25 * time.Millisecond)
+	port.Write([]byte("ATZ\r"))
+	time.Sleep(10 * time.Millisecond)
+}
+
 func scantoolSetFilter(base *BaseAdapter, mask, filter string) error {
 	base.Send() <- NewFrame(SystemMsg, []byte("STPC"), Outgoing)
 	base.Send() <- NewFrame(SystemMsg, []byte(mask), Outgoing)

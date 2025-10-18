@@ -31,7 +31,7 @@ func init() {
 					KLine: true,
 					SWCAN: false,
 				},
-				New: NewSTNFTDI("d2xx "+dev.Description, dev.Index),
+				New: NewScantoolFTDI("d2xx "+dev.Description, dev.Index),
 			}); err != nil {
 				panic(err)
 			}

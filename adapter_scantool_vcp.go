@@ -21,7 +21,7 @@ func init() {
 			KLine: false,
 			SWCAN: false,
 		},
-		New: NewSTNVCP(OBDLinkSX),
+		New: NewScantoolVCP(OBDLinkSX),
 	}); err != nil {
 		panic(err)
 	}
@@ -34,7 +34,7 @@ func init() {
 			KLine: false,
 			SWCAN: false,
 		},
-		New: NewSTNVCP(OBDLinkEX),
+		New: NewScantoolVCP(OBDLinkEX),
 	}); err != nil {
 		panic(err)
 	}
@@ -47,7 +47,7 @@ func init() {
 			KLine: true,
 			SWCAN: true,
 		},
-		New: NewSTNVCP(STN1170),
+		New: NewScantoolVCP(STN1170),
 	}); err != nil {
 		panic(err)
 	}
@@ -60,13 +60,13 @@ func init() {
 			KLine: true,
 			SWCAN: true,
 		},
-		New: NewSTNVCP(STN2120),
+		New: NewScantoolVCP(STN2120),
 	}); err != nil {
 		panic(err)
 	}
 }
 
-type STNVCP struct {
+type ScantoolVCP struct {
 	BaseAdapter
 
 	baseName     string
@@ -78,9 +78,9 @@ type STNVCP struct {
 	port serial.Port
 }
 
-func NewSTNVCP(name string) func(cfg *AdapterConfig) (Adapter, error) {
+func NewScantoolVCP(name string) func(cfg *AdapterConfig) (Adapter, error) {
 	return func(cfg *AdapterConfig) (Adapter, error) {
-		stn := &STNVCP{
+		stn := &ScantoolVCP{
 			BaseAdapter: NewBaseAdapter(name, cfg),
 			sendSem:     make(chan struct{}, 1),
 			baseName:    name,
@@ -95,12 +95,12 @@ func NewSTNVCP(name string) func(cfg *AdapterConfig) (Adapter, error) {
 	}
 }
 
-func (stn *STNVCP) SetFilter(filters []uint32) error {
+func (stn *ScantoolVCP) SetFilter(filters []uint32) error {
 	stn.filter, stn.mask = scantoolCANfilter(stn.cfg.CANFilter)
 	return scantoolSetFilter(&stn.BaseAdapter, stn.filter, stn.mask)
 }
 
-func (stn *STNVCP) Open(ctx context.Context) error {
+func (stn *ScantoolVCP) Open(ctx context.Context) error {
 	mode := &serial.Mode{
 		BaudRate: stn.cfg.PortBaudrate,
 		Parity:   serial.NoParity,
@@ -158,25 +158,23 @@ func (stn *STNVCP) Open(ctx context.Context) error {
 	return nil
 }
 
-func (stn *STNVCP) Close() error {
+func (stn *ScantoolVCP) Close() error {
 	stn.BaseAdapter.Close()
-	time.Sleep(50 * time.Millisecond)
-	stn.port.Write([]byte("ATZ\r"))
-	time.Sleep(100 * time.Millisecond)
+	scantoolReset(stn.port)
 	stn.port.ResetInputBuffer()
 	stn.port.ResetOutputBuffer()
 	return stn.port.Close()
 }
 
-func (stn *STNVCP) recvManager(ctx context.Context) {
+func (stn *ScantoolVCP) recvManager(ctx context.Context) {
 	buff := bytes.NewBuffer(nil)
 	readBuffer := make([]byte, 64)
 	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
+		//select {
+		//case <-ctx.Done():
+		//	return
+		//default:
+		//}
 		n, err := stn.port.Read(readBuffer)
 		if err != nil {
 			if ctx.Err() != nil {
@@ -189,11 +187,6 @@ func (stn *STNVCP) recvManager(ctx context.Context) {
 			continue
 		}
 		for _, b := range readBuffer[:n] {
-			//select {
-			//case <-ctx.Done():
-			//	return
-			//default:
-			//}
 			if b == '>' {
 				select {
 				case <-stn.sendSem:
@@ -201,7 +194,6 @@ func (stn *STNVCP) recvManager(ctx context.Context) {
 				}
 				continue
 			}
-
 			if b == 0x0D {
 				if buff.Len() == 0 {
 					continue
