@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/google/gousb"
-	"github.com/google/gousb/usbid"
 )
 
 // ==========================
@@ -680,11 +679,13 @@ func (ca *CombiAdapter) canCtrl(mode byte) error {
 
 func (ca *CombiAdapter) setBitrate(ctx context.Context) error {
 	var rate uint32
-	if ca.cfg.CANRate == 615.384 {
+	switch ca.cfg.CANRate {
+	case 615.384:
 		rate = 615000
-	} else {
+	default:
 		rate = uint32(ca.cfg.CANRate * 1000)
 	}
+	log.Println(rate)
 	wctx, cancel := context.WithTimeout(ctx, 40*time.Millisecond)
 	defer cancel()
 	pkt := []byte{cmdCanBitrate, 0x00, 0x04, byte(rate >> 24), byte(rate >> 16), byte(rate >> 8), byte(rate), termAck}
@@ -701,7 +702,8 @@ func boolToByte(b bool) byte {
 	return 0
 }
 
-// Dev helper to list USB topology (kept from original)
+/*
+// Dev helper to list USB topology
 func list() {
 	ctx := gousb.NewContext()
 	defer ctx.Close()
@@ -734,3 +736,4 @@ func list() {
 		log.Fatalf("list: %s", err)
 	}
 }
+*/
