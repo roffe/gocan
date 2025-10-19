@@ -151,6 +151,10 @@ func scantoolSendManager(
 	idb := make([]byte, 4)
 	for {
 		select {
+		case <-ctx.Done():
+			return
+		case <-closeChan:
+			return
 		case v := <-sendChan:
 			if id := v.Identifier; id >= SystemMsg {
 				if id == SystemMsg {
@@ -185,10 +189,6 @@ func scantoolSendManager(
 				return
 			}
 			f.Reset()
-		case <-ctx.Done():
-			return
-		case <-closeChan:
-			return
 		}
 	}
 }
