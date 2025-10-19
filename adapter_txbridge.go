@@ -435,6 +435,7 @@ func readSerialCommand(port io.Reader, timeout time.Duration) (*serialcommand.Se
 	return nil, fmt.Errorf("timeout after %v", timeout)
 }
 
+/*
 // WriteSerialCommand writes a single command to the serial port
 func WriteSerialCommand(port io.Writer, command byte, data []byte) error {
 	cmd := &serialcommand.SerialCommand{
@@ -454,3 +455,4 @@ func WriteSerialCommand(port io.Writer, command byte, data []byte) error {
 
 	return nil
 }
+*/
