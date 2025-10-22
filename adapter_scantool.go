@@ -255,7 +255,7 @@ func scantoolTrySpeed(
 					continue
 				}
 				if bytes.Contains(lineBuf, stn) {
-					onMessage("Device: " + string(lineBuf))
+					onMessage("Device info: " + string(lineBuf))
 					if _, err := port.Write([]byte{'\r'}); err != nil {
 						return err
 					}
@@ -275,70 +275,5 @@ func scantoolTrySpeed(
 		}
 	}
 
-	return fmt.Errorf("failed to change adapter baudrate from %d to %d bps", from, to)
-}
-
-func scantoolTrySpeed2(
-	port io.ReadWriter,
-	from, to uint,
-	speedSetter func(int) error,
-	resetInputBuffer func() error,
-	onMessage func(string),
-) error {
-	if err := speedSetter(int(from)); err != nil {
-		return err
-	}
-
-	if _, err := port.Write([]byte("\r\r\r")); err != nil {
-		return err
-	}
-
-	time.Sleep(20 * time.Millisecond)
-
-	if _, err := port.Write([]byte("STBR" + strconv.Itoa(int(to)) + "\r")); err != nil {
-		return err
-	}
-	time.Sleep(10 * time.Millisecond)
-
-	if err := resetInputBuffer(); err != nil {
-		return err
-	}
-
-	if err := speedSetter(int(to)); err != nil {
-		return err
-	}
-
-	buff := bytes.NewBuffer(nil)
-	defer buff.Reset()
-
-	var readbuff = make([]byte, 16)
-	for range 10 {
-		n, err := port.Read(readbuff)
-		if err != nil {
-			return err
-		}
-		if n == 0 {
-			time.Sleep(4 * time.Millisecond)
-			continue
-		}
-		for _, b := range readbuff[:n] {
-			if b == 0x0D {
-				if buff.Len() == 0 {
-					continue
-				}
-				if bytes.Contains(buff.Bytes(), []byte("STN")) {
-					onMessage(fmt.Sprintf("Device: %s", buff.String()))
-					if _, err := port.Write([]byte("\r")); err != nil {
-						return err
-					}
-					//stn.cfg.OnMessage(fmt.Sprintf("baudrate changed to %d bps", to))
-					return nil
-				}
-				buff.Reset()
-				continue
-			}
-			buff.WriteByte(b)
-		}
-	}
 	return fmt.Errorf("failed to change adapter baudrate from %d to %d bps", from, to)
 }
