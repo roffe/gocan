@@ -250,12 +250,8 @@ func (k *CANlib) recvMessage(msg *canlib.CANMessage) error {
 		return errors.New("kvaser recvManager invalid data length")
 	}
 	frame := NewFrame(uint32(msg.Identifier), msg.Data[:msg.DLC], Incoming)
-	if msg.Flags&uint32(canlib.MSG_EXT) != 0 {
-		frame.Extended = true
-	}
-	if msg.Flags&uint32(canlib.MSG_RTR) != 0 {
-		frame.RTR = true
-	}
+	frame.Extended = msg.Flags&uint32(canlib.MSG_EXT) != 0
+	frame.RTR = msg.Flags&uint32(canlib.MSG_RTR) != 0
 	select {
 	case k.recvChan <- frame:
 		return nil
