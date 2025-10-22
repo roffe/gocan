@@ -210,7 +210,7 @@ func scantoolTrySpeed(
 	cr3 := []byte{'\r', '\r', '\r'}
 	stn := []byte("STN")
 
-	// 1. Set initial baud and send triple break
+	// Set initial baud and send triple break
 	if err := speedSetter(int(from)); err != nil {
 		return err
 	}
@@ -219,7 +219,7 @@ func scantoolTrySpeed(
 	}
 	time.Sleep(sleepAfterBreak)
 
-	// 2. Send "STBR<to>\r" with minimal allocs
+	// Send "STBR<to>\r" with minimal allocs
 	cmd := append([]byte("STBR"), strconv.AppendInt(nil, int64(to), 10)...)
 	cmd = append(cmd, '\r')
 	if _, err := port.Write(cmd); err != nil {
@@ -227,7 +227,7 @@ func scantoolTrySpeed(
 	}
 	time.Sleep(sleepAfterSTBR)
 
-	// 3. Switch to new baud
+	// Switch to new baud
 	if err := resetInputBuffer(); err != nil {
 		return err
 	}
@@ -238,7 +238,6 @@ func scantoolTrySpeed(
 	readBuf := make([]byte, 64)
 	lineBuf := make([]byte, 0, 128)
 
-	// 4. Read loop with Go 1.22+ range-over-int
 	for range readAttempts {
 		n, err := port.Read(readBuf)
 		if err != nil {
@@ -264,7 +263,7 @@ func scantoolTrySpeed(
 				lineBuf = lineBuf[:0]
 				continue
 			}
-			// Grow only if needed — use Go 1.21+ min/max
+
 			if len(lineBuf) == cap(lineBuf) {
 				newCap := max(cap(lineBuf)*2, 64)
 				tmp := make([]byte, len(lineBuf), newCap)
