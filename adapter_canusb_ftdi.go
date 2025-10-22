@@ -115,44 +115,39 @@ func (cu *CanusbFTDI) recvManager(ctx context.Context) {
 		cu.SetError,
 		cu.cfg.OnMessage,
 	)
-
 	var rx_cnt int32
 	var err error
-	buf := make([]byte, 64) // large enough for worst case
+	buf := make([]byte, 1024) // large enough for worst case
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		default:
-		}
-		rx_cnt, err = cu.port.GetQueueStatus()
-		if err != nil {
-			cu.SetError(Unrecoverable(fmt.Errorf("failed to get queue status: %w", err)))
-			return
-		}
-		if rx_cnt == 0 {
-			time.Sleep(400 * time.Microsecond)
-			continue
-		}
-		// Adjust slice length without reallocation
-		readBuffer := buf[:rx_cnt]
-		n, err := cu.port.Read(readBuffer)
-		if err != nil {
-			if ctx.Err() != nil {
-				return
-			}
-			cu.SetError(fmt.Errorf("failed to read com port: %w", err))
-			return
-		}
-		select {
 		case <-cu.closeChan:
 			return
 		default:
+			rx_cnt, err = cu.port.GetQueueStatus()
+			if err != nil {
+				cu.SetError(Unrecoverable(fmt.Errorf("failed to get queue status: %w", err)))
+				return
+			}
+			if rx_cnt == 0 {
+				time.Sleep(400 * time.Microsecond)
+				continue
+			}
+			// Adjust slice length without reallocation
+			readBuffer := buf[:rx_cnt]
+			n, err := cu.port.Read(readBuffer)
+			if err != nil {
+				if ctx.Err() != nil {
+					return
+				}
+				cu.SetError(fmt.Errorf("failed to read com port: %w", err))
+				return
+			}
 			if n == 0 {
 				continue
 			}
 			parseFn(readBuffer[:n])
 		}
-
 	}
 }

@@ -174,8 +174,8 @@ func (cu *Canusb) callbackHandler(msg *canusb.CANMsg) uintptr {
 	case cu.recvChan <- &CANFrame{
 		Identifier: msg.ID,
 		Data:       msg.Bytes(),
-		Extended:   msg.Flags&canusb.CANMSG_EXTENDED != 0,
-		RTR:        msg.Flags&canusb.CANMSG_RTR != 0,
+		Extended:   msg.Flags&canusb.CANMSG_EXTENDED == canusb.CANMSG_EXTENDED,
+		RTR:        msg.Flags&canusb.CANMSG_RTR == canusb.CANMSG_RTR,
 		FrameType:  Incoming,
 	}:
 	default:
