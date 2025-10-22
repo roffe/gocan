@@ -22,15 +22,7 @@ require (
 
 require github.com/roffe/goftdi v0.0.0-20250330120219-31feb988cb73
 
-require (
-	github.com/Microsoft/go-winio v0.6.2
-	github.com/energye/systray v1.0.2
-)
-
-require (
-	github.com/godbus/dbus/v5 v5.0.4 // indirect
-	github.com/tevino/abool v0.0.0-20220530134649-2bfc934cb23c // indirect
-)
+require github.com/Microsoft/go-winio v0.6.2
 
 require (
 	github.com/mattn/go-colorable v0.1.14 // indirect
