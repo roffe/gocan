@@ -193,7 +193,92 @@ func scantoolSendManager(
 	}
 }
 
+const (
+	sleepAfterBreak = 20 * time.Millisecond
+	sleepAfterSTBR  = 10 * time.Millisecond
+	sleepWhenIdle   = 4 * time.Millisecond
+	readAttempts    = 10
+)
+
 func scantoolTrySpeed(
+	port io.ReadWriter,
+	from, to uint,
+	speedSetter func(int) error,
+	resetInputBuffer func() error,
+	onMessage func(string),
+) error {
+	cr3 := []byte{'\r', '\r', '\r'}
+	stn := []byte("STN")
+
+	// 1. Set initial baud and send triple break
+	if err := speedSetter(int(from)); err != nil {
+		return err
+	}
+	if _, err := port.Write(cr3); err != nil {
+		return err
+	}
+	time.Sleep(sleepAfterBreak)
+
+	// 2. Send "STBR<to>\r" with minimal allocs
+	cmd := append([]byte("STBR"), strconv.AppendInt(nil, int64(to), 10)...)
+	cmd = append(cmd, '\r')
+	if _, err := port.Write(cmd); err != nil {
+		return err
+	}
+	time.Sleep(sleepAfterSTBR)
+
+	// 3. Switch to new baud
+	if err := resetInputBuffer(); err != nil {
+		return err
+	}
+	if err := speedSetter(int(to)); err != nil {
+		return err
+	}
+
+	readBuf := make([]byte, 64)
+	lineBuf := make([]byte, 0, 128)
+
+	// 4. Read loop with Go 1.22+ range-over-int
+	for range readAttempts {
+		n, err := port.Read(readBuf)
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			time.Sleep(sleepWhenIdle)
+			continue
+		}
+
+		for _, b := range readBuf[:n] {
+			if b == '\r' {
+				if len(lineBuf) == 0 {
+					continue
+				}
+				if bytes.Contains(lineBuf, stn) {
+					onMessage("Device: " + string(lineBuf))
+					if _, err := port.Write([]byte{'\r'}); err != nil {
+						return err
+					}
+					return nil
+				}
+				lineBuf = lineBuf[:0]
+				continue
+			}
+			// Grow only if needed — use Go 1.21+ min/max
+			if len(lineBuf) == cap(lineBuf) {
+				newCap := max(cap(lineBuf)*2, 64)
+				tmp := make([]byte, len(lineBuf), newCap)
+				copy(tmp, lineBuf)
+				lineBuf = tmp
+			}
+			lineBuf = append(lineBuf, b)
+		}
+	}
+
+	return fmt.Errorf("failed to change adapter baudrate from %d to %d bps", from, to)
+}
+
+func scantoolTrySpeed2(
 	port io.ReadWriter,
 	from, to uint,
 	speedSetter func(int) error,
@@ -242,7 +327,7 @@ func scantoolTrySpeed(
 					continue
 				}
 				if bytes.Contains(buff.Bytes(), []byte("STN")) {
-					onMessage(buff.String())
+					onMessage(fmt.Sprintf("Device: %s", buff.String()))
 					if _, err := port.Write([]byte("\r")); err != nil {
 						return err
 					}

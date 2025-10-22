@@ -115,7 +115,7 @@ func (stn *ScantoolFTDI) Close() error {
 
 func (stn *ScantoolFTDI) recvManager(ctx context.Context) {
 	buff := bytes.NewBuffer(nil)
-	buf := make([]byte, 64)
+	buf := make([]byte, 256)
 	var rx_cnt int32
 	var err error
 	for {

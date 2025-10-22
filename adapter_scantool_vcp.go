@@ -124,6 +124,7 @@ func (stn *ScantoolVCP) Open(ctx context.Context) error {
 	resetInputBuffer := func() error {
 		return stn.port.ResetInputBuffer()
 	}
+
 	speedSetter := func(baud int) error {
 		return stn.port.SetMode(&serial.Mode{
 			BaudRate: baud,
