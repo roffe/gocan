@@ -130,20 +130,22 @@ This service allows the tester to perform the following tasks:
    gateway (or longer if the ECU would otherwise keep t
 */
 func (cl *Client) InitiateDiagnosticOperation(ctx context.Context, subFunc byte) error {
-	payload := []byte{0x02, INITIATE_DIAGNOSTIC_OPERATION, subFunc}
-	frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
+	frame := &gocan.CANFrame{
+		Identifier: cl.canID,
+		Data:       []byte{0x02, INITIATE_DIAGNOSTIC_OPERATION, subFunc},
+		FrameType:  gocan.ResponseRequired,
+	}
 	resp, err := cl.c.SendAndWait(ctx, frame, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
-		return fmt.Errorf("InitiateDiagnosticOperation: %w", err)
+		return fmt.Errorf("InitiateDiagnosticOperation[1]: %w", err)
 	}
 	if err := CheckErr(resp); err != nil {
-		return err
+		return fmt.Errorf("InitiateDiagnosticOperation[2]: %w", err)
 	}
 	if resp.Data[0] != 0x01 || resp.Data[1] != 0x50 {
 		log.Println(resp.String())
-		return errors.New("InitiateDiagnosticOperation: invalid response to InitiateDiagnosticOperation request")
+		return errors.New("InitiateDiagnosticOperation[3]: invalid response")
 	}
-
 	return nil
 }
 
@@ -283,9 +285,14 @@ another vehicle bus (e.g., KWP2000 or Class 2). This requirement is necessary to
 other devices on the GMLAN subnet.
 */
 func (cl *Client) ReturnToNormalMode(ctx context.Context) error {
+	frame := &gocan.CANFrame{
+		Identifier: cl.canID,
+		Data:       []byte{0x01, RETURN_TO_NORMAL_MODE},
+		FrameType:  gocan.ResponseRequired,
+	}
 	resp, err := cl.c.SendAndWait(
 		ctx,
-		gocan.NewFrame(cl.canID, []byte{0x01, RETURN_TO_NORMAL_MODE}, gocan.ResponseRequired),
+		frame,
 		cl.defaultTimeout,
 		cl.recvID...,
 	)
@@ -306,13 +313,12 @@ service
 
 func (cl *Client) ReadMemoryByAddress(ctx context.Context, address, length uint32) ([]byte, error) {
 	// request
-	req := gocan.NewFrame(
-		cl.canID,
-		[]byte{0x06, READ_MEMORY_BY_ADDRESS, byte(address >> 16), byte(address >> 8), byte(address), byte(length >> 8), byte(length)},
-		gocan.ResponseRequired,
-	)
-
-	resp, err := cl.c.SendAndWait(ctx, req, cl.defaultTimeout*2, cl.recvID...)
+	frame := &gocan.CANFrame{
+		Identifier: cl.canID,
+		Data:       []byte{0x06, READ_MEMORY_BY_ADDRESS, byte(address >> 16), byte(address >> 8), byte(address), byte(length >> 8), byte(length)},
+		FrameType:  gocan.ResponseRequired,
+	}
+	resp, err := cl.c.SendAndWait(ctx, frame, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
 		return nil, fmt.Errorf("ReadMemoryByAddress[1]: %w", err)
 	}
@@ -609,11 +615,10 @@ func (cl *Client) DynamicallyDefineMessage(ctx context.Context, ids ...uint16) e
 	}
 	resp, err := cl.c.SendAndWait(ctx, frame, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
-		return fmt.Errorf("DynamicallyDefineMessage: %w", err)
+		return fmt.Errorf("DynamicallyDefineMessage[1]: %w", err)
 	}
-	log.Println(resp.String())
 	if err := CheckErr(resp); err != nil {
-		return err
+		return fmt.Errorf("DynamicallyDefineMessage[2]: %w", err)
 	}
 	return nil
 }
@@ -668,7 +673,7 @@ func (cl *Client) Execute(ctx context.Context, startAddress uint32) error {
 	ti := time.Now()
 	resp, err := cl.c.SendAndWait(ctx, gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired), cl.defaultTimeout*10, cl.recvID...)
 	if err != nil {
-		return fmt.Errorf("Execute: %w", err)
+		return fmt.Errorf("Execute[1]: %w", err)
 	}
 	log.Println("Execute took", time.Since(ti).Milliseconds())
 	return CheckErr(resp)
@@ -691,17 +696,15 @@ func (cl *Client) TransferData(ctx context.Context, subFunc byte, length byte, s
 	f := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
 	resp, err := cl.c.SendAndWait(ctx, f, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
-		return err
+		return fmt.Errorf("TransferData[1]: %w", err)
 	}
-
 	if err := CheckErr(resp); err != nil {
-		return err
+		return fmt.Errorf("TransferData[2]: %w", err)
 	}
 
 	if resp.Data[0] != 0x30 || resp.Data[1] != 0x00 {
-		return errors.New("/!\\ Did not receive correct response from TransferData")
+		return errors.New("TransferData[3]: invalid response")
 	}
-
 	return nil
 }
 
@@ -974,13 +977,13 @@ func (cl *Client) ReportProgrammedState(ctx context.Context) (byte, error) {
 	frame := gocan.NewFrame(cl.canID, []byte{0x01, REPORT_PROGRAMMED_STATE}, gocan.ResponseRequired)
 	resp, err := cl.c.SendAndWait(ctx, frame, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
-		return 0, fmt.Errorf("ReportProgrammedState: %w", err)
+		return 0, fmt.Errorf("ReportProgrammedState[1]: %w", err)
 	}
 	if err := CheckErr(resp); err != nil {
-		return 0, err
+		return 0, fmt.Errorf("ReportProgrammedState[2]: %w", err)
 	}
 	if resp.Data[0] != 0x02 || resp.Data[1] != 0xE2 {
-		return 0, errors.New("invalid response to ReportProgrammedState request")
+		return 0, errors.New("ReportProgrammedState[3]: invalid response")
 	}
 	return resp.Data[2], nil
 }
@@ -1053,10 +1056,10 @@ func (cl *Client) ProgrammingMode(ctx context.Context, subFunc byte) error {
 		frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
 		resp, err := cl.c.SendAndWait(ctx, frame, cl.defaultTimeout*4, cl.recvID...)
 		if err != nil {
-			return fmt.Errorf("ProgrammingMode: %X %w", subFunc, err)
+			return fmt.Errorf("ProgrammingMode[1]: %X %w", subFunc, err)
 		}
 		if resp.Data[0] != 0x01 || resp.Data[1] != 0xE5 {
-			return errors.New("request ProgrammingMode invalid response")
+			return errors.New("ProgrammingMode[2]: invalid response")
 		}
 		return nil
 
@@ -1066,7 +1069,7 @@ func (cl *Client) ProgrammingMode(ctx context.Context, subFunc byte) error {
 		}
 		return nil
 	default:
-		return errors.New("ProgrammingMode: unknown subFunc")
+		return errors.New("ProgrammingMode[3]: unknown subFunc")
 	}
 }
 
