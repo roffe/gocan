@@ -117,7 +117,7 @@ func (cu *CanusbFTDI) recvManager(ctx context.Context) {
 	)
 	var rx_cnt int32
 	var err error
-	buf := make([]byte, 1024) // large enough for worst case
+	buf := make([]byte, 4*1024) // large enough for worst case
 	for {
 		select {
 		case <-ctx.Done():
