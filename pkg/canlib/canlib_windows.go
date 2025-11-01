@@ -1,5 +1,10 @@
 package canlib
 
+/*
+#include <stdlib.h>
+*/
+import "C"
+
 import (
 	"fmt"
 	"syscall"
@@ -444,8 +449,59 @@ func (hnd Handle) WriteSync(timeoutMS uint32) error {
 }
 
 // This function sends a CAN message and returns when the message has been successfully transmitted, or the timeout expires.
-func (hnd Handle) WriteWait(identifier uint32, data []byte, flags MsgFlag, timeoutMS uint32) error {
+func (hnd Handle) WriteWait2(identifier uint32, data []byte, flags MsgFlag, timeoutMS uint32) error {
 	return checkErr(procWriteWait.Call(uintptr(hnd), uintptr(identifier), uintptr(unsafe.Pointer(&data[0])), uintptr(len(data)), uintptr(flags), uintptr(timeoutMS)))
+}
+
+func prepFrameBuffer(data []byte) (ptr uintptr, length uintptr) {
+	if len(data) == 0 {
+		return 0, 0
+	}
+
+	// Defensive copy in case the driver queues the buffer internally.
+	buf := make([]byte, len(data))
+	copy(buf, data)
+
+	return uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf))
+}
+
+func prepFrameBufferC(data []byte) (ptr uintptr, length uintptr) {
+	if len(data) == 0 {
+		return 0, 0
+	}
+
+	mem := C.malloc(C.size_t(len(data)))
+	if mem == nil {
+		panic("malloc failed")
+	}
+
+	// copy from Go slice into C memory
+	dst := unsafe.Slice((*byte)(mem), len(data))
+	copy(dst, data)
+
+	return uintptr(mem), uintptr(len(data))
+}
+
+// releaseFrameBufferC frees the C memory allocated by prepFrameBufferC.
+func releaseFrameBufferC(ptr uintptr) {
+	if ptr == 0 {
+		return
+	}
+	C.free(unsafe.Pointer(ptr))
+}
+
+func (hnd Handle) WriteWait(identifier uint32, data []byte, flags MsgFlag, timeoutMS uint32) error {
+	ptr, length := prepFrameBufferC(data)
+	defer releaseFrameBufferC(ptr)
+	err := checkErr(procWriteWait.Call(
+		uintptr(hnd),
+		uintptr(identifier),
+		ptr,
+		length,
+		uintptr(flags),
+		uintptr(timeoutMS),
+	))
+	return err
 }
 
 type NotifyFlag uint32
