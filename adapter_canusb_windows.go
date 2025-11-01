@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	canusb "github.com/roffe/gocanusb"
+	"github.com/roffe/gocan/pkg/canusb"
 )
 
 func init() {
@@ -181,7 +181,7 @@ func (cu *Canusb) callbackHandler(msg *canusb.CANMsg) uintptr {
 	default:
 		cu.sendErrorEvent(ErrDroppedFrame)
 	}
-	return 1
+	return 0
 }
 
 func (cu *Canusb) run(ctx context.Context) {

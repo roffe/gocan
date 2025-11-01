@@ -5,7 +5,7 @@ package gocan
 import (
 	"log"
 
-	ftdi "github.com/roffe/goftdi"
+	ftdi "github.com/roffe/gocan/pkg/ftdi"
 )
 
 func init() {

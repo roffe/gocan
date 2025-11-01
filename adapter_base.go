@@ -17,11 +17,14 @@ type BaseAdapter struct {
 	name               string
 	cfg                *AdapterConfig
 	sendChan, recvChan chan *CANFrame
-	errOnce            sync.Once
-	errChan            chan error
-	evtChan            chan Event
-	closeChan          chan struct{}
-	closeOnce          sync.Once
+
+	errOnce sync.Once
+	errChan chan error
+
+	evtChan chan Event
+
+	closeChan chan struct{}
+	closeOnce sync.Once
 }
 
 func NewBaseAdapter(name string, cfg *AdapterConfig) BaseAdapter {
@@ -83,7 +86,7 @@ func (base *BaseAdapter) sendEvent(eventType EventType, details string) {
 	default:
 		_, file, no, ok := runtime.Caller(1)
 		if ok {
-			fmt.Printf("%s#%d event channel full: %s\n", filepath.Base(file), no, details)
+			log.Printf("%s#%d event channel full: %s\n", filepath.Base(file), no, details)
 		} else {
 			log.Printf("event channel full: %s", details)
 		}

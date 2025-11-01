@@ -10,10 +10,6 @@ import (
 	"strings"
 )
 
-func init() {
-
-}
-
 type Adapter interface {
 	Name() string
 	Open(context.Context) error
@@ -22,7 +18,6 @@ type Adapter interface {
 	Recv() <-chan *CANFrame
 	Err() <-chan error
 	Event() <-chan Event
-	//SetFilter([]uint32) error
 }
 
 type AdapterInfo struct {
@@ -80,7 +75,6 @@ func NewAdapter(adapterName string, cfg *AdapterConfig) (Adapter, error) {
 }
 
 func RegisterAdapter(adapter *AdapterInfo) error {
-	//log.Println("Registering adapter", adapter.Name)
 	if _, found := adapterMap[adapter.Name]; !found {
 		adapterMap[adapter.Name] = adapter
 		return nil
@@ -88,7 +82,7 @@ func RegisterAdapter(adapter *AdapterInfo) error {
 	return fmt.Errorf("adapter %s already registered", adapter.Name)
 }
 
-func List() []string {
+func ListAdapterNames() []string {
 	var out []string
 	for name := range adapterMap {
 		out = append(out, name)
@@ -103,8 +97,4 @@ func ListAdapters() []AdapterInfo {
 		out = append(out, *adapter)
 	}
 	return out
-}
-
-func GetAdapterMap() map[string]*AdapterInfo {
-	return adapterMap
 }

@@ -61,7 +61,6 @@ type CANlib struct {
 	timeoutRead  uint32
 	timeoutWrite uint32
 	closeOnce    sync.Once
-	// notifyChannel chan canlib.NotifyFlag
 }
 
 func NewCANlib(channel int, name string) func(cfg *AdapterConfig) (Adapter, error) {
@@ -71,9 +70,40 @@ func NewCANlib(channel int, name string) func(cfg *AdapterConfig) (Adapter, erro
 			BaseAdapter:  NewBaseAdapter(name, cfg),
 			timeoutRead:  defaultReadTimeoutMs,
 			timeoutWrite: defaultWriteTimeoutMs,
-			// notifyChannel: make(chan canlib.NotifyFlag, 100),
 		}, nil
 	}
+}
+
+func (k *CANlib) Open(ctx context.Context) error {
+	if k.cfg.PrintVersion {
+		k.cfg.OnMessage("CANlib v" + canlib.GetVersion())
+	}
+
+	if err := k.openChannels(); err != nil {
+		return err
+	}
+
+	if err := k.setSpeed(k.cfg.CANRate); err != nil {
+		err1 := k.readHandle.Close()
+		err2 := k.writeHandle.Close()
+		return fmt.Errorf("setSpeed: %v, RH: %v WH: %v", err, err1, err2)
+	}
+
+	// if err := canlib.SetBusOutputControl(k.readHandle, canlib.DRIVER_NORMAL); err != nil {
+	// 	return fmt.Errorf("setBusOutputControl: %v", err)
+	// }
+	// if err := canlib.SetBusOutputControl(k.writeHandle, canlib.DRIVER_NORMAL); err != nil {
+	// 	return fmt.Errorf("setBusOutputControl: %v", err)
+	// }
+
+	go k.recvManager(ctx)
+	go k.sendManager(ctx)
+
+	if err := k.readHandle.BusOn(); err != nil {
+		return err
+	}
+
+	return k.writeHandle.BusOn()
 }
 
 func (k *CANlib) SetFilter(filters []uint32) error {
@@ -82,9 +112,6 @@ func (k *CANlib) SetFilter(filters []uint32) error {
 
 func (k *CANlib) Close() error {
 	k.BaseAdapter.Close()
-	//if err := k.readHandle.SetNotifyCallback(nil, canlib.NOTIFY_RX); err != nil {
-	//	log.Println("Kvaser.Close() set callback error:", err)
-	//}
 	k.closeOnce.Do(func() {
 		if err := k.readHandle.BusOff(); err != nil {
 			log.Println("CANlib.BusOff() off error:", err)
@@ -112,38 +139,6 @@ func (k *CANlib) Close() error {
 		}
 	})
 	return nil
-}
-
-func (k *CANlib) Open(ctx context.Context) error {
-	if k.cfg.PrintVersion {
-		k.cfg.OnMessage("CANlib v" + canlib.GetVersion())
-	}
-
-	if err := k.openChannels(); err != nil {
-		return err
-	}
-
-	if err := k.setSpeed(k.cfg.CANRate); err != nil {
-		err1 := k.readHandle.Close()
-		err2 := k.writeHandle.Close()
-		return fmt.Errorf("setSpeed: %v, RH: %v WH: %v", err, err1, err2)
-	}
-
-	// if err := canlib.SetBusOutputControl(k.readHandle, canlib.DRIVER_NORMAL); err != nil {
-	// 	return fmt.Errorf("setBusOutputControl: %v", err)
-	// }
-	// if err := canlib.SetBusOutputControl(k.writeHandle, canlib.DRIVER_NORMAL); err != nil {
-	// 	return fmt.Errorf("setBusOutputControl: %v", err)
-	// }
-
-	go k.sendManager(ctx)
-	go k.recvManager(ctx)
-
-	if err := k.readHandle.BusOn(); err != nil {
-		return err
-	}
-
-	return k.writeHandle.BusOn()
 }
 
 func (k *CANlib) openChannels() (err error) {
@@ -223,26 +218,35 @@ func (k *CANlib) recvManager(ctx context.Context) {
 	if k.cfg.Debug {
 		defer log.Println("kvaser recvManager exited")
 	}
+
+	if err := k.writeHandle.SetNotifyCallback(k.handleCallback, canlib.NOTIFY_RX); err != nil {
+		log.Println("CANlib.recvManager set callback error:", err)
+	}
+	defer k.writeHandle.SetNotifyCallback(nil, canlib.NOTIFY_RX)
+
+	select {
+	case <-ctx.Done():
+		return
+	case <-k.closeChan:
+		return
+	}
+}
+
+func (k *CANlib) handleCallback(hhnd int32, ctx uintptr, event canlib.NotifyFlag) uintptr {
 	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-k.closeChan:
-			return
-		default:
-			msg, err := k.readHandle.ReadWait(k.timeoutRead)
-			if err != nil {
-				if err == canlib.ErrNoMsg {
-					continue
-				}
-				k.setError(fmt.Errorf("recv error: %v", err))
-				return
+		msg, err := k.readHandle.Read()
+		if err != nil {
+			if err == canlib.ErrNoMsg {
+				break
 			}
-			if err := k.recvMessage(msg); err != nil {
-				k.sendErrorEvent(err)
-			}
+			k.sendErrorEvent(fmt.Errorf("recv error: %w", err))
+			return 0
+		}
+		if err := k.recvMessage(msg); err != nil {
+			k.sendErrorEvent(err)
 		}
 	}
+	return 0
 }
 
 func (k *CANlib) recvMessage(msg *canlib.CANMessage) error {

@@ -36,12 +36,6 @@ github.com/mdlayher/socket v0.5.1 h1:VZaqt6RkGkt2OE9l3GcC6nZkqD3xKeQLyfleW/uBcos
 github.com/mdlayher/socket v0.5.1/go.mod h1:TjPLHI1UgwEv5J1B5q0zTZq12A/6H7nKmtTanQE37IQ=
 github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 h1:Jamvg5psRIccs7FGNTlIRMkT8wgtp5eCXdBlqhYGL6U=
 github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
-github.com/roffe/gocanusb v1.1.2 h1:qnPhGLIeTXkBKQiGNV/vZfcXMwRmL1XsEeorGmPHD+A=
-github.com/roffe/gocanusb v1.1.2/go.mod h1:zRgZyTCvOyLIMeW+d9aUPmoJC3PId0PUJF0IVNQ70Z4=
-github.com/roffe/goftdi v0.0.0-20250330120219-31feb988cb73 h1:ws9di8cqLErxvao9FI5cRU7s2XcsMcqhPMrNsKNcMSY=
-github.com/roffe/goftdi v0.0.0-20250330120219-31feb988cb73/go.mod h1:oWL500yi96TiZ8QuWArPYkkbli5DyX3y+9N03yboXIw=
-github.com/roffe/gopcan v0.0.2 h1:Usvyal9lGkrbq/epn5CXWhO1zWvncilVPjcKAL75dp0=
-github.com/roffe/gopcan v0.0.2/go.mod h1:/KrMtL4o4WA3jP7HUqX5wbRIcJQgnpnJvgawuC3wVTo=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
 github.com/yuin/goldmark v1.3.5/go.mod h1:mwnBkeHKe2W/ZEtQ+71ViKU8L12m81fl3OWwC1Zlc8k=

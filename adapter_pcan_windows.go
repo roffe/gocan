@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"unsafe"
 
-	"github.com/roffe/gopcan"
+	"github.com/roffe/gocan/pkg/pcan"
 )
 
 func cString(b []byte) string {
@@ -22,7 +22,7 @@ func cString(b []byte) string {
 }
 
 func init() {
-	channels, err := gopcan.GetAttachedChannelsCount()
+	channels, err := pcan.GetAttachedChannelsCount()
 	if err != nil {
 		log.Println(err)
 		return
@@ -49,12 +49,12 @@ func init() {
 
 type PCAN struct {
 	BaseAdapter
-	ch     gopcan.TPCANHandle
-	rate   gopcan.TPCANBaudrate
+	ch     pcan.TPCANHandle
+	rate   pcan.TPCANBaudrate
 	closed bool
 }
 
-func NewPCANCHelper(name string, ch gopcan.TPCANHandle) func(*AdapterConfig) (Adapter, error) {
+func NewPCANCHelper(name string, ch pcan.TPCANHandle) func(*AdapterConfig) (Adapter, error) {
 	return func(cfg *AdapterConfig) (Adapter, error) {
 		pcan, err := newPCAN(name, cfg)
 		if err != nil {
@@ -79,23 +79,23 @@ func newPCAN(name string, cfg *AdapterConfig) (Adapter, error) {
 }
 
 func (p *PCAN) Open(ctx context.Context) error {
-	hwName, err := gopcan.GetHardwareName(p.ch)
+	hwName, err := pcan.GetHardwareName(p.ch)
 	if err != nil {
 		return fmt.Errorf("failed to get hardware name: %w", err)
 	}
 
-	if err := gopcan.CAN_Initialize(p.ch, p.rate); err != nil {
+	if err := pcan.CAN_Initialize(p.ch, p.rate); err != nil {
 		return err
 	}
 
-	param := gopcan.DWORD(gopcan.PCAN_PARAMETER_ON)
-	if err := gopcan.CAN_SetValue(p.ch, gopcan.PCAN_BUSOFF_AUTORESET, uintptr(unsafe.Pointer(&param)), 4); err != nil {
-		log.Println("Error setting BUSOFF_AUTORESET:", err)
+	param := pcan.DWORD(pcan.PCAN_PARAMETER_ON)
+	if err := pcan.CAN_SetValue(p.ch, pcan.PCAN_BUSOFF_AUTORESET, uintptr(unsafe.Pointer(&param)), 4); err != nil {
+		p.cfg.OnMessage("Warning: Failed to set BUSOFF_AUTORESET parameter")
 	}
 
-	firmwareVersion, err := gopcan.GetFirmwareVersion(p.ch)
+	firmwareVersion, err := pcan.GetFirmwareVersion(p.ch)
 	if err != nil {
-		log.Println(err)
+		p.cfg.OnMessage("Warning: Failed to get firmware version")
 	}
 	p.sendInfoEvent(fmt.Sprintf("Name: %s %s", hwName, firmwareVersion))
 	go p.recvManager(ctx)
@@ -106,13 +106,13 @@ func (p *PCAN) Open(ctx context.Context) error {
 func (p *PCAN) Close() error {
 	p.closed = true
 	p.BaseAdapter.Close()
-	return gopcan.CAN_Uninitialize(p.ch)
+	return pcan.CAN_Uninitialize(p.ch)
 }
 
 func (p *PCAN) recvManager(ctx context.Context) {
 	defer log.Println("exit recvManager")
 
-	rxEvent, err := gopcan.SetReceiveEvent(p.ch)
+	rxEvent, err := pcan.SetReceiveEvent(p.ch)
 	if err != nil {
 		p.setError(fmt.Errorf("SetReceiveEvent failed: %w", err))
 		return
@@ -128,11 +128,11 @@ func (p *PCAN) recvManager(ctx context.Context) {
 			return
 		}
 		for {
-			var msg gopcan.TPCANMsg
-			var timestamp gopcan.TPCANTimestamp
-			err := gopcan.CAN_Read(p.ch, &msg, &timestamp)
+			var msg pcan.TPCANMsg
+			var timestamp pcan.TPCANTimestamp
+			err := pcan.CAN_Read(p.ch, &msg, &timestamp)
 			if err != nil {
-				if err.(gopcan.PCANError).Code == gopcan.PCAN_ERROR_QRCVEMPTY {
+				if err.(pcan.PCANError).Code == pcan.PCAN_ERROR_QRCVEMPTY {
 					break
 				}
 				if !p.closed {
@@ -161,50 +161,50 @@ func (p *PCAN) sendManager(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case frame := <-p.sendChan:
-			msg := gopcan.TPCANMsg{
+			msg := pcan.TPCANMsg{
 				ID:  uint32(frame.Identifier),
 				LEN: uint8(len(frame.Data)),
 			}
 			copy(msg.DATA[:], frame.Data)
-			if err := gopcan.CAN_Write(p.ch, &msg); err != nil {
+			if err := pcan.CAN_Write(p.ch, &msg); err != nil {
 				p.sendErrorEvent(fmt.Errorf("failed to send frame: %w", err))
 			}
 		}
 	}
 }
 
-func pcanCANrate(rate float64) (gopcan.TPCANBaudrate, error) {
+func pcanCANrate(rate float64) (pcan.TPCANBaudrate, error) {
 	switch rate {
 	case 1_000_000:
-		return gopcan.PCAN_BAUD_1M, nil
+		return pcan.PCAN_BAUD_1M, nil
 	case 800_000:
-		return gopcan.PCAN_BAUD_800K, nil
+		return pcan.PCAN_BAUD_800K, nil
 	case 615384:
-		return gopcan.TPCANBaudrate(0x4037), nil
+		return pcan.TPCANBaudrate(0x4037), nil
 	case 500_000:
-		return gopcan.PCAN_BAUD_500K, nil
+		return pcan.PCAN_BAUD_500K, nil
 	case 250_000:
-		return gopcan.PCAN_BAUD_250K, nil
+		return pcan.PCAN_BAUD_250K, nil
 	case 125_000:
-		return gopcan.PCAN_BAUD_125K, nil
+		return pcan.PCAN_BAUD_125K, nil
 	case 100_000:
-		return gopcan.PCAN_BAUD_100K, nil
+		return pcan.PCAN_BAUD_100K, nil
 	case 95_000:
-		return gopcan.PCAN_BAUD_95K, nil
+		return pcan.PCAN_BAUD_95K, nil
 	case 83_000:
-		return gopcan.PCAN_BAUD_83K, nil
+		return pcan.PCAN_BAUD_83K, nil
 	case 50_000:
-		return gopcan.PCAN_BAUD_50K, nil
+		return pcan.PCAN_BAUD_50K, nil
 	case 47_000:
-		return gopcan.PCAN_BAUD_47K, nil
+		return pcan.PCAN_BAUD_47K, nil
 	case 33_000:
-		return gopcan.PCAN_BAUD_33K, nil
+		return pcan.PCAN_BAUD_33K, nil
 	case 20_000:
-		return gopcan.PCAN_BAUD_20K, nil
+		return pcan.PCAN_BAUD_20K, nil
 	case 10_000:
-		return gopcan.PCAN_BAUD_10K, nil
+		return pcan.PCAN_BAUD_10K, nil
 	case 5_000:
-		return gopcan.PCAN_BAUD_5K, nil
+		return pcan.PCAN_BAUD_5K, nil
 	default:
 		return 0, fmt.Errorf("unsupported CAN rate: %v", rate)
 	}

@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"time"
 
-	ftdi "github.com/roffe/goftdi"
+	ftdi "github.com/roffe/gocan/pkg/ftdi"
 )
 
 type CanusbFTDI struct {

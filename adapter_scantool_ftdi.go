@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	ftdi "github.com/roffe/goftdi"
+	"github.com/roffe/gocan/pkg/ftdi"
 )
 
 type ScantoolFTDI struct {
