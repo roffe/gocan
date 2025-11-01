@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"syscall"
+	"unsafe"
 
 	"github.com/roffe/gopcan"
 )
@@ -85,6 +86,11 @@ func (p *PCAN) Open(ctx context.Context) error {
 
 	if err := gopcan.CAN_Initialize(p.ch, p.rate); err != nil {
 		return err
+	}
+
+	param := gopcan.DWORD(gopcan.PCAN_PARAMETER_ON)
+	if err := gopcan.CAN_SetValue(p.ch, gopcan.PCAN_BUSOFF_AUTORESET, uintptr(unsafe.Pointer(&param)), 4); err != nil {
+		log.Println("Error setting BUSOFF_AUTORESET:", err)
 	}
 
 	firmwareVersion, err := gopcan.GetFirmwareVersion(p.ch)
