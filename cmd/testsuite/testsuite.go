@@ -92,7 +92,7 @@ func main() {
 			continue
 		}
 		log.Printf("conecting #%d: %s", i, name)
-		c, err := gocan.NewWithAdapter(ctx, adapter)
+		c, err := gocan.NewWithOpts(ctx, adapter)
 		if err != nil {
 			log.Printf("Failed to create client %s: %v", name, err)
 			log.Fatalf("Failed to open %s: %v", name, err)
@@ -118,9 +118,7 @@ outer:
 		select {
 		case err := <-errz:
 			log.Printf("%s Client error: %v", adapterOrder[err.idx], err.err)
-			if !gocan.IsRecoverable(err.err) {
-				break outer
-			}
+			break outer
 		case <-ctx.Done():
 			break outer
 		case sig := <-sigChan:
@@ -143,16 +141,8 @@ type wrappedError struct {
 }
 
 func createErrListener(ctx context.Context, cl *gocan.Client, idx int, errz chan<- wrappedError) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case err, ok := <-cl.Err():
-			if !ok {
-				return
-			}
-			errz <- wrappedError{idx: idx, err: err}
-		}
+	if err := cl.Wait(); err != nil {
+		errz <- wrappedError{idx: idx, err: err}
 	}
 }
 
