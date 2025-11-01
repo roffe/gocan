@@ -131,7 +131,7 @@ func (a *OBDXProWifi) sendManager() {
 				a.cfg.OnMessage(fmt.Sprintf("dvi out: %s", sendCmd.String()))
 			}
 			if _, err := a.conn.Write(sendCmd.Bytes()); err != nil {
-				a.SetError(fmt.Errorf("failed to send frame: %w", err))
+				a.sendErrorEvent(fmt.Errorf("failed to send frame: %w", err))
 			}
 
 		}
@@ -154,7 +154,7 @@ func (a *OBDXProWifi) recvManager() {
 			select {
 			case a.recvChan <- frame:
 			default:
-				a.SetError(ErrDroppedFrame)
+				a.sendErrorEvent(ErrDroppedFrame)
 			}
 			return
 		}
@@ -171,7 +171,7 @@ func (a *OBDXProWifi) recvManager() {
 				//if errors.Is(err, os.ErrDeadlineExceeded) {
 				//	continue
 				//}
-				a.SetError(Unrecoverable(fmt.Errorf("failed to read from com port: %w", err)))
+				a.setError(fmt.Errorf("failed to read from com port: %w", err))
 				return
 			}
 			if n == 0 {

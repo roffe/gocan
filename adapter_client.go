@@ -104,7 +104,7 @@ func (c *GWClient) sendManager(ctx context.Context, stream grpc.BidiStreamingCli
 			return
 		case msg := <-c.sendChan:
 			if err := c.sendMessage(stream, msg); err != nil {
-				c.SetError(fmt.Errorf("sendManager: %w", err))
+				c.setError(fmt.Errorf("sendManager: %w", err))
 				return
 			}
 		}
@@ -146,7 +146,7 @@ func (c *GWClient) recvManager(_ context.Context, stream grpc.BidiStreamingClien
 				}
 			}
 
-			c.SetError(Unrecoverable(err))
+			c.setError(err)
 			return
 		}
 
@@ -160,10 +160,10 @@ func (c *GWClient) recvMessage(identifier uint32, data []byte) {
 		c.cfg.OnMessage(string(data))
 		return
 	case SystemMsgError:
-		c.SetError(errors.New(string(data)))
+		c.sendEvent(EventTypeError, string(data))
 		return
 	case SystemMsgUnrecoverableError:
-		c.SetError(Unrecoverable(errors.New(string(data))))
+		c.setError(errors.New(string(data)))
 		return
 	}
 	frame := NewFrame(identifier, data, Incoming)

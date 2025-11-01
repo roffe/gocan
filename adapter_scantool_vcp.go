@@ -154,7 +154,7 @@ func (stn *ScantoolVCP) Open(ctx context.Context) error {
 	}
 
 	go stn.recvManager(ctx)
-	go scantoolSendManager(ctx, stn.cfg.Debug, stn.port, stn.sendChan, stn.sendSem, stn.closeChan, stn.SetError, stn.cfg.OnMessage)
+	go scantoolSendManager(ctx, stn.cfg.Debug, stn.port, stn.sendChan, stn.sendSem, stn.closeChan, stn.setError, stn.cfg.OnMessage)
 
 	return nil
 }
@@ -181,7 +181,7 @@ func (stn *ScantoolVCP) recvManager(ctx context.Context) {
 			if ctx.Err() != nil {
 				return
 			}
-			stn.SetError(fmt.Errorf("failed to read: %w", err))
+			stn.setError(fmt.Errorf("failed to read: %w", err))
 			return
 		}
 		if n == 0 {
@@ -204,13 +204,13 @@ func (stn *ScantoolVCP) recvManager(ctx context.Context) {
 				}
 				switch buff.String() {
 				case "CAN ERROR":
-					stn.cfg.OnMessage("CAN ERROR")
+					stn.sendEvent(EventTypeError, "CAN ERROR")
 					buff.Reset()
 				case "STOPPED":
-					stn.cfg.OnMessage("STOPPED")
+					stn.sendEvent(EventTypeInfo, "STOPPED")
 					buff.Reset()
 				case "?":
-					stn.cfg.OnMessage("UNKNOWN COMMAND")
+					stn.sendEvent(EventTypeWarning, "UNKNOWN COMMAND")
 					buff.Reset()
 				case "NO DATA", "OK":
 					buff.Reset()
@@ -224,7 +224,7 @@ func (stn *ScantoolVCP) recvManager(ctx context.Context) {
 					select {
 					case stn.recvChan <- f:
 					default:
-						stn.SetError(ErrDroppedFrame)
+						stn.sendErrorEvent(ErrDroppedFrame)
 					}
 					buff.Reset()
 				}

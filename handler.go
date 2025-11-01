@@ -8,21 +8,21 @@ import (
 
 // handler takes care of faning out incoming frames to any subs
 type handler struct {
-	adapter Adapter
-	//register   chan *Subscriber
-	//unregister chan *Subscriber
-	close     chan struct{}
+	adapter   Adapter
+	closeCh   chan struct{}
 	closeOnce sync.Once
 
 	submap     map[uint32]map[*Subscriber]struct{}
 	globalSubs []*Subscriber
+
+	onEvent func(Event)
 
 	mu sync.RWMutex
 }
 
 func newHandler(adapter Adapter) *handler {
 	fh := &handler{
-		close:      make(chan struct{}),
+		closeCh:    make(chan struct{}),
 		adapter:    adapter,
 		submap:     make(map[uint32]map[*Subscriber]struct{}),
 		globalSubs: make([]*Subscriber, 0, 100),
@@ -73,12 +73,21 @@ func (h *handler) unregisterSubscriber(sub *Subscriber) {
 
 func (h *handler) run(ctx context.Context) {
 	recvChan := h.adapter.Recv()
+	eventChan := h.adapter.Event()
 	for {
 		select {
-		case <-h.close:
+		case <-h.closeCh:
 			return
 		case <-ctx.Done():
 			return
+		case evt, ok := <-eventChan:
+			if !ok {
+				log.Println("event channel closed")
+				return
+			}
+			if h.onEvent != nil {
+				go h.onEvent(evt)
+			}
 		case frame, ok := <-recvChan:
 			if !ok {
 				log.Println("incoming channel closed")
@@ -113,8 +122,15 @@ func (h *handler) deliver(frame *CANFrame) {
 	}
 }
 
-func (h *handler) Close() {
+func (h *handler) close() {
 	h.closeOnce.Do(func() {
-		close(h.close)
+		close(h.closeCh)
 	})
+}
+
+// Set a function to be called on events
+func (h *handler) setOnEvent(fn func(Event)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.onEvent = fn
 }

@@ -21,6 +21,7 @@ type Adapter interface {
 	Send() chan<- *CANFrame
 	Recv() <-chan *CANFrame
 	Err() <-chan error
+	Event() <-chan Event
 	//SetFilter([]uint32) error
 }
 
@@ -72,18 +73,6 @@ func NewAdapter(adapterName string, cfg *AdapterConfig) (Adapter, error) {
 			}
 		}
 	}
-	/*
-		if cfg.OnError == nil {
-			cfg.OnError = func(err error) {
-				_, file, no, ok := runtime.Caller(1)
-				if ok {
-					fmt.Printf("%s#%d %v\n", filepath.Base(file), no, err)
-				} else {
-					log.Println(err)
-				}
-			}
-		}
-	*/
 	if adapter, found := adapterMap[adapterName]; found {
 		return adapter.New(cfg)
 	}

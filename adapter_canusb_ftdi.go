@@ -79,7 +79,7 @@ func (cu *CanusbFTDI) Open(ctx context.Context) error {
 	cu.port.Purge(ftdi.FT_PURGE_RX)
 
 	go cu.recvManager(ctx)
-	go canusbSendManager(ctx, cu.closeChan, cu.sendSem, cu.port, cu.sendChan, cu.SetError, cu.cfg.OnMessage, cu.cfg.Debug)
+	go canusbSendManager(ctx, cu.closeChan, cu.sendSem, cu.port, cu.sendChan, cu.setError, cu.cfg.OnMessage, cu.cfg.Debug)
 
 	// Open the CAN channel
 	cu.sendChan <- &CANFrame{
@@ -112,7 +112,7 @@ func (cu *CanusbFTDI) recvManager(ctx context.Context) {
 		cu.buff,
 		cu.sendSem,
 		cu.recvChan,
-		cu.SetError,
+		cu.setError,
 		cu.cfg.OnMessage,
 	)
 	var rx_cnt int32
@@ -127,7 +127,7 @@ func (cu *CanusbFTDI) recvManager(ctx context.Context) {
 		default:
 			rx_cnt, err = cu.port.GetQueueStatus()
 			if err != nil {
-				cu.SetError(Unrecoverable(fmt.Errorf("failed to get queue status: %w", err)))
+				cu.setError(fmt.Errorf("failed to get queue status: %w", err))
 				return
 			}
 			if rx_cnt == 0 {
@@ -141,7 +141,7 @@ func (cu *CanusbFTDI) recvManager(ctx context.Context) {
 				if ctx.Err() != nil {
 					return
 				}
-				cu.SetError(fmt.Errorf("failed to read com port: %w", err))
+				cu.setError(fmt.Errorf("failed to read com port: %w", err))
 				return
 			}
 			if n == 0 {

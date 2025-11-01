@@ -327,11 +327,11 @@ func canusbSendManager(
 						onMessage(">> " + string(msg.Data))
 					}
 					if _, err := port.Write(msg.Data); err != nil {
-						onError(Unrecoverable(fmt.Errorf("failed to write to com port: %w", err)))
+						onError(fmt.Errorf("failed to write to com port: %w", err))
 						return
 					}
 					if _, err := port.Write([]byte{'\r'}); err != nil {
-						onError(Unrecoverable(fmt.Errorf("failed to write to com port: %w", err)))
+						onError(fmt.Errorf("failed to write to com port: %w", err))
 						return
 					}
 				}
@@ -382,7 +382,7 @@ func canusbSendManager(
 			i++
 
 			if _, err := port.Write(out[:i]); err != nil {
-				onError(Unrecoverable(fmt.Errorf("failed to write to com port: %w", err)))
+				onError(fmt.Errorf("failed to write to com port: %w", err))
 				return
 			}
 

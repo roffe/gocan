@@ -2,7 +2,6 @@ package gocan
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -192,7 +191,7 @@ func (tx *Txbridge) sendManager(_ context.Context) {
 			if frame.Identifier == SystemMsg {
 				_, err := tx.port.Write(frame.Data)
 				if err != nil {
-					tx.SetError(err)
+					tx.sendErrorEvent(err)
 				}
 				continue
 			}
@@ -203,12 +202,12 @@ func (tx *Txbridge) sendManager(_ context.Context) {
 			}
 			buf, err := cmd.MarshalBinary()
 			if err != nil {
-				tx.SetError(err)
+				tx.sendErrorEvent(err)
 				continue
 			}
 			_, err = tx.port.Write(buf)
 			if err != nil {
-				tx.SetError(err)
+				tx.sendErrorEvent(err)
 				continue
 			}
 		}
@@ -242,10 +241,10 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 
 		n, err := tx.port.Read(readbuf)
 		if err != nil {
-			if errors.Is(err, net.ErrClosed) {
-				return
-			}
-			tx.SetError(Unrecoverable(err))
+			//if errors.Is(err, net.ErrClosed) {
+			//	return
+			//}
+			tx.setError(err)
 			return
 		}
 		if n == 0 {
@@ -280,7 +279,7 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 				data := make([]byte, commandSize)
 				copy(data, cmdbuff[:cmdbuffPtr])
 				if commandChecksum != b {
-					tx.SetError(fmt.Errorf("checksum error: expected %02X, got %02X", commandChecksum, b))
+					tx.sendEvent(EventTypeError, fmt.Sprintf("checksum error: expected %02X, got %02X", commandChecksum, b))
 					//tx.cfg.OnMessage(fmt.Sprintf("checksum error %q %02X != %02X", command, commandChecksum, b))
 					parsingCommand = false
 					commandSize = 0
@@ -299,11 +298,11 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 				case 'e':
 					switch data[1] {
 					case 0x31:
-						tx.SetError(fmt.Errorf("read timeout"))
+						tx.sendEvent(EventTypeError, "read timeout")
 					case 0x32:
-						tx.SetError(fmt.Errorf("invalid sequence"))
+						tx.sendEvent(EventTypeError, "invalid sequence")
 					default:
-						tx.SetError(fmt.Errorf("xerror: %X", data))
+						tx.sendEvent(EventTypeError, fmt.Sprintf("xerror: %X", data))
 					}
 					cmdbuffPtr = 0
 					commandChecksum = 0
@@ -365,7 +364,7 @@ func (tx *Txbridge) sendFrame(frame *CANFrame) {
 	select {
 	case tx.recvChan <- frame:
 	default:
-		tx.SetError(ErrDroppedFrame)
+		tx.sendErrorEvent(ErrDroppedFrame)
 	}
 }
 

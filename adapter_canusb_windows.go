@@ -153,7 +153,7 @@ func (cu *Canusb) Open(ctx context.Context) error {
 	if cu.cfg.PrintVersion {
 		ver, err := cu.h.VersionInfo()
 		if err != nil {
-			cu.SetError(fmt.Errorf("get version failed: %w", err))
+			cu.sendErrorEvent(fmt.Errorf("get version failed: %w", err))
 		} else {
 			cu.cfg.OnMessage(ver)
 		}
@@ -179,7 +179,7 @@ func (cu *Canusb) callbackHandler(msg *canusb.CANMsg) uintptr {
 		FrameType:  Incoming,
 	}:
 	default:
-		cu.SetError(ErrDroppedFrame)
+		cu.sendErrorEvent(ErrDroppedFrame)
 	}
 	return 1
 }
@@ -202,7 +202,7 @@ func (cu *Canusb) run(ctx context.Context) {
 		case <-stats.C:
 			st, err := cu.h.GetStatistics()
 			if err != nil {
-				cu.SetError(fmt.Errorf("get statistics failed: %w", err))
+				cu.sendErrorEvent(fmt.Errorf("get statistics failed: %w", err))
 				continue
 			}
 			log.Println(st.String())
@@ -211,7 +211,7 @@ func (cu *Canusb) run(ctx context.Context) {
 				if err == canusb.ErrArbitrationLost {
 					continue
 				}
-				cu.SetError(err)
+				cu.sendErrorEvent(err)
 				continue
 			}
 		case frame := <-cu.sendChan:
@@ -231,7 +231,7 @@ func (cu *Canusb) run(ctx context.Context) {
 				msg.Flags |= canusb.CANMSG_RTR
 			}
 			if err := cu.h.Write(msg); err != nil {
-				cu.SetError(fmt.Errorf("write failed: %w", err))
+				cu.sendErrorEvent(fmt.Errorf("write failed: %w", err))
 			}
 			if err := cu.h.Flush(canusb.FLUSH_WAIT); err != nil {
 				log.Println(err)

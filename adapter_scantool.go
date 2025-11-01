@@ -163,7 +163,7 @@ func scantoolSendManager(
 					}
 					sendSem <- struct{}{}
 					if _, err := port.Write(append(v.Data, '\r')); err != nil {
-						onError(Unrecoverable(fmt.Errorf("failed to write: %q %w", f.String(), err)))
+						onError(fmt.Errorf("failed to write: %q %w", f.String(), err))
 						return
 					}
 				}
@@ -185,7 +185,7 @@ func scantoolSendManager(
 			}
 			sendSem <- struct{}{}
 			if _, err := port.Write(f.Bytes()); err != nil {
-				onError(Unrecoverable(fmt.Errorf("failed to write: %q %w", f.String(), err)))
+				onError(fmt.Errorf("failed to write: %q %w", f.String(), err))
 				return
 			}
 			f.Reset()

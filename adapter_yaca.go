@@ -146,7 +146,7 @@ func (ya *YACA) recvManager(ctx context.Context) {
 		}
 		n, err := ya.port.Read(readBuffer)
 		if err != nil {
-			ya.SetError(fmt.Errorf("failed to read from com port: %w", err))
+			ya.setError(fmt.Errorf("failed to read from com port: %w", err))
 			return
 		}
 		if n == 0 {
@@ -185,7 +185,7 @@ func (ya *YACA) parse(ctx context.Context, buff *bytes.Buffer, readBuffer []byte
 				select {
 				case ya.recvChan <- f:
 				default:
-					ya.SetError(ErrDroppedFrame)
+					ya.sendEvent(EventTypeWarning, ErrDroppedFrame.Error())
 				}
 				buff.Reset()
 			case 0x07: // bell, last command was unknown
@@ -241,7 +241,7 @@ func (ya *YACA) sendManager(ctx context.Context) {
 						ya.cfg.OnMessage(">> " + string(v.Data))
 					}
 					if _, err := ya.port.Write(append(v.Data, '\r')); err != nil {
-						ya.SetError(Unrecoverable(fmt.Errorf("failed to write to com port: %w", err)))
+						ya.setError(fmt.Errorf("failed to write to com port: %w", err))
 						return
 					}
 				}

@@ -213,7 +213,7 @@ func (k *CANlib) sendManager(ctx context.Context) {
 				continue
 			}
 			if err := k.writeHandle.WriteWait(msg.Identifier, msg.Data, canlib.MSG_STD, k.timeoutWrite); err != nil {
-				k.SetError(fmt.Errorf("kvaser sendMessage error: %w", err))
+				k.sendErrorEvent(fmt.Errorf("Send: %w", err))
 			}
 		}
 	}
@@ -235,11 +235,11 @@ func (k *CANlib) recvManager(ctx context.Context) {
 				if err == canlib.ErrNoMsg {
 					continue
 				}
-				k.SetError(Unrecoverable(fmt.Errorf("kvaser recvManager error: %v", err)))
+				k.setError(fmt.Errorf("recv error: %v", err))
 				return
 			}
 			if err := k.recvMessage(msg); err != nil {
-				k.SetError(err)
+				k.sendErrorEvent(err)
 			}
 		}
 	}
@@ -247,7 +247,7 @@ func (k *CANlib) recvManager(ctx context.Context) {
 
 func (k *CANlib) recvMessage(msg *canlib.CANMessage) error {
 	if len(msg.Data) < int(msg.DLC) {
-		return errors.New("kvaser recvManager invalid data length")
+		return errors.New("recvManager invalid data length")
 	}
 	frame := NewFrame(uint32(msg.Identifier), msg.Data[:msg.DLC], Incoming)
 	frame.Extended = msg.Flags&uint32(canlib.MSG_EXT) != 0
@@ -256,6 +256,6 @@ func (k *CANlib) recvMessage(msg *canlib.CANMessage) error {
 	case k.recvChan <- frame:
 		return nil
 	default:
-		return errors.New("kvaser recvManager dropped frame")
+		return errors.New("recvManager dropped frame")
 	}
 }

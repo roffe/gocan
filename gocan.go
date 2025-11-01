@@ -20,12 +20,18 @@ const (
 	SystemMsgUnknown
 )
 
-type Opts func(*Client)
+type Opt func(*Client)
 
 type Client struct {
 	fh        *handler
 	adapter   Adapter
 	closeOnce sync.Once
+}
+
+func WithEventHandler(fn func(Event)) Opt {
+	return func(c *Client) {
+		c.fh.setOnEvent(fn)
+	}
 }
 
 // Create a new CAN client with given adapter name and config
@@ -34,16 +40,11 @@ func New(ctx context.Context, adapterName string, cfg *AdapterConfig) (*Client, 
 	if err != nil {
 		return nil, err
 	}
-	return NewWithAdapter(ctx, adapter)
-}
-
-// Create a new CAN client with given adapter
-func NewWithAdapter(ctx context.Context, adapter Adapter) (*Client, error) {
 	return NewWithOpts(ctx, adapter)
 }
 
 // Create a new CAN client with given adapter and options
-func NewWithOpts(ctx context.Context, adapter Adapter, opts ...Opts) (*Client, error) {
+func NewWithOpts(ctx context.Context, adapter Adapter, opts ...Opt) (*Client, error) {
 	c := &Client{
 		fh:      newHandler(adapter),
 		adapter: adapter,
@@ -65,9 +66,13 @@ func (c *Client) AdapterName() string {
 	return c.adapter.Name()
 }
 
-// Return a channel for errors from the adapter
-func (c *Client) Err() <-chan error {
-	return c.adapter.Err()
+// Wait for the first critical error or closure of the client
+func (c *Client) Wait() error {
+	return <-c.adapter.Err()
+}
+
+func (c *Client) Event() <-chan Event {
+	return c.adapter.Event()
 }
 
 // Close the client and underlying adapter
@@ -75,7 +80,7 @@ func (c *Client) Close() error {
 	var err error
 	c.closeOnce.Do(func() {
 		err = c.adapter.Close()
-		c.fh.Close()
+		c.fh.close()
 	})
 	return err
 }
@@ -122,8 +127,8 @@ func (c *Client) SendAndWait(ctx context.Context, frame *CANFrame, timeout time.
 	return sub.wait(waitCtx)
 }
 
-// Wait for a certain CAN identifier for up to <timeout>
-func (c *Client) Wait(ctx context.Context, timeout time.Duration, identifiers ...uint32) (*CANFrame, error) {
+// Receive a single CAN frame with specific identifier with a max waiting timeout
+func (c *Client) Recv(ctx context.Context, timeout time.Duration, identifiers ...uint32) (*CANFrame, error) {
 	sub, err := c.newSub(1, identifiers...)
 	if err != nil {
 		return nil, err

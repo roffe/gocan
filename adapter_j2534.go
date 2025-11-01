@@ -279,14 +279,14 @@ func (ma *J2534) recvManager(ctx context.Context) {
 		default:
 			msg, err := ma.readMsg()
 			if err != nil {
-				ma.SetError(err)
+				ma.sendErrorEvent(err)
 				continue
 			}
 			if msg == nil {
 				continue
 			}
 			if msg.DataSize == 0 {
-				ma.SetError(errors.New("empty message"))
+				ma.sendErrorEvent(errors.New("empty message"))
 				continue
 			}
 			frame := NewFrame(
@@ -300,7 +300,7 @@ func (ma *J2534) recvManager(ctx context.Context) {
 			select {
 			case ma.recvChan <- frame:
 			default:
-				ma.SetError(ErrDroppedFrame)
+				ma.sendErrorEvent(ErrDroppedFrame)
 			}
 		}
 	}
@@ -360,7 +360,7 @@ func (ma *J2534) sendManager(ctx context.Context) {
 			binary.BigEndian.PutUint32(msg.Data[:], f.Identifier)
 			copy(msg.Data[4:], f.Data)
 			if err := ma.sendMsg(msg); err != nil {
-				ma.SetError(fmt.Errorf("send error: %w", err))
+				ma.sendErrorEvent(fmt.Errorf("send error: %w", err))
 			}
 		}
 	}

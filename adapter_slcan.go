@@ -111,7 +111,7 @@ func (sl *SLCan) recvManager(ctx context.Context) {
 		n, err := sl.port.Read(readBuffer)
 		if err != nil {
 			if !sl.closed {
-				sl.SetError(Unrecoverable(fmt.Errorf("failed to read com port: %w", err)))
+				sl.setError(fmt.Errorf("failed to read com port: %w", err))
 			}
 			return
 		}
@@ -146,7 +146,7 @@ func (sl *SLCan) handleSend(frame *CANFrame, f *bytes.Buffer) error {
 				log.Println(">> " + string(frame.Data))
 			}
 			if _, err := sl.port.Write(append(frame.Data, '\r')); err != nil {
-				return Unrecoverable(fmt.Errorf("failed to write to com port: %w", err))
+				return fmt.Errorf("failed to write to com port: %w", err)
 			}
 		}
 		return nil
@@ -193,7 +193,7 @@ func (sl *SLCan) parse(ctx context.Context, buff *bytes.Buffer, readBuffer []byt
 				case <-ctx.Done():
 					return
 				default:
-					sl.SetError(ErrDroppedFrame)
+					sl.sendErrorEvent(ErrDroppedFrame)
 				}
 			} else {
 				sl.cfg.OnMessage("Unknown>> " + buff.String())

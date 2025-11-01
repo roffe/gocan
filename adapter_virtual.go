@@ -49,7 +49,7 @@ func (v *Mock) sendManager(ctx context.Context) {
 			select {
 			case v.recvChan <- frame:
 			default:
-				v.SetError(ErrDroppedFrame)
+				v.sendErrorEvent(ErrDroppedFrame)
 			}
 		}
 	}
