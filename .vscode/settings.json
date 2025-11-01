@@ -1,8 +1,8 @@
 {
     "go.useLanguageServer": true,
-    "go.buildTags": "canusb canlib j2534 combi",
+    "go.buildTags": "canusb canlib j2534 combi pcan",
     "go.buildFlags": [
         "-tags",
-        "canusb,canlib,ftdi,j2534,combi",
+        "canusb,canlib,ftdi,j2534,combi,pcan",
     ],
 }
