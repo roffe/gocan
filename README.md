@@ -2,6 +2,8 @@
 
 A Go Linux/Windows/OSX CAN library
 
+Linux maintainer wanted! Please contact me if you want to help out.
+
 ## Build tags
 
 * combi - requires libusb-1.0.dll
