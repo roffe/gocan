@@ -32,7 +32,7 @@ func init() {
 		log.Println(err)
 		return
 	}
-	log.Printf("Attached Channels Count: %d\n", len(channels))
+	//log.Printf("Attached Channels Count: %d\n", len(channels))
 	for _, channel := range channels {
 		name := cString(channel.DeviceName[:])
 		if err := RegisterAdapter(&AdapterInfo{
