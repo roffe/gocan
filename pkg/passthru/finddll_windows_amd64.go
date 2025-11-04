@@ -72,7 +72,11 @@ func FindDLLs() (prefix string, dlls []J2534DLL) {
 				capabilities.SWCANPS = true
 			}
 		}
-		dlls = append(dlls, J2534DLL{Name: name, FunctionLibrary: functionLibrary, Capabilities: capabilities})
+		dlls = append(dlls, J2534DLL{
+			Name:            name,
+			FunctionLibrary: functionLibrary,
+			Capabilities:    capabilities,
+		})
 	}
 	return
 }
