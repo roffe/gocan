@@ -1,9 +1,7 @@
 package gocan
 
 import (
-	"bytes"
 	"context"
-	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"log"
@@ -53,7 +51,7 @@ func (sl *SLCan) Open(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to open com port %q : %v", sl.cfg.Port, err)
 	}
-	p.SetReadTimeout(1 * time.Millisecond)
+	p.SetReadTimeout(3 * time.Millisecond)
 	sl.port = p
 
 	p.ResetOutputBuffer()
@@ -76,11 +74,14 @@ func (sl *SLCan) Open(ctx context.Context) error {
 	case 250.0:
 		p.Write([]byte("S5\r"))
 	case 500.0:
+		log.Println("set 500")
 		p.Write([]byte("S6\r"))
 	case 750.0:
 		p.Write([]byte("S7\r"))
 	case 1000.0:
 		p.Write([]byte("S8\r"))
+	case 615.384:
+		p.Write([]byte("S9\r"))
 	}
 	time.Sleep(10 * time.Millisecond)
 	p.Write([]byte("O\r"))
@@ -92,6 +93,7 @@ func (sl *SLCan) SetFilter(filters []uint32) error {
 }
 
 func (sl *SLCan) Close() error {
+	sl.BaseAdapter.Close()
 	sl.closed = true
 	time.Sleep(10 * time.Millisecond)
 	sl.port.Write([]byte("C\r"))
@@ -100,15 +102,10 @@ func (sl *SLCan) Close() error {
 }
 
 func (sl *SLCan) recvManager(ctx context.Context) {
-	buff := bytes.NewBuffer(nil)
-	readBuffer := make([]byte, 8)
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-		n, err := sl.port.Read(readBuffer)
+	buf := make([]byte, 0, 1024)
+	readBuf := make([]byte, 8)
+	for ctx.Err() == nil {
+		n, err := sl.port.Read(readBuf)
 		if err != nil {
 			if !sl.closed {
 				sl.setError(fmt.Errorf("failed to read com port: %w", err))
@@ -118,28 +115,28 @@ func (sl *SLCan) recvManager(ctx context.Context) {
 		if n == 0 {
 			continue
 		}
-		sl.parse(ctx, buff, readBuffer[:n])
+		buf = sl.parse(ctx, buf, readBuf[:n])
 	}
 }
 
 func (sl *SLCan) sendManager(ctx context.Context) {
-	f := bytes.NewBuffer(nil)
+	var outBuf = make([]byte, 0, 4096) // reused scratch buffer for frames
 	for {
 		select {
-		case frame := <-sl.sendChan:
-			if err := sl.handleSend(frame, f); err != nil {
-				sl.cfg.OnMessage(fmt.Sprintf("send error: %v", err))
-			}
 		case <-ctx.Done():
 			return
 		case <-sl.closeChan:
 			return
+		case frame := <-sl.sendChan:
+			if err := sl.handleSend(frame, &outBuf); err != nil {
+				sl.cfg.OnMessage(fmt.Sprintf("send error: %v", err))
+			}
 		}
 	}
 }
 
-// handleSend processes a single send operation.
-func (sl *SLCan) handleSend(frame *CANFrame, f *bytes.Buffer) error {
+func (sl *SLCan) handleSend(frame *CANFrame, outBuf *[]byte) error {
+	// System / control messages (like "O", "C", bitrate stuff)
 	if id := frame.Identifier; id >= SystemMsg {
 		if id == SystemMsg {
 			if sl.cfg.Debug {
@@ -152,64 +149,102 @@ func (sl *SLCan) handleSend(frame *CANFrame, f *bytes.Buffer) error {
 		return nil
 	}
 
-	f.Reset()
-	f.WriteByte('t')
-	idb := make([]byte, 4)
-	binary.BigEndian.PutUint32(idb, frame.Identifier)
-	f.WriteString(hex.EncodeToString(idb)[5:]) // Skip the first byte
-	f.WriteString(strconv.Itoa(frame.Length()))
-	f.WriteString(hex.EncodeToString(frame.Data))
-	f.WriteByte(0x0D)
+	// Reset the reusable buffer without realloc
+	buf := (*outBuf)[:0]
 
-	if _, err := sl.port.Write(f.Bytes()); err != nil {
-		sl.cfg.OnMessage(fmt.Sprintf("failed to write to com port: %s, %v", f.String(), err))
+	// SLCAN frame format for standard ID:
+	// 't' + 3-hex-digit ID + len-nibble + data-as-hex + '\r'
+	//
+	// Example: t1238A1B2C3D4E5F6\r
+	//
+	// We currently only send 11-bit IDs, same as the old code.
+
+	buf = append(buf, 't')
+
+	// Encode 11-bit ID as 3 hex chars.
+	// Old code did:
+	//   idb := make([]byte,4)
+	//   binary.BigEndian.PutUint32(idb, frame.Identifier)
+	//   f.WriteString(hex.EncodeToString(idb)[5:])
+	//
+	// We'll do it without heap churn.
+
+	id := frame.Identifier & 0x7FF // 11-bit
+	// We want exactly 3 hex nybbles (padded): high -> low
+	// nibble2 nibble1 nibble0
+	n2 := byte((id >> 8) & 0xF)
+	n1 := byte((id >> 4) & 0xF)
+	n0 := byte(id & 0xF)
+
+	buf = append(buf, nybbleToHex(n2), nybbleToHex(n1), nybbleToHex(n0))
+
+	// DLC (single hex digit)
+	dlc := frame.Length()
+	buf = append(buf, nybbleToHex(byte(dlc)&0xF))
+
+	for i := range dlc {
+		buf = append(buf, nybbleToHex(frame.Data[i]>>4), nybbleToHex(frame.Data[i]&0xF))
+	}
+
+	// Terminate with CR
+	buf = append(buf, '\r')
+	// Send it
+	if _, err := sl.port.Write(buf); err != nil {
+		sl.sendErrorEvent(fmt.Errorf("failed to write to com port: %w", err))
 	}
 	if sl.cfg.Debug {
-		log.Println(">> " + f.String())
+		// Safe to turn the slice into string for debug only
+		log.Println(">> " + string(buf))
 	}
-
+	// Store the grown buffer back so capacity is kept/reused
+	*outBuf = buf
 	return nil
 }
 
-func (sl *SLCan) parse(ctx context.Context, buff *bytes.Buffer, readBuffer []byte) {
-	for _, b := range readBuffer {
-		if b == 0x0D {
-			if buff.Len() == 0 {
+// helper converts a 0..15 value to its ASCII hex nibble
+func nybbleToHex(n byte) byte {
+	if n < 10 {
+		return '0' + n
+	}
+	return 'A' + (n - 10)
+}
+
+// parse processes the read data and returns any remaining partial data.
+func (sl *SLCan) parse(ctx context.Context, buf, readBuf []byte) []byte {
+	for _, b := range readBuf {
+		if b == '\r' {
+			if len(buf) == 0 {
 				continue
 			}
-			by := buff.Bytes()
-			if by[0] == 't' {
+			switch buf[0] {
+			case 't':
 				if sl.cfg.Debug {
-					log.Println("<< " + buff.String())
+					log.Printf("<< %s", string(buf))
 				}
-				f, err := sl.decodeFrame(by)
+				f, err := sl.decodeFrame(buf)
 				if err != nil {
-					sl.cfg.OnMessage(fmt.Sprintf("%v: %X", err, by))
-					buff.Reset()
+					sl.cfg.OnMessage(fmt.Sprintf("%v: %X", err, buf))
+					buf = buf[:0]
 					continue
 				}
+
 				select {
 				case sl.recvChan <- f:
 				case <-ctx.Done():
-					return
+					return buf[:0]
 				default:
 					sl.sendErrorEvent(ErrDroppedFrame)
 				}
-			} else {
-				sl.cfg.OnMessage("Unknown>> " + buff.String())
+			default:
+				sl.sendWarningEvent("Unknown>> " + string(buf))
 			}
-			buff.Reset()
+			// Reset buffer after a full message
+			buf = buf[:0]
 		} else {
-			buff.WriteByte(b)
-		}
-
-		// Check for context cancellation at the end of the loop
-		select {
-		case <-ctx.Done():
-			return
-		default:
+			buf = append(buf, b)
 		}
 	}
+	return buf
 }
 
 func (*SLCan) decodeFrame(buff []byte) (*CANFrame, error) {
