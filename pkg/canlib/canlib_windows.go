@@ -1,18 +1,13 @@
 package canlib
 
-/*
-#include <stdlib.h>
-*/
-import "C"
-
 import (
 	"fmt"
+	"sync"
 	"syscall"
 	"unsafe"
 )
 
 var (
-	InitErr  error
 	dllFuncs = map[string]**syscall.Proc{
 		"canInitializeLibrary":   &procInitializeLibrary,
 		"canUnloadLibrary":       &procUnloadLibrary,
@@ -43,29 +38,34 @@ var (
 		"canWriteWait":           &procWriteWait,
 		"kvSetNotifyCallback":    &prockvSetNotifyCallback,
 	}
+	InitErr  error
+	initOnce sync.Once
 )
 
-func init() {
-	canlib32, err := syscall.LoadDLL("canlib32.dll")
-	if err != nil {
-		InitErr = err
-		return
-	}
-
-	for funcName, procPtr := range dllFuncs {
-		proc, err := canlib32.FindProc(funcName)
+func Init() error {
+	initOnce.Do(func() {
+		canlib32, err := syscall.LoadDLL("canlib32.dll")
 		if err != nil {
-			InitErr = fmt.Errorf("failed to find procedure %s: %w", funcName, err)
-			canlib32.Release()
+			InitErr = err
 			return
 		}
-		*procPtr = proc
-	}
 
-	if err := InitializeLibrary(); err != nil {
-		InitErr = fmt.Errorf("canlib InitializeLibrary error: %w", err)
-		return
-	}
+		for funcName, procPtr := range dllFuncs {
+			proc, err := canlib32.FindProc(funcName)
+			if err != nil {
+				InitErr = fmt.Errorf("failed to find procedure %s: %w", funcName, err)
+				canlib32.Release()
+				return
+			}
+			*procPtr = proc
+		}
+
+		if err := InitializeLibrary(); err != nil {
+			InitErr = fmt.Errorf("canlib InitializeLibrary error: %w", err)
+			return
+		}
+	})
+	return InitErr
 }
 
 var (
@@ -449,58 +449,54 @@ func (hnd Handle) WriteSync(timeoutMS uint32) error {
 }
 
 // This function sends a CAN message and returns when the message has been successfully transmitted, or the timeout expires.
+func (hnd Handle) WriteWait(identifier uint32, data []byte, flags MsgFlag, timeoutMS uint32) error {
+	return hnd.writeFrameNoAlloc(identifier, data, flags, timeoutMS)
+}
+
+// writeFrameNoAlloc copies 'data' into cb.ptr and issues the syscall.
+func (hnd Handle) writeFrameNoAlloc(identifier uint32, data []byte, flags MsgFlag, timeoutMS uint32) error {
+	if len(data) == 0 {
+		// Still call with length 0? Up to your driver spec.
+		return checkErr(procWriteWait.Call(uintptr(hnd), uintptr(identifier), 0, 0, uintptr(flags), uintptr(timeoutMS)))
+	}
+
+	cb, pooled := getCBuf(len(data))
+	// Make a Go view onto the C memory.
+	dst := unsafe.Slice((*byte)(unsafe.Pointer(cb.ptr)), len(data))
+	copy(dst, data)
+
+	// Call into driver while memory is valid.
+	err := checkErr(procWriteWait.Call(
+		uintptr(hnd),
+		uintptr(identifier),
+		uintptr(cb.ptr),
+		uintptr(len(data)),
+		uintptr(flags),
+		uintptr(timeoutMS),
+	))
+
+	// Return or free buffer.
+	putCBuf(cb, pooled)
+
+	return err
+}
+
+// This function sends a CAN message and returns when the message has been successfully transmitted, or the timeout expires.
 func (hnd Handle) WriteWait2(identifier uint32, data []byte, flags MsgFlag, timeoutMS uint32) error {
 	return checkErr(procWriteWait.Call(uintptr(hnd), uintptr(identifier), uintptr(unsafe.Pointer(&data[0])), uintptr(len(data)), uintptr(flags), uintptr(timeoutMS)))
 }
 
-func prepFrameBuffer(data []byte) (ptr uintptr, length uintptr) {
-	if len(data) == 0 {
-		return 0, 0
-	}
-
-	// Defensive copy in case the driver queues the buffer internally.
-	buf := make([]byte, len(data))
-	copy(buf, data)
-
-	return uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf))
-}
-
-func prepFrameBufferC(data []byte) (ptr uintptr, length uintptr) {
-	if len(data) == 0 {
-		return 0, 0
-	}
-
-	mem := C.malloc(C.size_t(len(data)))
-	if mem == nil {
-		panic("malloc failed")
-	}
-
-	// copy from Go slice into C memory
-	dst := unsafe.Slice((*byte)(mem), len(data))
-	copy(dst, data)
-
-	return uintptr(mem), uintptr(len(data))
-}
-
-// releaseFrameBufferC frees the C memory allocated by prepFrameBufferC.
-func releaseFrameBufferC(ptr uintptr) {
-	if ptr == 0 {
-		return
-	}
-	C.free(unsafe.Pointer(ptr))
-}
-
-func (hnd Handle) WriteWait(identifier uint32, data []byte, flags MsgFlag, timeoutMS uint32) error {
+func (hnd Handle) WriteWait3(identifier uint32, data []byte, flags MsgFlag, timeoutMS uint32) error {
 	ptr, length := prepFrameBufferC(data)
-	defer releaseFrameBufferC(ptr)
 	err := checkErr(procWriteWait.Call(
 		uintptr(hnd),
 		uintptr(identifier),
-		ptr,
+		uintptr(ptr),
 		length,
 		uintptr(flags),
 		uintptr(timeoutMS),
 	))
+	releaseFrameBufferC(ptr)
 	return err
 }
 
