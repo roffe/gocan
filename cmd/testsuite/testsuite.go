@@ -105,20 +105,18 @@ func main() {
 		createWorker(ctx, cl, i, last)
 	}
 
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
-
-	errz := make(chan wrappedError, 20)
 	for idx, c := range clientz {
-		go createErrListener(ctx, c, idx, errz)
+		go func(cl *gocan.Client, idx int) {
+			if err := cl.Wait(ctx); err != nil {
+				log.Printf("Client #%d (%s) exited with error: %v", idx, cl.Adapter().Name(), err)
+				cancel()
+			}
+		}(c, idx)
 	}
 
 outer:
 	for {
 		select {
-		case err := <-errz:
-			log.Printf("%s Client error: %v", adapterOrder[err.idx], err.err)
-			break outer
 		case <-ctx.Done():
 			break outer
 		case sig := <-sigChan:
@@ -127,22 +125,9 @@ outer:
 		}
 	}
 
-	cancel()
 	for _, c := range clientz {
 		log.Println("Closing client", c.Adapter().Name())
 		c.Close()
-	}
-
-}
-
-type wrappedError struct {
-	idx int // index of the client
-	err error
-}
-
-func createErrListener(ctx context.Context, cl *gocan.Client, idx int, errz chan<- wrappedError) {
-	if err := cl.Wait(); err != nil {
-		errz <- wrappedError{idx: idx, err: err}
 	}
 }
 
