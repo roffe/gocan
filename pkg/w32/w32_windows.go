@@ -7,7 +7,7 @@ import (
 )
 
 var (
-	modkernel32 *syscall.DLL
+	Modkernel32 *syscall.DLL
 	procMap     = map[string]**syscall.Proc{
 		"CreateEventW":        &procCreateEventW,
 		"WaitForSingleObject": &procWaitForSingleObject,
@@ -27,12 +27,12 @@ const (
 
 func init() {
 	var err error
-	modkernel32, err = syscall.LoadDLL("kernel32.dll")
+	Modkernel32, err = syscall.LoadDLL("kernel32.dll")
 	if err != nil {
 		panic(err)
 	}
 	for name, procPtr := range procMap {
-		*procPtr, err = modkernel32.FindProc(name)
+		*procPtr, err = Modkernel32.FindProc(name)
 		if err != nil {
 			panic(err)
 		}
