@@ -74,7 +74,6 @@ func (sl *SLCan) Open(ctx context.Context) error {
 	case 250.0:
 		p.Write([]byte("S5\r"))
 	case 500.0:
-		log.Println("set 500")
 		p.Write([]byte("S6\r"))
 	case 750.0:
 		p.Write([]byte("S7\r"))
