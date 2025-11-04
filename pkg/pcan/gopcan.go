@@ -2,6 +2,7 @@ package pcan
 
 import (
 	"log"
+	"sync"
 	"syscall"
 	"unsafe"
 )
@@ -41,20 +42,28 @@ var (
 	procCANLookupChannel  *syscall.Proc
 )
 
-func init() {
-	var err error
-	pcan, err = syscall.LoadDLL("PCANBasic.dll")
-	if err != nil {
-		log.Println(err)
-		return
-	}
+var (
+	InitErr  error
+	initOnce sync.Once
+)
 
-	for name, proc := range funcMap {
-		*proc, err = pcan.FindProc(name)
+func Init() error {
+	initOnce.Do(func() {
+		var err error
+		pcan, err = syscall.LoadDLL("PCANBasic.dll")
 		if err != nil {
-			panic(err)
+			InitErr = err
+			return
 		}
-	}
+		for name, proc := range funcMap {
+			*proc, err = pcan.FindProc(name)
+			if err != nil {
+				InitErr = err
+				return
+			}
+		}
+	})
+	return InitErr
 }
 
 type PCANError struct {
@@ -454,6 +463,9 @@ func GetAttachedChannelsCount() ([]TPCANChannelInformation, error) {
 	var count uint32
 	if err := CAN_GetValue(PCAN_NONEBUS, PCAN_ATTACHED_CHANNELS_COUNT, uintptr(unsafe.Pointer(&count)), 4); err != nil {
 		return nil, err
+	}
+	if count == 0 {
+		return []TPCANChannelInformation{}, nil
 	}
 	channels := make([]TPCANChannelInformation, count)
 	if err := CAN_GetValue(PCAN_NONEBUS, PCAN_ATTACHED_CHANNELS, uintptr(unsafe.Pointer(&channels[0])), uint32(unsafe.Sizeof(TPCANChannelInformation{}))*count); err != nil {

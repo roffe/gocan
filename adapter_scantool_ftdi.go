@@ -3,7 +3,6 @@
 package gocan
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -25,6 +24,8 @@ type ScantoolFTDI struct {
 
 	port     *ftdi.Device
 	devIndex uint64
+
+	closed bool
 }
 
 func NewScantoolFTDI(name string, idx uint64) func(cfg *AdapterConfig) (Adapter, error) {
@@ -107,92 +108,9 @@ func (stn *ScantoolFTDI) Open(ctx context.Context) error {
 }
 
 func (stn *ScantoolFTDI) Close() error {
+	stn.closed = true
 	stn.BaseAdapter.Close()
 	scantoolReset(stn.port)
 	stn.port.Purge(ftdi.FT_PURGE_BOTH)
 	return stn.port.Close()
-}
-
-func (stn *ScantoolFTDI) recvManager(ctx context.Context) {
-	buff := bytes.NewBuffer(nil)
-	buf := make([]byte, 256)
-	var rx_cnt int32
-	var err error
-	for {
-		//select {
-		//case <-ctx.Done():
-		//	return
-		//default:
-		//}
-		rx_cnt, err = stn.port.GetQueueStatus()
-		if err != nil {
-			stn.setError(fmt.Errorf("failed to get queue status: %w", err))
-			return
-		}
-		if rx_cnt == 0 {
-			time.Sleep(400 * time.Microsecond)
-			continue
-		}
-
-		readBuffer := buf[:rx_cnt]
-		n, err := stn.port.Read(readBuffer)
-		if err != nil {
-			if ctx.Err() != nil {
-				return
-			}
-			stn.setError(fmt.Errorf("failed to read: %w", err))
-			return
-		}
-		if n == 0 {
-			continue
-		}
-		for _, b := range readBuffer[:n] {
-			if b == '>' {
-				select {
-				case <-stn.sendSem:
-				default:
-				}
-				continue
-			}
-			if b == 0x0D {
-				if buff.Len() == 0 {
-					continue
-				}
-				if stn.cfg.Debug {
-					stn.cfg.OnMessage("<i> " + buff.String())
-				}
-				switch buff.String() {
-				case "CAN ERROR":
-					//stn.cfg.OnMessage("CAN ERROR")
-					stn.sendEvent(EventTypeError, "CAN ERROR")
-					buff.Reset()
-				case "STOPPED":
-					//stn.cfg.OnMessage("STOPPED")
-					stn.sendEvent(EventTypeInfo, "STOPPED")
-					buff.Reset()
-				case "?":
-					//stn.cfg.OnMessage("UNKNOWN COMMAND")
-					stn.sendEvent(EventTypeWarning, "UNKNOWN COMMAND")
-					buff.Reset()
-				case "NO DATA", "OK":
-					buff.Reset()
-				default:
-					f, err := scantoolDecodeFrame(buff.Bytes())
-					if err != nil {
-						stn.cfg.OnMessage(fmt.Sprintf("failed to decode frame: %s %v", buff.String(), err))
-						buff.Reset()
-						continue
-					}
-					select {
-					case stn.recvChan <- f:
-					default:
-						stn.sendErrorEvent(ErrDroppedFrame)
-					}
-					buff.Reset()
-				}
-				continue
-			}
-			buff.WriteByte(b)
-		}
-	}
 }

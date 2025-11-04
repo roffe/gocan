@@ -4,6 +4,14 @@ import (
 	"errors"
 )
 
+type EventMask uint16
+
+const (
+	FT_EVENT_RXCHAR       EventMask = 1
+	FT_EVENT_MODEM_STATUS EventMask = 2
+	FT_EVENT_LINE_STATUS  EventMask = 4
+)
+
 type BitMode byte
 
 const (

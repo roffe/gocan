@@ -12,6 +12,10 @@ import (
 )
 
 func main() {
+	if err := pcan.Init(); err != nil {
+		log.Fatal("PCANBasic driver not loaded:", err)
+	}
+
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 

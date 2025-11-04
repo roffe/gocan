@@ -4,98 +4,9 @@ import (
 	"fmt"
 	"syscall"
 	"unsafe"
+
+	"github.com/roffe/gocan/pkg/w32"
 )
-
-var (
-	modkernel32 *syscall.DLL
-	procMap     = map[string]**syscall.Proc{
-		"CreateEventW":        &procCreateEventW,
-		"WaitForSingleObject": &procWaitForSingleObject,
-		"CloseHandle":         &procCloseHandle,
-	}
-	procCreateEventW        *syscall.Proc
-	procWaitForSingleObject *syscall.Proc
-	procCloseHandle         *syscall.Proc
-)
-
-func init() {
-	var err error
-	modkernel32, err = syscall.LoadDLL("kernel32.dll")
-	if err != nil {
-		panic(err)
-	}
-	for name, procPtr := range procMap {
-		*procPtr, err = modkernel32.FindProc(name)
-		if err != nil {
-			panic(err)
-		}
-	}
-}
-
-const (
-	WAIT_OBJECT_0    = 0x00000000
-	WAIT_TIMEOUT     = 0x00000102
-	WAIT_FAILED      = 0xFFFFFFFF
-	INFINITE_TIMEOUT = 0xFFFFFFFF
-)
-
-// winCreateEvent wraps CreateEventW(NULL, FALSE, FALSE, NULL)
-//
-// bManualReset   = FALSE  -> auto-reset event
-// bInitialState  = FALSE  -> start non-signaled
-// lpName         = NULL   -> unnamed event
-//
-// Returns a Windows HANDLE as syscall.Handle.
-func winCreateEvent() (syscall.Handle, error) {
-	r1, _, e := procCreateEventW.Call(
-		0, // lpEventAttributes (LPSECURITY_ATTRIBUTES) = NULL
-		0, // bManualReset (BOOL) = FALSE  (auto-reset)
-		0, // bInitialState (BOOL) = FALSE (nonsignaled initially)
-		0, // lpName (LPCWSTR) = NULL
-	)
-	if r1 == 0 {
-		if e != syscall.Errno(0) {
-			return 0, e
-		}
-		return 0, syscall.EINVAL
-	}
-	return syscall.Handle(r1), nil
-}
-
-// winWaitForSingleObject(waitHandle, timeoutMs)
-// timeoutMs can be INFINITE_TIMEOUT
-func winWaitForSingleObject(h syscall.Handle, timeoutMs uint32) (uint32, error) {
-	r1, _, e := procWaitForSingleObject.Call(
-		uintptr(h),
-		uintptr(timeoutMs),
-	)
-	ret := uint32(r1)
-
-	switch ret {
-	case WAIT_OBJECT_0, WAIT_TIMEOUT:
-		return ret, nil
-	case WAIT_FAILED:
-		if e != syscall.Errno(0) {
-			return ret, e
-		}
-		return ret, syscall.EINVAL
-	default:
-		// shouldn't normally happen
-		return ret, fmt.Errorf("WaitForSingleObject unexpected result 0x%08X", ret)
-	}
-}
-
-// winCloseHandle is just CloseHandle on the HANDLE we created.
-func winCloseHandle(h syscall.Handle) error {
-	r1, _, e := procCloseHandle.Call(uintptr(h))
-	if r1 == 0 {
-		if e != syscall.Errno(0) {
-			return e
-		}
-		return syscall.EINVAL
-	}
-	return nil
-}
 
 // ----- PCAN receive event glue -----
 //
@@ -129,7 +40,7 @@ type ReceiveEvent struct {
 // on it and later clean it up.
 func SetReceiveEvent(channel TPCANHandle) (*ReceiveEvent, error) {
 	// 1. Create the Windows event
-	h, err := winCreateEvent()
+	h, err := w32.CreateEvent(false, false, "")
 	if err != nil {
 		return nil, fmt.Errorf("CreateEvent failed: %w", err)
 	}
@@ -145,7 +56,7 @@ func SetReceiveEvent(channel TPCANHandle) (*ReceiveEvent, error) {
 		4, // sizeof(DWORD)
 	); err != nil {
 		// important: close handle if we fail to register it
-		_ = winCloseHandle(h)
+		_ = w32.CloseHandle(h)
 		return nil, fmt.Errorf("CAN_SetValue(PCAN_RECEIVE_EVENT) failed: %w", err)
 	}
 
@@ -171,7 +82,7 @@ func (re *ReceiveEvent) ClearReceiveEvent(channel TPCANHandle) error {
 	}
 
 	// Close our side of the handle
-	if err := winCloseHandle(re.Handle); err != nil {
+	if err := w32.CloseHandle(re.Handle); err != nil {
 		return fmt.Errorf("CloseHandle failed: %w", err)
 	}
 
@@ -191,14 +102,14 @@ func (re *ReceiveEvent) Wait(timeoutMs uint32) error {
 		return fmt.Errorf("ReceiveEvent not initialized")
 	}
 
-	res, err := winWaitForSingleObject(re.Handle, timeoutMs)
+	res, err := w32.WaitForSingleObject(re.Handle, timeoutMs)
 	if err != nil {
 		return err
 	}
 	switch res {
-	case WAIT_OBJECT_0:
+	case w32.WAIT_OBJECT_0:
 		return nil
-	case WAIT_TIMEOUT:
+	case w32.WAIT_TIMEOUT:
 		return syscall.ETIMEDOUT
 	default:
 		return fmt.Errorf("unexpected wait result 0x%X", res)

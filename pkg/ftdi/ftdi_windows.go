@@ -11,8 +11,6 @@ import (
 	"unsafe"
 )
 
-var InitErr error
-
 var (
 	dllFuncs = map[string]**syscall.Proc{
 		"FT_CreateDeviceInfoList":   &ftCreateDeviceInfoList,
@@ -36,6 +34,7 @@ var (
 		"FT_ResetDevice":            &ftResetDevice,
 		"FT_SetBreakOn":             &ftSetBreakOn,
 		"FT_SetBreakOff":            &ftSetBreakOff,
+		"FT_SetEventNotification":   &ftSetEventNotification,
 	}
 
 	ftCreateDeviceInfoList *syscall.Proc
@@ -59,20 +58,20 @@ var (
 	ftResetDevice          *syscall.Proc
 	ftSetBreakOn           *syscall.Proc
 	ftSetBreakOff          *syscall.Proc
+	ftSetEventNotification *syscall.Proc
 )
 
 var (
-	ErrInvalidDriver  = errors.New("unsupported FTDI DLL")
-	ErrDriverNotFound = errors.New("FTDI driver not found in system directories")
-
-	initOnce sync.Once
+	ErrInvalidDriver = errors.New("unsupported FTDI DLL")
+	InitErr          error
+	initOnce         sync.Once
 )
 
 func Init() error {
 	initOnce.Do(func() {
 		d2xx, err := syscall.LoadDLL("ftd2xx.dll")
 		if err != nil {
-			InitErr = ErrDriverNotFound
+			InitErr = err
 			return
 		}
 		for procName, procPtr := range dllFuncs {
@@ -206,8 +205,7 @@ func (d *Device) GetStatus() (rx_queue, tx_queue, events int32, e error) {
 }
 
 func (d *Device) GetQueueStatus() (rx_queue int32, e error) {
-	r, _, _ := ftGetQueueStatus.Call(uintptr(*d),
-		uintptr(unsafe.Pointer(&rx_queue)))
+	r, _, _ := ftGetQueueStatus.Call(uintptr(*d), uintptr(unsafe.Pointer(&rx_queue)))
 
 	if r != FT_OK {
 		return rx_queue, ftdiError(r)
@@ -217,100 +215,35 @@ func (d *Device) GetQueueStatus() (rx_queue int32, e error) {
 
 func (d *Device) Read(p []byte) (n int, e error) {
 	var bytesRead uint32
-	/*
-		for {
-			rx_cnt, err := d.GetQueueStatus()
-			if err != nil {
-				return int(bytesRead), io.EOF
-			}
-			if rx_cnt > 0 {
-				bytesToRead = uint32(rx_cnt)
-				break
-			}
-			time.Sleep(CHECK_RX_DELAY_MS * time.Millisecond)
-			log.Println("No data in RX buffer")
-		}
-	*/
-
-	r, _, _ := ftRead.Call(uintptr(*d),
-		uintptr(unsafe.Pointer(&p[0])),
-		uintptr(uint32(len(p))),
-		uintptr(unsafe.Pointer(&bytesRead)))
-	if r != FT_OK {
-		return int(bytesRead), ftdiError(r)
+	r1, _, _ := ftRead.Call(uintptr(*d), uintptr(unsafe.Pointer(&p[0])), uintptr(uint32(len(p))), uintptr(unsafe.Pointer(&bytesRead)))
+	if r1 != FT_OK {
+		return int(bytesRead), ftdiError(r1)
 	}
 	return int(bytesRead), nil
 }
 
 func (d *Device) Write(p []byte) (n int, e error) {
 	var bytesWritten uint32
-	r, _, _ := ftWrite.Call(uintptr(*d),
-		uintptr(unsafe.Pointer(&p[0])),
-		uintptr(uint32(len(p))),
-		uintptr(unsafe.Pointer(&bytesWritten)))
-
-	if r != FT_OK {
-		return int(bytesWritten), ftdiError(r)
+	r1, _, _ := ftWrite.Call(uintptr(*d), uintptr(unsafe.Pointer(&p[0])), uintptr(uint32(len(p))), uintptr(unsafe.Pointer(&bytesWritten)))
+	if r1 != FT_OK {
+		return int(bytesWritten), ftdiError(r1)
 	}
 	return int(bytesWritten), nil
 }
 
 func (d *Device) SetBaudRate(baud uint) (e error) {
-	r, _, _ := ftSetBaudRate.Call(uintptr(*d), uintptr(uint32(baud)))
-	if r != FT_OK {
-		return ftdiError(r)
+	r1, _, _ := ftSetBaudRate.Call(uintptr(*d), uintptr(uint32(baud)))
+	if r1 != FT_OK {
+		return ftdiError(r1)
 	}
 	return nil
 }
 
-/*
-type EventHandle struct {
-	Handle uintptr
-}
-
-var (
-	modkernel32     = syscall.NewLazyDLL("kernel32.dll")
-	procCreateEvent = modkernel32.NewProc("CreateEventW")
-)
-
-// CreateEvent implements win32 CreateEventW func in golang. It will create an event object.
-func CreateEvent(eventAttributes *syscall.SecurityAttributes, manualReset bool, initialState bool, name string) (handle syscall.Handle, err error) {
-	namep, _ := syscall.UTF16PtrFromString(name)
-	var _p1 uint32
-	if manualReset {
-		_p1 = 1
-	}
-	var _p2 uint32
-	if initialState {
-		_p2 = 1
-	}
-	r0, _, e1 := procCreateEvent.Call(uintptr(unsafe.Pointer(eventAttributes)), uintptr(_p1), uintptr(_p2), uintptr(unsafe.Pointer(namep)))
-	use(unsafe.Pointer(namep))
-	handle = syscall.Handle(r0)
-	if handle == syscall.InvalidHandle {
-		err = e1
-	}
-	return
-}
-
-var temp unsafe.Pointer
-
-// use ensures a variable is kept alive without the GC freeing while still needed
-func use(p unsafe.Pointer) {
-	temp = p
-}
-
-func (d *Device) SetEventNotification(event_mask uint32) (e error) {
-	cb := func() uintptr {
-		log.Println("Callback")
-		return 1
-	}
-
-	eh := EventHandle{Handle: syscall.NewCallback(cb)}
+func (d *Device) SetEventNotification(event_mask EventMask, callback syscall.Handle) (e error) {
 	r, _, _ := ftSetEventNotification.Call(
 		uintptr(*d),
 		uintptr(event_mask),
-		uintptr(unsafe.Pointer(&eh)),
+		uintptr(callback),
 	)
 	if r != FT_OK {
 		return ftdiError(r)
@@ -318,17 +251,11 @@ func (d *Device) SetEventNotification(event_mask uint32) (e error) {
 	return nil
 }
 
-*/
-
 // Set the 'event' and 'error' characheters. Disabled if the charachter is '0x00'.
 func (d *Device) SetChars(event, err byte) (e error) {
-	r, _, _ := ftSetChars.Call(uintptr(*d),
-		uintptr(event),
-		uintptr(event),
-		uintptr(err),
-		uintptr(err))
-	if r != FT_OK {
-		return ftdiError(r)
+	r1, _, _ := ftSetChars.Call(uintptr(*d), uintptr(event), uintptr(event), uintptr(err), uintptr(err))
+	if r1 != FT_OK {
+		return ftdiError(r1)
 	}
 	return nil
 }

@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"time"
 
 	ftdi "github.com/roffe/gocan/pkg/ftdi"
 )
@@ -19,6 +18,7 @@ type CanusbFTDI struct {
 	buff         *bytes.Buffer
 	sendSem      chan struct{}
 	devIndex     uint64
+	closed       bool
 }
 
 func NewCanusbFTDI(name string, index uint64) func(cfg *AdapterConfig) (Adapter, error) {
@@ -78,7 +78,17 @@ func (cu *CanusbFTDI) Open(ctx context.Context) error {
 
 	cu.port.Purge(ftdi.FT_PURGE_RX)
 
-	go cu.recvManager(ctx)
+	parseFn := canusbCreateParser(
+		cu.cfg.Debug,
+		cu.cfg.PrintVersion,
+		cu.buff,
+		cu.sendSem,
+		cu.recvChan,
+		cu.setError,
+		cu.cfg.OnMessage,
+	)
+
+	go cu.recvManager(ctx, parseFn)
 	go canusbSendManager(ctx, cu.closeChan, cu.sendSem, cu.port, cu.sendChan, cu.setError, cu.cfg.OnMessage, cu.cfg.Debug)
 
 	// Open the CAN channel
@@ -91,6 +101,7 @@ func (cu *CanusbFTDI) Open(ctx context.Context) error {
 }
 
 func (cu *CanusbFTDI) Close() error {
+	cu.closed = true
 	cu.BaseAdapter.Close()
 	if cu.port != nil {
 		if err := canusbClose(cu.port); err != nil {
@@ -103,51 +114,4 @@ func (cu *CanusbFTDI) Close() error {
 		cu.port = nil
 	}
 	return nil
-}
-
-func (cu *CanusbFTDI) recvManager(ctx context.Context) {
-	parseFn := canusbCreateParser(
-		cu.cfg.Debug,
-		cu.cfg.PrintVersion,
-		cu.buff,
-		cu.sendSem,
-		cu.recvChan,
-		cu.setError,
-		cu.cfg.OnMessage,
-	)
-	var rx_cnt int32
-	var err error
-	buf := make([]byte, 4*1024) // large enough for worst case
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-cu.closeChan:
-			return
-		default:
-			rx_cnt, err = cu.port.GetQueueStatus()
-			if err != nil {
-				cu.setError(fmt.Errorf("failed to get queue status: %w", err))
-				return
-			}
-			if rx_cnt == 0 {
-				time.Sleep(400 * time.Microsecond)
-				continue
-			}
-			// Adjust slice length without reallocation
-			readBuffer := buf[:rx_cnt]
-			n, err := cu.port.Read(readBuffer)
-			if err != nil {
-				if ctx.Err() != nil {
-					return
-				}
-				cu.setError(fmt.Errorf("failed to read com port: %w", err))
-				return
-			}
-			if n == 0 {
-				continue
-			}
-			parseFn(readBuffer[:n])
-		}
-	}
 }
