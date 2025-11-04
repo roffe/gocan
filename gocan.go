@@ -67,8 +67,13 @@ func (c *Client) AdapterName() string {
 }
 
 // Wait for the first critical error or closure of the client
-func (c *Client) Wait() error {
-	return <-c.adapter.Err()
+func (c *Client) Wait(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return nil
+	case err := <-c.adapter.Err():
+		return err
+	}
 }
 
 func (c *Client) Event() <-chan Event {
