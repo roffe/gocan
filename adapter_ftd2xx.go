@@ -9,8 +9,8 @@ import (
 )
 
 func init() {
-	if ftdi.Init() != nil {
-		log.Println("ftd2xx driver not loaded:", ftdi.InitErr)
+	if err := ftdi.Init(); err != nil {
+		log.Println("ftd2xx driver not loaded:", err)
 		return
 	}
 

@@ -22,6 +22,11 @@ func cString(b []byte) string {
 }
 
 func init() {
+	if err := pcan.Init(); err != nil {
+		log.Println("PCANBasic driver not loaded:", err)
+		return
+	}
+
 	channels, err := pcan.GetAttachedChannelsCount()
 	if err != nil {
 		log.Println(err)

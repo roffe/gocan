@@ -19,8 +19,8 @@ const (
 )
 
 func init() {
-	if canlib.InitErr != nil {
-		log.Println("Kvaser driver not loaded:", canlib.InitErr)
+	if err := canlib.Init(); err != nil {
+		log.Println("Kvaser driver not loaded:", err)
 		return
 	}
 	channels, err := canlib.GetNumberOfChannels()
@@ -219,10 +219,10 @@ func (k *CANlib) recvManager(ctx context.Context) {
 		defer log.Println("kvaser recvManager exited")
 	}
 
-	if err := k.writeHandle.SetNotifyCallback(k.handleCallback, canlib.NOTIFY_RX); err != nil {
+	if err := k.readHandle.SetNotifyCallback(k.handleCallback, canlib.NOTIFY_RX); err != nil {
 		log.Println("CANlib.recvManager set callback error:", err)
 	}
-	defer k.writeHandle.SetNotifyCallback(nil, canlib.NOTIFY_RX)
+	defer k.readHandle.SetNotifyCallback(nil, canlib.NOTIFY_RX)
 
 	select {
 	case <-ctx.Done():

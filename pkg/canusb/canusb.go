@@ -3,11 +3,14 @@ package canusb
 import (
 	"fmt"
 	"log"
+	"sync"
 	"syscall"
 	"unsafe"
 )
 
 var InitErr error
+
+var initOnce sync.Once
 
 var (
 	dllFuncs = map[string]**syscall.Proc{
@@ -44,21 +47,23 @@ var (
 	procGetNextAdapter     *syscall.Proc
 )
 
-func init() {
-	canusb, err := syscall.LoadDLL(dllName)
-	if err != nil {
-		InitErr = err
-		return
-	}
-
-	for funcName, procPtr := range dllFuncs {
-		*procPtr, err = canusb.FindProc(funcName)
+func Init() error {
+	initOnce.Do(func() {
+		canusb, err := syscall.LoadDLL(dllName)
 		if err != nil {
-			InitErr = fmt.Errorf("failed to find procedure %s: %w", funcName, err)
+			InitErr = err
 			return
 		}
-	}
 
+		for funcName, procPtr := range dllFuncs {
+			*procPtr, err = canusb.FindProc(funcName)
+			if err != nil {
+				InitErr = fmt.Errorf("failed to find procedure %s: %w", funcName, err)
+				return
+			}
+		}
+	})
+	return InitErr
 }
 
 // Open CAN interface to device

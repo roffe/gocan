@@ -15,8 +15,8 @@ import (
 )
 
 func init() {
-	if canusb.InitErr != nil {
-		log.Println("CANUSB driver not loaded:", canusb.InitErr)
+	if err := canusb.Init(); err != nil {
+		log.Println("CANUSB driver not loaded:", err)
 		return
 	}
 	if names, err := canusb.GetAdapters(); err == nil {
@@ -185,7 +185,7 @@ func (cu *Canusb) callbackHandler(msg *canusb.CANMsg) uintptr {
 }
 
 func (cu *Canusb) run(ctx context.Context) {
-	stats := time.NewTicker(10 * time.Second)
+	stats := time.NewTicker(5 * time.Second)
 	defer stats.Stop()
 	if !cu.cfg.Debug {
 		stats.Stop()

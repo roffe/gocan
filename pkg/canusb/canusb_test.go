@@ -3,6 +3,10 @@ package canusb
 import "testing"
 
 func TestCANHANDLE_VersionInfo(t *testing.T) {
+	if err := Init(); err != nil {
+		t.Fatalf("canusb.Init() error: %v", err)
+	}
+
 	tests := []struct {
 		name string
 
