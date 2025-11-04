@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"log"
 	"strconv"
 	"time"
 )
@@ -147,6 +148,7 @@ func scantoolSendManager(
 	onMessage func(string),
 
 ) {
+	defer log.Println("exit scantoolSendManager")
 	f := bytes.NewBuffer(nil)
 	idb := make([]byte, 4)
 	for {
@@ -275,4 +277,16 @@ func scantoolTrySpeed(
 	}
 
 	return fmt.Errorf("failed to change adapter baudrate from %d to %d bps", from, to)
+}
+
+func equalBytesString(b []byte, s string) bool {
+	if len(b) != len(s) {
+		return false
+	}
+	for i := range b {
+		if b[i] != s[i] {
+			return false
+		}
+	}
+	return true
 }

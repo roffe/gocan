@@ -168,6 +168,7 @@ func (stn *ScantoolVCP) Close() error {
 }
 
 func (stn *ScantoolVCP) recvManager(ctx context.Context) {
+	defer log.Println("exit scantoolRecvManager")
 	buff := bytes.NewBuffer(nil)
 	readBuffer := make([]byte, 64)
 	for {
