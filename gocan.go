@@ -76,10 +76,6 @@ func (c *Client) Wait(ctx context.Context) error {
 	}
 }
 
-func (c *Client) Event() <-chan Event {
-	return c.adapter.Event()
-}
-
 // Close the client and underlying adapter
 func (c *Client) Close() error {
 	var err error
@@ -117,12 +113,9 @@ func (c *Client) SendExtended(identifier uint32, data []byte, f CANFrameType) er
 // Send and wait up to <timeout> for a answer on given identifiers
 func (c *Client) SendAndWait(ctx context.Context, frame *CANFrame, timeout time.Duration, identifiers ...uint32) (*CANFrame, error) {
 	frame.Timeout = uint32(timeout.Milliseconds())
-	sub, err := c.newSub(1, identifiers...)
-	if err != nil {
-		return nil, err
-	}
+	sub := c.newSub(1, identifiers...)
 	defer func() {
-		c.fh.unregisterSubscriber(sub)
+		c.fh.unregisterSub(sub)
 	}()
 	if err := c.SendFrame(frame); err != nil {
 		return nil, err
@@ -132,16 +125,12 @@ func (c *Client) SendAndWait(ctx context.Context, frame *CANFrame, timeout time.
 	return sub.wait(waitCtx)
 }
 
-// Receive a single CAN frame with specific identifier with a max waiting timeout
+// Receive a single CAN frame with specific identifier and timeout
 func (c *Client) Recv(ctx context.Context, timeout time.Duration, identifiers ...uint32) (*CANFrame, error) {
-	sub, err := c.newSub(1, identifiers...)
-	if err != nil {
-		return nil, err
-	}
+	sub := c.newSub(1, identifiers...)
 	defer func() {
-		c.fh.unregisterSubscriber(sub)
+		c.fh.unregisterSub(sub)
 	}()
-
 	waitCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	return sub.wait(waitCtx)
@@ -175,28 +164,24 @@ func (c *Client) SubscribeChan(ctx context.Context, channel chan *CANFrame, iden
 		filterCount:  len(identifiers),
 		responseChan: channel,
 	}
-	c.fh.registerSubscriber(sub)
+	c.fh.registerSub(sub)
 	return sub
 }
 
 // Subscribe to CAN identifiers and return a message channel
 func (c *Client) Subscribe(ctx context.Context, identifiers ...uint32) *Subscriber {
-	sub, err := c.newSub(40, identifiers...)
-	if err != nil {
-		panic(err) // Should never happen
-	}
-	return sub
+	return c.newSub(10, identifiers...)
 }
 
-func (c *Client) newSub(bufferSize int, identifiers ...uint32) (*Subscriber, error) {
+func (c *Client) newSub(bufferSize int, identifiers ...uint32) *Subscriber {
 	sub := &Subscriber{
 		cl:           c,
 		identifiers:  toSet(identifiers),
 		filterCount:  len(identifiers),
 		responseChan: make(chan *CANFrame, bufferSize),
 	}
-	c.fh.registerSubscriber(sub)
-	return sub, nil
+	c.fh.registerSub(sub)
+	return sub
 }
 
 func toSet(identifiers []uint32) map[uint32]struct{} {

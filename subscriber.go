@@ -16,7 +16,7 @@ type Subscriber struct {
 
 func (s *Subscriber) Close() {
 	s.closeOnce.Do(func() {
-		s.cl.fh.unregisterSubscriber(s)
+		s.cl.fh.unregisterSub(s)
 	})
 }
 

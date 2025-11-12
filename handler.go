@@ -17,7 +17,7 @@ type handler struct {
 
 	onEvent func(Event)
 
-	mu sync.RWMutex
+	mu sync.Mutex
 }
 
 func newHandler(adapter Adapter) *handler {
@@ -30,7 +30,7 @@ func newHandler(adapter Adapter) *handler {
 	return fh
 }
 
-func (h *handler) registerSubscriber(sub *Subscriber) {
+func (h *handler) registerSub(sub *Subscriber) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if sub.filterCount == 0 {
@@ -45,7 +45,7 @@ func (h *handler) registerSubscriber(sub *Subscriber) {
 	}
 }
 
-func (h *handler) unregisterSubscriber(sub *Subscriber) {
+func (h *handler) unregisterSub(sub *Subscriber) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if sub.filterCount == 0 {
@@ -55,7 +55,7 @@ func (h *handler) unregisterSubscriber(sub *Subscriber) {
 				break
 			}
 		}
-		close(sub.responseChan)
+		//close(sub.responseChan)
 		return
 	}
 	for id := range sub.identifiers {
@@ -98,12 +98,9 @@ func (h *handler) run(ctx context.Context) {
 	}
 }
 
-// NOTE: We send while holding RLock on h.mu. unregisterSubscriber acquires the write lock
-// and closes sub.responseChan. Holding RLock guarantees the channel won't be closed
-// mid-send, avoiding send-on-closed-channel panics.
 func (h *handler) deliver(frame *CANFrame) {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	for _, sub := range h.globalSubs {
 		select {
 		case sub.responseChan <- frame:
