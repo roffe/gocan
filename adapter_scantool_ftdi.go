@@ -102,8 +102,8 @@ func (stn *ScantoolFTDI) Open(ctx context.Context) error {
 	}
 
 	go stn.recvManager(ctx)
-	go scantoolSendManager(ctx, stn.cfg.Debug, stn.port, stn.sendChan, stn.sendSem, stn.closeChan, stn.setError, stn.cfg.OnMessage)
-
+	go scantoolSendManager(ctx, stn.port, &stn.BaseAdapter, stn.sendSem)
+	//go scantoolSendManagerOld(ctx, stn.cfg.Debug, stn.port, stn.sendChan, stn.sendSem, stn.closeChan, stn.setError, stn.cfg.OnMessage)
 	return nil
 }
 

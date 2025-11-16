@@ -24,7 +24,7 @@ var scantoolBaudrates = [...]uint{115200, 38400, 230400, 921600, 2000000, 100000
 func scantoolInit(debug bool, port io.Writer, protocolCMD, canrateCMD, filter, mask string, onMessage func(string)) {
 	var initCmds = []string{
 		"ATE0",      // turn off echo
-		"STUFC0",    // Turn on flow control
+		"STUFC0",    // Turn off flow control
 		"ATS0",      // turn off spaces
 		"ATV1",      // variable DLC on
 		protocolCMD, // Set canbus protocol
@@ -100,7 +100,11 @@ func scantoolDecodeFrame(buff []byte) (*CANFrame, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode frame body: %v", err)
 	}
-	return NewFrame(uint32(id), data, Incoming), nil
+	return &CANFrame{
+		Identifier: uint32(id),
+		Data:       data,
+		FrameType:  Incoming,
+	}, nil
 }
 
 func scantoolCalculateCANrate(baseName string, rate float64) (string, string, error) {
@@ -137,7 +141,112 @@ func scantoolCalculateCANrate(baseName string, rate float64) (string, string, er
 	return protocolCMD, canrateCMD, nil
 }
 
-func scantoolSendManager(
+func scantoolSendManager(ctx context.Context, port io.Writer, b *BaseAdapter, sendSem chan struct{}) {
+	defer log.Println("exit scantoolSendManager")
+
+	// Reused buffers to avoid per-frame allocations.
+	cmdBuf := make([]byte, 0, 128) // grows once, reused every loop
+	var dataHexBuf []byte          // grows to max seen payload once
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-b.closeChan:
+			return
+		case frame, ok := <-b.sendChan:
+			if !ok {
+				return
+			}
+
+			id := frame.Identifier
+			if id >= SystemMsg {
+				// System message: write raw data + '\r'
+				if id == SystemMsg {
+					if b.cfg.Debug {
+						// This allocates a string, but only in debug mode.
+						b.cfg.OnMessage("<o> " + string(frame.Data))
+					}
+					sendSem <- struct{}{}
+					if _, err := port.Write(frame.Data); err != nil {
+						b.setError(fmt.Errorf("failed to write system msg: %w", err))
+						return
+					}
+					if _, err := port.Write([]byte{'\r'}); err != nil {
+						b.setError(fmt.Errorf("failed to write system msg terminator: %w", err))
+						return
+					}
+				}
+				continue
+			}
+
+			// -------- Build STPX command into cmdBuf with no allocations --------
+			cmdBuf = cmdBuf[:0]
+
+			// "STPXh:"
+			cmdBuf = append(cmdBuf, 'S', 'T', 'P', 'X', 'h', ':')
+
+			// 3 hex digits of identifier (equivalent to hex.EncodeToString(idb)[5:])
+			cmdBuf = appendID3Hex(cmdBuf, id)
+
+			// ",d:"
+			cmdBuf = append(cmdBuf, ',', 'd', ':')
+
+			// data as hex, reuse dataHexBuf
+			needed := hex.EncodedLen(len(frame.Data))
+			if cap(dataHexBuf) < needed {
+				dataHexBuf = make([]byte, needed)
+			}
+			dataHex := dataHexBuf[:needed]
+			hex.Encode(dataHex, frame.Data)
+			cmdBuf = append(cmdBuf, dataHex...)
+
+			// Optional timeout
+			if frame.Timeout != 0 && frame.Timeout != 200 {
+				cmdBuf = append(cmdBuf, ',', 't', ':')
+				cmdBuf = strconv.AppendInt(cmdBuf, int64(frame.Timeout), 10)
+			}
+
+			// Optional response count
+			if respCount := frame.FrameType.Responses; respCount > 0 {
+				cmdBuf = append(cmdBuf, ',', 'r', ':')
+				cmdBuf = strconv.AppendInt(cmdBuf, int64(respCount), 10)
+			}
+
+			// Trailing CR
+			cmdBuf = append(cmdBuf, '\r')
+
+			if b.cfg.Debug {
+				// Only allocs in debug mode; if this is hot, we can also reuse a []byte->string pool.
+				b.cfg.OnMessage("<o> " + string(cmdBuf))
+			}
+
+			sendSem <- struct{}{}
+			if _, err := port.Write(cmdBuf); err != nil {
+				// Error path, allocations are fine here
+				b.setError(fmt.Errorf("failed to write scantool frame: %w", err))
+				return
+			}
+		}
+	}
+}
+
+// appendID3Hex appends the lower 12 bits of id as three zero-padded lowercase hex digits.
+// This matches: hex.EncodeToString(idb)[5:] where idb is a big-endian uint32.
+func appendID3Hex(buf []byte, id uint32) []byte {
+	v := id & 0xFFF
+	for shift := 8; shift >= 0; shift -= 4 {
+		n := (v >> uint(shift)) & 0xF
+		if n < 10 {
+			buf = append(buf, byte('0'+n))
+		} else {
+			buf = append(buf, byte('a'+n-10))
+		}
+	}
+	return buf
+}
+
+func scantoolSendManagerOld(
 	ctx context.Context,
 	debug bool,
 	port io.Writer,
@@ -203,11 +312,13 @@ const (
 )
 
 func scantoolTrySpeed(
+
 	port io.ReadWriter,
 	from, to uint,
 	speedSetter func(int) error,
 	resetInputBuffer func() error,
 	onMessage func(string),
+
 ) error {
 	cr3 := []byte{'\r', '\r', '\r'}
 	stn := []byte("STN")

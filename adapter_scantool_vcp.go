@@ -1,7 +1,6 @@
 package gocan
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -153,8 +152,14 @@ func (stn *ScantoolVCP) Open(ctx context.Context) error {
 		return err
 	}
 
-	go stn.recvManager(ctx)
-	go scantoolSendManager(ctx, stn.cfg.Debug, stn.port, stn.sendChan, stn.sendSem, stn.closeChan, stn.setError, stn.cfg.OnMessage)
+	scm := &scantoolManager{
+		BaseAdapter: &stn.BaseAdapter,
+		port:        stn.port,
+	}
+	go scm.run(ctx)
+
+	//go stn.recvManager(ctx)
+	//go scantoolSendManager(ctx, stn.cfg.Debug, stn.port, stn.sendChan, stn.sendSem, stn.closeChan, stn.setError, stn.cfg.OnMessage)
 
 	return nil
 }
@@ -167,6 +172,7 @@ func (stn *ScantoolVCP) Close() error {
 	return stn.port.Close()
 }
 
+/*
 func (stn *ScantoolVCP) recvManager(ctx context.Context) {
 	defer log.Println("exit scantoolRecvManager")
 	buff := bytes.NewBuffer(nil)
@@ -235,3 +241,4 @@ func (stn *ScantoolVCP) recvManager(ctx context.Context) {
 		}
 	}
 }
+*/
