@@ -6,10 +6,11 @@ Linux maintainer wanted! Please contact me if you want to help out.
 
 ## Build tags
 
-* combi - requires libusb-1.0.dll
 * canlib - requires client32.dll
 * canusb - requires canusbdrv(64).dll
+* combi - requires libusb-1.0.dll
 * j2538 - requires vendor DLL to be installed
+* pcan - requires PCANBasic.dll
 
 ## Usage
 
@@ -38,7 +39,7 @@ Import the package in your imports
 * STN1170
 * STN2120
 * [CANUSB](https://www.canusb.com/products/canusb/) adapter running in VCP mode using [Lawicel ascii api](https://www.canusb.com/files/canusb_manual.pdf)
-* CANable Nano and Pro running [slcan](https://github.com/normaldotcom/canable-fw)
+* CANable Nano and Pro 1.0 & 2.0 running [slcan](https://github.com/normaldotcom/canable-fw)
 * [YACA](https://github.com/roffe/yaca)
 
 ### libusb
