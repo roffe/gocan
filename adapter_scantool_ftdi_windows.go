@@ -30,13 +30,15 @@ func (stn *ScantoolFTDI) recvManager(ctx context.Context) {
 	// Create a Windows event
 	hEvent, err := w32.CreateEvent(false, false, "scantoolFTDIRecvEvent")
 	if err != nil {
-		stn.setError(fmt.Errorf("CreateEvent failed: %w", err))
+		stn.Fatal(fmt.Errorf("CreateEvent failed: %w", err))
+		return
 	}
 	// Make sure to close it on return
 	defer w32.CloseHandle(hEvent)
 
 	if err := stn.port.SetEventNotification(ftdi.FT_EVENT_RXCHAR, hEvent); err != nil {
-		stn.setError(fmt.Errorf("SetEventNotification failed: %w", err))
+		stn.Fatal(fmt.Errorf("SetEventNotification failed: %w", err))
+		return
 	}
 
 	for ctx.Err() == nil {
@@ -45,14 +47,14 @@ func (stn *ScantoolFTDI) recvManager(ctx context.Context) {
 			if err == syscall.ETIMEDOUT {
 				continue
 			}
-			stn.setError(fmt.Errorf("failed to wait for event: %w", err))
+			stn.Fatal(fmt.Errorf("failed to wait for event: %w", err))
 			return
 		}
 
 		rxCnt, err = stn.port.GetQueueStatus()
 		if err != nil {
 			if !stn.closed {
-				stn.setError(fmt.Errorf("failed to get queue status: %w", err))
+				stn.Fatal(fmt.Errorf("failed to get queue status: %w", err))
 			}
 			return
 		}
@@ -67,7 +69,7 @@ func (stn *ScantoolFTDI) recvManager(ctx context.Context) {
 		n, err := stn.port.Read(readBuffer)
 		if err != nil {
 			if !stn.closed {
-				stn.setError(fmt.Errorf("failed to read: %w", err))
+				stn.Fatal(fmt.Errorf("failed to read: %w", err))
 			}
 			return
 		}
@@ -98,7 +100,7 @@ func (stn *ScantoolFTDI) recvManager(ctx context.Context) {
 
 				if stn.cfg.Debug {
 					// Only here do we pay for a string alloc, in debug builds.
-					stn.cfg.OnMessage("<i> " + string(lineBuf))
+					stn.Debug("<i> " + string(lineBuf))
 				}
 
 				switch {
@@ -124,7 +126,7 @@ func (stn *ScantoolFTDI) recvManager(ctx context.Context) {
 					f, err := scantoolDecodeFrame(lineBuf)
 					if err != nil {
 						// We will only allocate here to build the debug string.
-						stn.cfg.OnMessage(fmt.Sprintf("failed to decode frame: %s %v", string(lineBuf), err))
+						stn.Error(fmt.Errorf("failed to decode frame: %s %v", string(lineBuf), err))
 						lineBuf = lineBuf[:0]
 						continue
 					}
@@ -133,7 +135,7 @@ func (stn *ScantoolFTDI) recvManager(ctx context.Context) {
 					case stn.recvChan <- f:
 						// ok
 					default:
-						stn.sendErrorEvent(ErrDroppedFrame)
+						stn.Error(ErrDroppedFrame)
 					}
 					lineBuf = lineBuf[:0]
 				}

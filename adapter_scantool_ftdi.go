@@ -84,7 +84,7 @@ func (stn *ScantoolFTDI) Open(ctx context.Context) error {
 
 	for _, from := range scantoolBaudrates {
 		log.Println("trying to change baudrate from", from, "to", to, "bps")
-		if err := scantoolTrySpeed(stn.port, from, to, speedSetter, resetInputBuffer, stn.cfg.OnMessage); err == nil {
+		if err := scantoolTrySpeed(stn.port, from, to, speedSetter, resetInputBuffer, stn.Info); err == nil {
 			found = true
 			break
 		}
@@ -95,7 +95,7 @@ func (stn *ScantoolFTDI) Open(ctx context.Context) error {
 		return errors.New("failed to switch adapter baudrate")
 	}
 
-	scantoolInit(stn.cfg.Debug, stn.port, stn.protocolCMD, stn.canrateCMD, stn.filter, stn.mask, stn.cfg.OnMessage)
+	scantoolInit(stn.cfg.Debug, stn.port, stn.protocolCMD, stn.canrateCMD, stn.filter, stn.mask, stn.Info)
 	if err := stn.port.Purge(ftdi.FT_PURGE_RX); err != nil {
 		stn.port.Close()
 		return err

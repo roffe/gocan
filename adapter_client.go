@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -28,16 +26,6 @@ type GWClient struct {
 }
 
 func NewGWClient(adapterName string, cfg *AdapterConfig) (*GWClient, error) {
-	if cfg.OnMessage == nil {
-		cfg.OnMessage = func(msg string) {
-			_, file, no, ok := runtime.Caller(1)
-			if ok {
-				fmt.Printf("%s#%d %v\n", filepath.Base(file), no, msg)
-			} else {
-				log.Println(msg)
-			}
-		}
-	}
 	return &GWClient{
 		BaseAdapter: NewBaseAdapter(adapterName, cfg),
 	}, nil
@@ -104,7 +92,7 @@ func (c *GWClient) sendManager(ctx context.Context, stream grpc.BidiStreamingCli
 			return
 		case msg := <-c.sendChan:
 			if err := c.sendMessage(stream, msg); err != nil {
-				c.setError(fmt.Errorf("sendManager: %w", err))
+				c.Fatal(fmt.Errorf("sendManager: %w", err))
 				return
 			}
 		}
@@ -146,7 +134,7 @@ func (c *GWClient) recvManager(_ context.Context, stream grpc.BidiStreamingClien
 				}
 			}
 
-			c.setError(err)
+			c.Fatal(err)
 			return
 		}
 
@@ -157,20 +145,20 @@ func (c *GWClient) recvManager(_ context.Context, stream grpc.BidiStreamingClien
 func (c *GWClient) recvMessage(identifier uint32, data []byte) {
 	switch identifier {
 	case SystemMsg:
-		c.cfg.OnMessage(string(data))
+		c.Info(string(data))
 		return
 	case SystemMsgError:
 		c.sendEvent(EventTypeError, string(data))
 		return
 	case SystemMsgUnrecoverableError:
-		c.setError(errors.New(string(data)))
+		c.Fatal(errors.New(string(data)))
 		return
 	}
 	frame := NewFrame(identifier, data, Incoming)
 	select {
 	case c.recvChan <- frame:
 	default:
-		c.cfg.OnMessage("client recv channel full")
+		c.Error(ErrDroppedFrame)
 	}
 }
 

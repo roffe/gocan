@@ -225,7 +225,7 @@ func (ca *CombiAdapter) Open(ctx context.Context) error {
 	out, err := iface.OutEndpoint(usbOutEndpointNum)
 	if err != nil {
 		// Some units expose OUT on EP2 (STM32 clones)
-		ca.cfg.OnMessage("trying EP 2 (stm32 clone)")
+		ca.Info("trying EP 2 (stm32 clone)")
 		out, err = iface.OutEndpoint(2)
 		if err != nil {
 			iface.Close()
@@ -250,7 +250,7 @@ func (ca *CombiAdapter) Open(ctx context.Context) error {
 	// Optional: print FW version
 	if ca.cfg.PrintVersion {
 		if ver, err := ca.ReadVersion(ctx); err == nil {
-			ca.cfg.OnMessage(ver)
+			ca.Info(ver)
 		}
 	}
 
@@ -455,7 +455,7 @@ func (ca *CombiAdapter) sendManager(ctx context.Context) {
 			if frame.Identifier == SystemMsg {
 				// Raw write for board/system messages
 				if _, err := ca.out.WriteContext(ctx, frame.Data); err != nil {
-					ca.sendErrorEvent(fmt.Errorf("failed to send frame: %w", err))
+					ca.Error(fmt.Errorf("failed to send frame: %w", err))
 				}
 				continue
 			}
@@ -479,11 +479,11 @@ func (ca *CombiAdapter) sendCANMessage(ctx context.Context, frame *CANFrame) {
 	defer cancel()
 	n, err := ca.out.WriteContext(wctx, buf)
 	if err != nil {
-		ca.setError(fmt.Errorf("failed to send frame: %w", err))
+		ca.Fatal(fmt.Errorf("failed to send frame: %w", err))
 		return
 	}
 	if n != 19 {
-		ca.sendErrorEvent(fmt.Errorf("sent %d bytes of data out of 19", n))
+		ca.Error(fmt.Errorf("sent %d bytes of data out of 19", n))
 	}
 }
 
@@ -513,7 +513,7 @@ func (ca *CombiAdapter) recvManager(ctx context.Context) {
 				if ctx.Err() != nil {
 					return
 				}
-				ca.sendErrorEvent(fmt.Errorf("failed to read from usb device: %w", err))
+				ca.Error(fmt.Errorf("failed to read from usb device: %w", err))
 				if n == 0 {
 					continue
 				}
@@ -522,7 +522,7 @@ func (ca *CombiAdapter) recvManager(ctx context.Context) {
 				switch state {
 				case psCmd:
 					if _, ok := combiValidCommands[b]; !ok {
-						ca.sendErrorEvent(fmt.Errorf("%w: %02X", ErrInvalidCommand, b))
+						ca.Error(fmt.Errorf("%w: %02X", ErrInvalidCommand, b))
 						state = psCmd
 						continue
 					}
@@ -535,7 +535,7 @@ func (ca *CombiAdapter) recvManager(ctx context.Context) {
 				case psSizeLow:
 					size |= uint16(b)
 					if size >= MaxCommandSize {
-						ca.sendErrorEvent(fmt.Errorf("command size too large: %d", size))
+						ca.Error(fmt.Errorf("command size too large: %d", size))
 						state = psCmd
 						continue
 					}
@@ -552,11 +552,11 @@ func (ca *CombiAdapter) recvManager(ctx context.Context) {
 					}
 				case psTerm:
 					if b == termNak {
-						ca.sendErrorEvent(fmt.Errorf("%w: %02X", ErrCommandTermination, b))
+						ca.Error(fmt.Errorf("%w: %02X", ErrCommandTermination, b))
 						state = psCmd
 						continue
 					} else if b != termAck {
-						ca.sendErrorEvent(fmt.Errorf("unexpected termination byte: %02X, expected: %02X", b, termAck))
+						ca.Error(fmt.Errorf("unexpected termination byte: %02X, expected: %02X", b, termAck))
 						state = psCmd
 						continue
 					}
@@ -572,7 +572,7 @@ func (ca *CombiAdapter) recvManager(ctx context.Context) {
 						log.Printf("recv cmd: % 02X", pkg)
 					}
 					if err := ca.processCommand(cmd, cdata[:ptr]); err != nil {
-						ca.sendErrorEvent(err)
+						ca.Error(err)
 					}
 					state = psCmd
 				}

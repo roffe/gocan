@@ -92,14 +92,14 @@ func (a *OBDXProWifi) Open(ctx context.Context) error {
 
 	for _, cmd := range initCommands {
 		if _, err := a.conn.Write(cmd.Bytes()); err != nil {
-			a.cfg.OnMessage(fmt.Sprintf("failed to send init command: %v", err))
+			a.Error(fmt.Errorf("failed to send init command: %w", err))
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
 
 	for _, f := range a.filters {
 		if _, err := a.conn.Write(f.Bytes()); err != nil {
-			a.cfg.OnMessage(fmt.Sprintf("failed to set filter: %v", err))
+			a.Error(fmt.Errorf("failed to set filter: %w", err))
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
@@ -128,10 +128,10 @@ func (a *OBDXProWifi) sendManager() {
 			}
 			sendCmd := dvi.New(dvi.CMD_SEND_TO_NETWORK_NORMAL, append([]byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)}, frame.Data...))
 			if a.cfg.Debug {
-				a.cfg.OnMessage(fmt.Sprintf("dvi out: %s", sendCmd.String()))
+				a.Debug(fmt.Sprintf("dvi out: %s", sendCmd.String()))
 			}
 			if _, err := a.conn.Write(sendCmd.Bytes()); err != nil {
-				a.sendErrorEvent(fmt.Errorf("failed to send frame: %w", err))
+				a.Error(fmt.Errorf("failed to send frame: %w", err))
 			}
 
 		}
@@ -141,7 +141,7 @@ func (a *OBDXProWifi) sendManager() {
 func (a *OBDXProWifi) recvManager() {
 	parser := dvi.NewCommandParser(func(cmd *dvi.Command) {
 		if a.cfg.Debug {
-			a.cfg.OnMessage(fmt.Sprintf("dvi in: %s", cmd.String()))
+			a.Debug(fmt.Sprintf("dvi in: %s", cmd.String()))
 		}
 		switch cmd.Command() {
 		case 0x08:
@@ -154,7 +154,7 @@ func (a *OBDXProWifi) recvManager() {
 			select {
 			case a.recvChan <- frame:
 			default:
-				a.sendErrorEvent(ErrDroppedFrame)
+				a.Error(ErrDroppedFrame)
 			}
 			return
 		}
@@ -171,7 +171,7 @@ func (a *OBDXProWifi) recvManager() {
 				//if errors.Is(err, os.ErrDeadlineExceeded) {
 				//	continue
 				//}
-				a.setError(fmt.Errorf("failed to read from com port: %w", err))
+				a.Fatal(fmt.Errorf("failed to read from com port: %w", err))
 				return
 			}
 			if n == 0 {
@@ -199,7 +199,7 @@ func (a *OBDXProWifi) Close() error {
 		}
 
 		a.conn.Close()
-		a.cfg.OnMessage("Disconnected from OBDX Pro")
+		a.Info("Disconnected from OBDX Pro")
 	})
 	return nil
 }

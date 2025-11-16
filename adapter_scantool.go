@@ -165,15 +165,15 @@ func scantoolSendManager(ctx context.Context, port io.Writer, b *BaseAdapter, se
 				if id == SystemMsg {
 					if b.cfg.Debug {
 						// This allocates a string, but only in debug mode.
-						b.cfg.OnMessage("<o> " + string(frame.Data))
+						b.Debug("<o> " + string(frame.Data))
 					}
 					sendSem <- struct{}{}
 					if _, err := port.Write(frame.Data); err != nil {
-						b.setError(fmt.Errorf("failed to write system msg: %w", err))
+						b.Fatal(fmt.Errorf("failed to write system msg: %w", err))
 						return
 					}
 					if _, err := port.Write([]byte{'\r'}); err != nil {
-						b.setError(fmt.Errorf("failed to write system msg terminator: %w", err))
+						b.Fatal(fmt.Errorf("failed to write system msg terminator: %w", err))
 						return
 					}
 				}
@@ -218,13 +218,13 @@ func scantoolSendManager(ctx context.Context, port io.Writer, b *BaseAdapter, se
 
 			if b.cfg.Debug {
 				// Only allocs in debug mode; if this is hot, we can also reuse a []byte->string pool.
-				b.cfg.OnMessage("<o> " + string(cmdBuf))
+				b.Debug("<o> " + string(cmdBuf))
 			}
 
 			sendSem <- struct{}{}
 			if _, err := port.Write(cmdBuf); err != nil {
 				// Error path, allocations are fine here
-				b.setError(fmt.Errorf("failed to write scantool frame: %w", err))
+				b.Fatal(fmt.Errorf("failed to write scantool frame: %w", err))
 				return
 			}
 		}
@@ -367,7 +367,7 @@ func scantoolTrySpeed(
 					continue
 				}
 				if bytes.Contains(lineBuf, stn) {
-					onMessage("Device info: " + string(lineBuf))
+					onMessage(string(lineBuf))
 					if _, err := port.Write([]byte{'\r'}); err != nil {
 						return err
 					}

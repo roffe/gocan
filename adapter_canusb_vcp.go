@@ -75,7 +75,7 @@ func (cu *CanusbVCP) Open(ctx context.Context) error {
 	p.ResetInputBuffer()
 
 	go cu.recvManager(ctx)
-	go canusbSendManager(ctx, cu.closeChan, cu.sendSem, cu.port, cu.sendChan, cu.setError, cu.cfg.OnMessage, cu.cfg.Debug)
+	go canusbSendManager(ctx, &cu.BaseAdapter, cu.sendSem, cu.port)
 
 	// Open the CAN channel
 	cu.sendChan <- &CANFrame{
@@ -104,14 +104,7 @@ func (cu *CanusbVCP) Close() error {
 }
 
 func (cu *CanusbVCP) recvManager(ctx context.Context) {
-	parseFn := canusbCreateParser(
-		cu.cfg.Debug,
-		cu.cfg.PrintVersion,
-		cu.buff, cu.sendSem,
-		cu.recvChan,
-		cu.setError,
-		cu.cfg.OnMessage,
-	)
+	parseFn := canusbCreateParser(cu.buff, &cu.BaseAdapter, cu.sendSem)
 
 	readBuffer := make([]byte, 64)
 	for {
@@ -125,7 +118,7 @@ func (cu *CanusbVCP) recvManager(ctx context.Context) {
 			if ctx.Err() != nil {
 				return
 			}
-			cu.setError(fmt.Errorf("failed to read com port: %w", err))
+			cu.Fatal(fmt.Errorf("failed to read com port: %w", err))
 			return
 		}
 		select {

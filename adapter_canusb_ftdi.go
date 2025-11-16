@@ -78,18 +78,10 @@ func (cu *CanusbFTDI) Open(ctx context.Context) error {
 
 	cu.port.Purge(ftdi.FT_PURGE_RX)
 
-	parseFn := canusbCreateParser(
-		cu.cfg.Debug,
-		cu.cfg.PrintVersion,
-		cu.buff,
-		cu.sendSem,
-		cu.recvChan,
-		cu.setError,
-		cu.cfg.OnMessage,
-	)
+	parseFn := canusbCreateParser(cu.buff, &cu.BaseAdapter, cu.sendSem)
 
 	go cu.recvManager(ctx, parseFn)
-	go canusbSendManager(ctx, cu.closeChan, cu.sendSem, cu.port, cu.sendChan, cu.setError, cu.cfg.OnMessage, cu.cfg.Debug)
+	go canusbSendManager(ctx, &cu.BaseAdapter, cu.sendSem, cu.port)
 
 	// Open the CAN channel
 	cu.sendChan <- &CANFrame{

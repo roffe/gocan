@@ -76,7 +76,7 @@ func NewCANlib(channel int, name string) func(cfg *AdapterConfig) (Adapter, erro
 
 func (k *CANlib) Open(ctx context.Context) error {
 	if k.cfg.PrintVersion {
-		k.cfg.OnMessage("CANlib v" + canlib.GetVersion())
+		k.Info("CANlib v" + canlib.GetVersion())
 	}
 
 	if err := k.openChannels(); err != nil {
@@ -208,7 +208,7 @@ func (k *CANlib) sendManager(ctx context.Context) {
 				continue
 			}
 			if err := k.writeHandle.WriteWait(msg.Identifier, msg.Data, canlib.MSG_STD, k.timeoutWrite); err != nil {
-				k.sendErrorEvent(fmt.Errorf("Send: %w", err))
+				k.Error(fmt.Errorf("Send: %w", err))
 			}
 		}
 	}
@@ -239,11 +239,11 @@ func (k *CANlib) handleCallback(hhnd int32, ctx uintptr, event canlib.NotifyFlag
 			if err == canlib.ErrNoMsg {
 				break
 			}
-			k.sendErrorEvent(fmt.Errorf("recv error: %w", err))
+			k.Error(fmt.Errorf("recv error: %w", err))
 			return 0
 		}
 		if err := k.recvMessage(msg); err != nil {
-			k.sendErrorEvent(err)
+			k.Error(err)
 		}
 	}
 	return 0

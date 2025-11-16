@@ -160,7 +160,7 @@ func (el *ELM327) run(ctx context.Context) {
 		case frame := <-el.sendChan:
 			if el.currentID != frame.Identifier {
 				if err := el.setHeader(frame.Identifier); err != nil {
-					el.sendErrorEvent(err)
+					el.Error(err)
 					continue
 				}
 			}
@@ -168,14 +168,14 @@ func (el *ELM327) run(ctx context.Context) {
 			if frame.FrameType.Type == 2 { // Response Required
 				if !el.response {
 					if err := el.setResponse(true); err != nil {
-						el.sendErrorEvent(err)
+						el.Error(err)
 						continue
 					}
 				}
 			} else {
 				if el.response {
 					if err := el.setResponse(false); err != nil {
-						el.sendErrorEvent(err)
+						el.Error(err)
 						continue
 					}
 				}
@@ -205,18 +205,18 @@ func (el *ELM327) run(ctx context.Context) {
 					continue
 				}
 				if len(msg) < 4 {
-					el.sendWarningEvent("message invalid: " + msg)
+					el.Error(fmt.Errorf("message invalid: %s", msg))
 					continue
 				}
 				idStr := msg[0:3]
 				id, err := strconv.ParseUint(idStr, 16, 32)
 				if err != nil {
-					el.sendErrorEvent(fmt.Errorf("invalid id in message %q: %w", msg, err))
+					el.Error(fmt.Errorf("invalid id in message %q: %w", msg, err))
 					continue
 				}
 				data, err := hex.DecodeString(msg[3:])
 				if err != nil {
-					el.sendErrorEvent(fmt.Errorf("invalid data in message %q: %w", msg, err))
+					el.Error(fmt.Errorf("invalid data in message %q: %w", msg, err))
 					continue
 				}
 				frame := &CANFrame{
@@ -227,7 +227,7 @@ func (el *ELM327) run(ctx context.Context) {
 				select {
 				case el.recvChan <- frame:
 				default:
-					el.sendErrorEvent(errors.New("recvChan full, frame dropped"))
+					el.Error(errors.New("recvChan full, frame dropped"))
 				}
 			}
 		}
@@ -404,7 +404,7 @@ func (el *ELM327) changeDeviceBaudrate(from, to int) error {
 					continue
 				}
 				if bytes.Contains(lineBuf, elm) {
-					el.cfg.OnMessage("Device info: " + string(lineBuf))
+					el.Info(string(lineBuf))
 					if _, err := el.port.Write([]byte{'\r'}); err != nil {
 						return err
 					}

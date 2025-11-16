@@ -19,11 +19,13 @@ func (cu *CanusbFTDI) recvManager(ctx context.Context, parseFn func([]byte)) {
 	// Create a Windows event
 	hEvent, err := w32.CreateEvent(false, false, "canusbFTDIRecvEvent")
 	if err != nil {
-		cu.setError(fmt.Errorf("CreateEvent failed: %w", err))
+		cu.Fatal(fmt.Errorf("CreateEvent failed: %w", err))
+		return
 	}
 
 	if err := cu.port.SetEventNotification(ftdi.FT_EVENT_RXCHAR, hEvent); err != nil {
-		cu.setError(fmt.Errorf("SetEventNotification failed: %w", err))
+		cu.Fatal(fmt.Errorf("SetEventNotification failed: %w", err))
+		return
 	}
 	defer w32.CloseHandle(hEvent)
 
@@ -33,14 +35,14 @@ func (cu *CanusbFTDI) recvManager(ctx context.Context, parseFn func([]byte)) {
 			if err == syscall.ETIMEDOUT {
 				continue
 			}
-			cu.setError(fmt.Errorf("failed to wait for event: %w", err))
+			cu.Fatal(fmt.Errorf("failed to wait for event: %w", err))
 			return
 		}
 
 		rx_cnt, err = cu.port.GetQueueStatus()
 		if err != nil {
 			if !cu.closed {
-				cu.setError(fmt.Errorf("failed to get queue status: %w", err))
+				cu.Fatal(fmt.Errorf("failed to get queue status: %w", err))
 			}
 			return
 		}
@@ -52,7 +54,7 @@ func (cu *CanusbFTDI) recvManager(ctx context.Context, parseFn func([]byte)) {
 		n, err := cu.port.Read(readBuffer)
 		if err != nil {
 			if !cu.closed {
-				cu.setError(fmt.Errorf("failed to read com port: %w", err))
+				cu.Fatal(fmt.Errorf("failed to read com port: %w", err))
 			}
 			return
 		}

@@ -207,11 +207,11 @@ func canusbAcceptanceFilters(idList []uint32) (string, string) {
 	return fmt.Sprintf("M%08X", code), fmt.Sprintf("m%08X", mask)
 }
 
-func canusbCreateParser(debug, printVersion bool, buff *bytes.Buffer, sendSem <-chan struct{}, recvChan chan<- *CANFrame, errorFunc func(error), logFunc func(string)) func([]byte) {
+func canusbCreateParser(buff *bytes.Buffer, ba *BaseAdapter, sendSem <-chan struct{}) func([]byte) {
 	return func(data []byte) {
 		for _, b := range data {
 			if b == 0x07 { // BELL
-				errorFunc(errors.New("command error"))
+				ba.Error(errors.New("command error"))
 				select {
 				case <-sendSem:
 				default:
@@ -226,8 +226,8 @@ func canusbCreateParser(debug, printVersion bool, buff *bytes.Buffer, sendSem <-
 				continue
 			}
 			by := buff.Bytes()
-			if debug {
-				logFunc("<< " + buff.String())
+			if ba.cfg.Debug {
+				ba.Debug("<< " + buff.String())
 			}
 			switch by[0] {
 			case 'F':
@@ -236,32 +236,32 @@ func canusbCreateParser(debug, printVersion bool, buff *bytes.Buffer, sendSem <-
 				default:
 				}
 				if err := canusbDecodeStatus(by); err != nil {
-					errorFunc(fmt.Errorf("CAN status error: %w", err))
+					ba.Error(fmt.Errorf("CAN status error: %w", err))
 				}
 			case 't':
 				f, err := canusbDecodeFrame(by)
 				if err != nil {
-					errorFunc(fmt.Errorf("failed to decode frame: %w", err))
+					ba.Error(fmt.Errorf("failed to decode frame: %w", err))
 					buff.Reset()
 					continue
 				}
 				select {
-				case recvChan <- f:
+				case ba.recvChan <- f:
 				default:
-					errorFunc(ErrDroppedFrame)
+					ba.Error(ErrDroppedFrame)
 				}
 				buff.Reset()
 			case 'T':
 				f, err := canusbDecodeExtendedFrame(by)
 				if err != nil {
-					errorFunc(fmt.Errorf("failed to decode frame: %w", err))
+					ba.Error(fmt.Errorf("failed to decode frame: %w", err))
 					buff.Reset()
 					continue
 				}
 				select {
-				case recvChan <- f:
+				case ba.recvChan <- f:
 				default:
-					errorFunc(ErrDroppedFrame)
+					ba.Error(ErrDroppedFrame)
 				}
 				buff.Reset()
 			case 'z': // last command ok
@@ -270,31 +270,22 @@ func canusbCreateParser(debug, printVersion bool, buff *bytes.Buffer, sendSem <-
 				default:
 				}
 			case 'V':
-				if printVersion {
-					logFunc("H/W version " + buff.String())
+				if ba.cfg.PrintVersion {
+					ba.Info("H/W version " + buff.String())
 				}
 			case 'N':
-				if printVersion {
-					logFunc("H/W serial " + buff.String())
+				if ba.cfg.PrintVersion {
+					ba.Info("H/W serial " + buff.String())
 				}
 			default:
-				logFunc("Unknown>> " + buff.String())
+				ba.Warn("Unknown>> " + buff.String())
 			}
 			buff.Reset()
 		}
 	}
 }
 
-func canusbSendManager(
-	ctx context.Context,
-	closeChan <-chan struct{},
-	sendSem chan struct{},
-	port io.Writer,
-	sendChan <-chan *CANFrame,
-	onError func(error),
-	onMessage func(string),
-	debug bool,
-) {
+func canusbSendManager(ctx context.Context, ba *BaseAdapter, sendSem chan struct{}, port io.Writer) {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
@@ -314,24 +305,24 @@ func canusbSendManager(
 		select {
 		case <-ctx.Done():
 			return
-		case <-closeChan:
+		case <-ba.closeChan:
 			return
 		case <-ticker.C:
 			sendSem <- struct{}{}
 			_, _ = port.Write([]byte{'F', '\r'})
-		case msg := <-sendChan:
+		case msg := <-ba.sendChan:
 			// System messages pass-through
 			if id := msg.Identifier; id >= SystemMsg {
 				if id == SystemMsg {
-					if debug {
-						onMessage(">> " + string(msg.Data))
+					if ba.cfg.Debug {
+						ba.Debug(">> " + string(msg.Data))
 					}
 					if _, err := port.Write(msg.Data); err != nil {
-						onError(fmt.Errorf("failed to write to com port: %w", err))
+						ba.Fatal(fmt.Errorf("failed to write to com port: %w", err))
 						return
 					}
 					if _, err := port.Write([]byte{'\r'}); err != nil {
-						onError(fmt.Errorf("failed to write to com port: %w", err))
+						ba.Fatal(fmt.Errorf("failed to write to com port: %w", err))
 						return
 					}
 				}
@@ -382,12 +373,12 @@ func canusbSendManager(
 			i++
 
 			if _, err := port.Write(out[:i]); err != nil {
-				onError(fmt.Errorf("failed to write to com port: %w", err))
+				ba.Fatal(fmt.Errorf("failed to write to com port: %w", err))
 				return
 			}
 
-			if debug {
-				onMessage(">> " + string(out[:i]))
+			if ba.cfg.Debug {
+				ba.Debug(">> " + string(out[:i]))
 			}
 		}
 	}

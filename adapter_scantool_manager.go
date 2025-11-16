@@ -40,16 +40,16 @@ func (scm *scantoolManager) run(ctx context.Context) {
 				if id == SystemMsg {
 					if scm.cfg.Debug {
 						// log the payload instead of the old cmdBuf contents
-						scm.cfg.OnMessage("<o> " + string(frame.Data))
+						scm.Debug("<o> " + string(frame.Data))
 					}
 
 					// Avoid append (which may allocate / mutate caller's slice):
 					if _, err := scm.port.Write(frame.Data); err != nil {
-						scm.setError(fmt.Errorf("failed to write: %q %w", string(frame.Data), err))
+						scm.Fatal(fmt.Errorf("failed to write: %q %w", string(frame.Data), err))
 						return
 					}
 					if _, err := scm.port.Write([]byte{'\r'}); err != nil {
-						scm.setError(fmt.Errorf("failed to write CR: %q %w", string(frame.Data), err))
+						scm.Fatal(fmt.Errorf("failed to write CR: %q %w", string(frame.Data), err))
 						return
 					}
 				}
@@ -97,16 +97,16 @@ func (scm *scantoolManager) run(ctx context.Context) {
 			cmd := cmdBuf.String() // single string allocation per command
 
 			if scm.cfg.Debug {
-				scm.cfg.OnMessage("<o> " + cmd)
+				scm.Debug("<o> " + cmd)
 			}
 
 			resp, err := scm.sendCommand(cmd)
 			if err != nil {
-				scm.sendErrorEvent(fmt.Errorf("failed to send command: %w", err))
+				scm.Error(fmt.Errorf("failed to send command: %w", err))
 				continue
 			}
 			if scm.cfg.Debug {
-				scm.cfg.OnMessage("<i> " + resp)
+				scm.Debug("<i> " + resp)
 			}
 
 			if resp == "\r" {
@@ -126,13 +126,13 @@ func (scm *scantoolManager) run(ctx context.Context) {
 				default:
 					frm, err := scantoolDecodeFrame([]byte(msg)) // still alloc; see notes below
 					if err != nil {
-						scm.sendErrorEvent(fmt.Errorf("failed to decode frame: %q %w", msg, err))
+						scm.Error(fmt.Errorf("failed to decode frame: %q %w", msg, err))
 						continue
 					}
 					select {
 					case scm.recvChan <- frm:
 					default:
-						scm.sendErrorEvent(ErrDroppedFrame)
+						scm.Error(ErrDroppedFrame)
 					}
 				}
 			}

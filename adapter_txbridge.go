@@ -133,7 +133,7 @@ func (tx *Txbridge) Open(ctx context.Context) error {
 			return fmt.Errorf("unexpected version response: %X %X", cmd.Command, cmd.Data)
 		}
 
-		tx.cfg.OnMessage("txbridge firmware version: " + string(cmd.Data))
+		tx.Info("txbridge firmware version: " + string(cmd.Data))
 
 		if ver := semver.Compare("v"+string(cmd.Data), "v"+tx.cfg.MinimumFirmwareVersion); ver != 0 {
 			tx.port.Close()
@@ -191,7 +191,7 @@ func (tx *Txbridge) sendManager(_ context.Context) {
 			if frame.Identifier == SystemMsg {
 				_, err := tx.port.Write(frame.Data)
 				if err != nil {
-					tx.sendErrorEvent(err)
+					tx.Error(err)
 				}
 				continue
 			}
@@ -202,12 +202,12 @@ func (tx *Txbridge) sendManager(_ context.Context) {
 			}
 			buf, err := cmd.MarshalBinary()
 			if err != nil {
-				tx.sendErrorEvent(err)
+				tx.Error(err)
 				continue
 			}
 			_, err = tx.port.Write(buf)
 			if err != nil {
-				tx.sendErrorEvent(err)
+				tx.Error(err)
 				continue
 			}
 		}
@@ -244,7 +244,7 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 			//if errors.Is(err, net.ErrClosed) {
 			//	return
 			//}
-			tx.setError(err)
+			tx.Fatal(err)
 			return
 		}
 		if n == 0 {
@@ -336,7 +336,7 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 						Incoming,
 					))
 				default:
-					tx.cfg.OnMessage(fmt.Sprintf("unknown command: %q: %x", command, data))
+					tx.Error(fmt.Errorf("unknown command: %q: %x", command, data))
 					cmdbuffPtr = 0
 					commandChecksum = 0
 					commandSize = 0
@@ -364,7 +364,7 @@ func (tx *Txbridge) sendFrame(frame *CANFrame) {
 	select {
 	case tx.recvChan <- frame:
 	default:
-		tx.sendErrorEvent(ErrDroppedFrame)
+		tx.Error(ErrDroppedFrame)
 	}
 }
 

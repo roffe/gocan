@@ -146,7 +146,7 @@ func (ya *YACA) recvManager(ctx context.Context) {
 		}
 		n, err := ya.port.Read(readBuffer)
 		if err != nil {
-			ya.setError(fmt.Errorf("failed to read from com port: %w", err))
+			ya.Fatal(fmt.Errorf("failed to read from com port: %w", err))
 			return
 		}
 		if n == 0 {
@@ -171,7 +171,7 @@ func (ya *YACA) parse(ctx context.Context, buff *bytes.Buffer, readBuffer []byte
 			switch by[0] {
 			case 'F':
 				if err := ya.decodeStatus(by); err != nil {
-					ya.cfg.OnMessage(fmt.Sprintf("CAN status error: %v", err))
+					ya.Warn(fmt.Sprintf("CAN status error: %v", err))
 				}
 			case 't':
 				//if cu.cfg.Debug {
@@ -179,7 +179,7 @@ func (ya *YACA) parse(ctx context.Context, buff *bytes.Buffer, readBuffer []byte
 				//}
 				f, err := ya.decodeFrame(by)
 				if err != nil {
-					ya.cfg.OnMessage(fmt.Sprintf("failed to decode frame: %X", buff.Bytes()))
+					ya.Error(fmt.Errorf("failed to decode frame: %X", buff.Bytes()))
 					continue
 				}
 				select {
@@ -189,9 +189,9 @@ func (ya *YACA) parse(ctx context.Context, buff *bytes.Buffer, readBuffer []byte
 				}
 				buff.Reset()
 			case 0x07: // bell, last command was unknown
-				ya.cfg.OnMessage("unknown command")
+				ya.Warn("unknown command")
 			default:
-				ya.cfg.OnMessage("Unknown>> " + buff.String())
+				ya.Warn("Unknown>> " + buff.String())
 			}
 			buff.Reset()
 			continue
@@ -238,10 +238,10 @@ func (ya *YACA) sendManager(ctx context.Context) {
 			if id := v.Identifier; id >= SystemMsg {
 				if id == SystemMsg {
 					if ya.cfg.Debug {
-						ya.cfg.OnMessage(">> " + string(v.Data))
+						ya.Debug(">> " + string(v.Data))
 					}
 					if _, err := ya.port.Write(append(v.Data, '\r')); err != nil {
-						ya.setError(fmt.Errorf("failed to write to com port: %w", err))
+						ya.Fatal(fmt.Errorf("failed to write to com port: %w", err))
 						return
 					}
 				}
@@ -253,7 +253,8 @@ func (ya *YACA) sendManager(ctx context.Context) {
 				strconv.Itoa(v.Length()) +
 				hex.EncodeToString(v.Data) + "\x0D")
 			if _, err := ya.port.Write(f.Bytes()); err != nil {
-				ya.cfg.OnMessage(fmt.Sprintf("failed to write to com port: %s, %v", f.String(), err))
+				ya.Fatal(fmt.Errorf("failed to write to com port: %s, %v", f.String(), err))
+				return
 			}
 			if ya.cfg.Debug {
 				fmt.Fprint(os.Stderr, ">> "+f.String()+"\n")

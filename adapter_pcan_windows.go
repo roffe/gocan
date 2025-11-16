@@ -95,14 +95,14 @@ func (p *PCAN) Open(ctx context.Context) error {
 
 	param := pcan.DWORD(pcan.PCAN_PARAMETER_ON)
 	if err := pcan.CAN_SetValue(p.ch, pcan.PCAN_BUSOFF_AUTORESET, uintptr(unsafe.Pointer(&param)), 4); err != nil {
-		p.cfg.OnMessage("Warning: Failed to set BUSOFF_AUTORESET parameter")
+		p.Warn("Failed to set BUSOFF_AUTORESET parameter")
 	}
 
 	firmwareVersion, err := pcan.GetFirmwareVersion(p.ch)
 	if err != nil {
-		p.cfg.OnMessage("Warning: Failed to get firmware version")
+		p.Warn("Failed to get firmware version")
 	}
-	p.sendInfoEvent(fmt.Sprintf("Name: %s %s", hwName, firmwareVersion))
+	p.Info(fmt.Sprintf("Name: %s %s", hwName, firmwareVersion))
 	go p.recvManager(ctx)
 	go p.sendManager(ctx)
 	return nil
@@ -119,7 +119,7 @@ func (p *PCAN) recvManager(ctx context.Context) {
 
 	rxEvent, err := pcan.SetReceiveEvent(p.ch)
 	if err != nil {
-		p.setError(fmt.Errorf("SetReceiveEvent failed: %w", err))
+		p.Fatal(fmt.Errorf("SetReceiveEvent failed: %w", err))
 		return
 	}
 	defer rxEvent.ClearReceiveEvent(p.ch)
@@ -129,7 +129,7 @@ func (p *PCAN) recvManager(ctx context.Context) {
 			if err == syscall.ETIMEDOUT {
 				continue
 			}
-			p.setError(fmt.Errorf("wait failed: %w", err))
+			p.Fatal(fmt.Errorf("wait failed: %w", err))
 			return
 		}
 		for {
@@ -141,7 +141,7 @@ func (p *PCAN) recvManager(ctx context.Context) {
 					break
 				}
 				if !p.closed {
-					p.setError(err)
+					p.Fatal(err)
 				}
 				return
 			}
@@ -153,7 +153,7 @@ func (p *PCAN) recvManager(ctx context.Context) {
 			select {
 			case p.recvChan <- frame:
 			default:
-				p.sendErrorEvent(ErrDroppedFrame)
+				p.Error(ErrDroppedFrame)
 			}
 		}
 	}
@@ -172,7 +172,7 @@ func (p *PCAN) sendManager(ctx context.Context) {
 			}
 			copy(msg.DATA[:], frame.Data)
 			if err := pcan.CAN_Write(p.ch, &msg); err != nil {
-				p.sendErrorEvent(fmt.Errorf("failed to send frame: %w", err))
+				p.Error(fmt.Errorf("failed to send frame: %w", err))
 			}
 		}
 	}

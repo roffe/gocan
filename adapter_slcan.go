@@ -107,7 +107,7 @@ func (sl *SLCan) recvManager(ctx context.Context) {
 		n, err := sl.port.Read(readBuf)
 		if err != nil {
 			if !sl.closed {
-				sl.setError(fmt.Errorf("failed to read com port: %w", err))
+				sl.Fatal(fmt.Errorf("failed to read com port: %w", err))
 			}
 			return
 		}
@@ -128,7 +128,7 @@ func (sl *SLCan) sendManager(ctx context.Context) {
 			return
 		case frame := <-sl.sendChan:
 			if err := sl.handleSend(frame, &outBuf); err != nil {
-				sl.cfg.OnMessage(fmt.Sprintf("send error: %v", err))
+				sl.Error(fmt.Errorf("send error: %w", err))
 			}
 		}
 	}
@@ -189,7 +189,7 @@ func (sl *SLCan) handleSend(frame *CANFrame, outBuf *[]byte) error {
 	buf = append(buf, '\r')
 	// Send it
 	if _, err := sl.port.Write(buf); err != nil {
-		sl.sendErrorEvent(fmt.Errorf("failed to write to com port: %w", err))
+		sl.Error(fmt.Errorf("failed to write to com port: %w", err))
 	}
 	if sl.cfg.Debug {
 		// Safe to turn the slice into string for debug only
@@ -222,7 +222,7 @@ func (sl *SLCan) parse(ctx context.Context, buf, readBuf []byte) []byte {
 				}
 				f, err := sl.decodeFrame(buf)
 				if err != nil {
-					sl.cfg.OnMessage(fmt.Sprintf("%v: %X", err, buf))
+					sl.Error(fmt.Errorf("%w: %X", err, buf))
 					buf = buf[:0]
 					continue
 				}
@@ -232,10 +232,10 @@ func (sl *SLCan) parse(ctx context.Context, buf, readBuf []byte) []byte {
 				case <-ctx.Done():
 					return buf[:0]
 				default:
-					sl.sendErrorEvent(ErrDroppedFrame)
+					sl.Error(ErrDroppedFrame)
 				}
 			default:
-				sl.sendWarningEvent("Unknown>> " + string(buf))
+				sl.Warn("Unknown>> " + string(buf))
 			}
 			// Reset buffer after a full message
 			buf = buf[:0]

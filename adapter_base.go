@@ -65,8 +65,8 @@ func (base *BaseAdapter) Close() {
 	})
 }
 
-// setError set a fatal adapter error only once and non-blocking.
-func (base *BaseAdapter) setError(err error) {
+// Set a Fatal adapter error
+func (base *BaseAdapter) Fatal(err error) {
 	base.errOnce.Do(func() {
 		select {
 		case base.errChan <- err:
@@ -95,14 +95,21 @@ func (base *BaseAdapter) sendEvent(eventType EventType, details string) {
 
 }
 
-func (base *BaseAdapter) sendErrorEvent(err error) {
+func (base *BaseAdapter) Error(err error) {
 	base.sendEvent(EventTypeError, err.Error())
 }
 
-func (base *BaseAdapter) sendWarningEvent(warn string) {
+// Send a warning event
+func (base *BaseAdapter) Warn(warn string) {
 	base.sendEvent(EventTypeWarning, warn)
 }
 
-func (base *BaseAdapter) sendInfoEvent(info string) {
+// Send an info event
+func (base *BaseAdapter) Info(info string) {
 	base.sendEvent(EventTypeInfo, info)
+}
+
+// Send a debug event
+func (base *BaseAdapter) Debug(debug string) {
+	base.sendEvent(EventTypeDebug, debug)
 }
