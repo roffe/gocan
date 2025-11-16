@@ -65,6 +65,7 @@ func (base *BaseAdapter) Close() {
 	})
 }
 
+// setError set a fatal adapter error only once and non-blocking.
 func (base *BaseAdapter) setError(err error) {
 	base.errOnce.Do(func() {
 		select {
