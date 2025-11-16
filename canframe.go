@@ -77,7 +77,6 @@ func (f *CANFrame) Bytes() []byte {
 
 func (f *CANFrame) String() string {
 	var out strings.Builder
-
 	switch f.FrameType.Type {
 	case 0:
 		out.WriteString("<i> || ")
@@ -87,24 +86,17 @@ func (f *CANFrame) String() string {
 		out.WriteString("<r> || ")
 
 	}
-
 	out.WriteString(fmt.Sprintf("0x%03X", f.Identifier) + " || ")
-
 	out.WriteString(strconv.Itoa(len(f.Data)) + " || ")
-
 	var hexView strings.Builder
-
 	for i, b := range f.Data {
 		hexView.WriteString(fmt.Sprintf("%02X", b))
 		if i != len(f.Data)-1 {
 			hexView.WriteString(" ")
 		}
 	}
-
 	out.WriteString(fmt.Sprintf("%-23s", hexView.String()))
-
 	out.WriteString(" || ")
-
 	var binView strings.Builder
 	for i, b := range f.Data {
 		binView.WriteString(fmt.Sprintf("%08b", b))
@@ -112,9 +104,7 @@ func (f *CANFrame) String() string {
 			binView.WriteString(" ")
 		}
 	}
-
 	out.WriteString(fmt.Sprintf("%-72s", binView.String()))
-
 	out.WriteString(" || ")
 	out.WriteString(onlyPrintable(f.Data))
 	return out.String()
