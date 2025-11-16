@@ -7,6 +7,7 @@ import (
 )
 
 type Subscriber struct {
+	createdAt    string
 	cl           *Client
 	identifiers  map[uint32]struct{}
 	filterCount  int
