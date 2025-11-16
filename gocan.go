@@ -4,6 +4,9 @@ package gocan
 
 import (
 	"context"
+	"path/filepath"
+	"runtime"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -175,6 +178,7 @@ func (c *Client) Subscribe(ctx context.Context, identifiers ...uint32) *Subscrib
 
 func (c *Client) newSub(bufferSize int, identifiers ...uint32) *Subscriber {
 	sub := &Subscriber{
+		createdAt:    callerInfo(3),
 		cl:           c,
 		identifiers:  toSet(identifiers),
 		filterCount:  len(identifiers),
@@ -182,6 +186,18 @@ func (c *Client) newSub(bufferSize int, identifiers ...uint32) *Subscriber {
 	}
 	c.fh.registerSub(sub)
 	return sub
+}
+
+func callerInfo(depth int) string {
+	_, file, line, ok := runtime.Caller(depth)
+	if !ok {
+		return "unknown"
+	}
+	//fn := runtime.FuncForPC(pc)
+	//if fn != nil {
+	//	funcName = fn.Name()
+	//}
+	return filepath.Base(file) + ":" + strconv.Itoa(line)
 }
 
 func toSet(identifiers []uint32) map[uint32]struct{} {

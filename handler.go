@@ -105,7 +105,7 @@ func (h *handler) deliver(frame *CANFrame) {
 		select {
 		case sub.responseChan <- frame:
 		default:
-			log.Printf("failed to deliver 0X%02X", frame.Identifier)
+			log.Printf("%s sub full 0x%02X", sub.createdAt, frame.Identifier)
 		}
 	}
 	if subs, ok := h.submap[frame.Identifier]; ok {
@@ -113,7 +113,7 @@ func (h *handler) deliver(frame *CANFrame) {
 			select {
 			case sub.responseChan <- frame:
 			default:
-				log.Printf("failed to deliver 0X%02X", frame.Identifier)
+				log.Printf("%s sub full 0x%02X", sub.createdAt, frame.Identifier)
 			}
 		}
 	}
