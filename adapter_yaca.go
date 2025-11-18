@@ -32,7 +32,7 @@ func init() {
 }
 
 type YACA struct {
-	BaseAdapter
+	*BaseAdapter
 	port   serial.Port
 	closed bool
 }
@@ -250,7 +250,7 @@ func (ya *YACA) sendManager(ctx context.Context) {
 			idb := make([]byte, 4)
 			binary.BigEndian.PutUint32(idb, v.Identifier)
 			f.WriteString("t" + hex.EncodeToString(idb)[5:] +
-				strconv.Itoa(v.Length()) +
+				strconv.Itoa(v.DLC()) +
 				hex.EncodeToString(v.Data) + "\x0D")
 			if _, err := ya.port.Write(f.Bytes()); err != nil {
 				ya.Fatal(fmt.Errorf("failed to write to com port: %s, %v", f.String(), err))

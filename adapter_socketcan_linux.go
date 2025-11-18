@@ -34,7 +34,7 @@ func init() {
 }
 
 type SocketCAN struct {
-	BaseAdapter
+	*BaseAdapter
 	d  *candevice.Device
 	tx *socketcan.Transmitter
 	rx *socketcan.Receiver

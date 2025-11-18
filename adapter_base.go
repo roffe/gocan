@@ -2,7 +2,6 @@ package gocan
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"path/filepath"
 	"runtime"
@@ -23,12 +22,12 @@ type BaseAdapter struct {
 
 	evtChan chan Event
 
-	closeChan chan struct{}
 	closeOnce sync.Once
+	closeChan chan struct{}
 }
 
-func NewBaseAdapter(name string, cfg *AdapterConfig) BaseAdapter {
-	return BaseAdapter{
+func NewBaseAdapter(name string, cfg *AdapterConfig) *BaseAdapter {
+	return &BaseAdapter{
 		name:      name,
 		cfg:       cfg,
 		sendChan:  make(chan *CANFrame, 40),
@@ -39,18 +38,22 @@ func NewBaseAdapter(name string, cfg *AdapterConfig) BaseAdapter {
 	}
 }
 
+// Name returns the adapter name.
 func (base *BaseAdapter) Name() string {
 	return base.name
 }
 
+// Return the send channel for the adapter
 func (base *BaseAdapter) Send() chan<- *CANFrame {
 	return base.sendChan
 }
 
+// Return the receive channel for the adapter
 func (base *BaseAdapter) Recv() <-chan *CANFrame {
 	return base.recvChan
 }
 
+// Return the error channel for the adapter
 func (base *BaseAdapter) Err() <-chan error {
 	return base.errChan
 }
@@ -61,11 +64,17 @@ func (base *BaseAdapter) Event() <-chan Event {
 
 func (base *BaseAdapter) Close() {
 	base.closeOnce.Do(func() {
+		//log.Println("close baseAdapter")
 		close(base.closeChan)
+		select {
+		case base.errChan <- nil:
+		default:
+			log.Println("failed to send <nil> to errchan")
+		}
 	})
 }
 
-// Set a Fatal adapter error
+// Set a fatal adapter error, meaning communication is broken and cannot continue.
 func (base *BaseAdapter) Fatal(err error) {
 	base.errOnce.Do(func() {
 		select {
@@ -73,7 +82,7 @@ func (base *BaseAdapter) Fatal(err error) {
 		default:
 			_, file, no, ok := runtime.Caller(1)
 			if ok {
-				fmt.Printf("%s#%d error channel full: %v\n", filepath.Base(file), no, err)
+				log.Printf("%s:%d error channel full: %v\n", filepath.Base(file), no, err)
 			} else {
 				log.Printf("error channel full: %v", err)
 			}
@@ -95,6 +104,7 @@ func (base *BaseAdapter) sendEvent(eventType EventType, details string) {
 
 }
 
+// Send an error event
 func (base *BaseAdapter) Error(err error) {
 	base.sendEvent(EventTypeError, err.Error())
 }

@@ -20,7 +20,7 @@ import (
 var _ Adapter = (*GWClient)(nil)
 
 type GWClient struct {
-	BaseAdapter
+	*BaseAdapter
 	closeOnce sync.Once
 	conn      *grpc.ClientConn
 }
@@ -163,9 +163,7 @@ func (c *GWClient) recvMessage(identifier uint32, data []byte) {
 }
 
 func (c *GWClient) Close() error {
-	c.closeOnce.Do(func() {
-		close(c.closeChan)
-	})
+	c.BaseAdapter.Close()
 	if c.conn != nil {
 		return c.conn.Close()
 	}

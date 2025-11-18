@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"go.bug.st/serial"
@@ -26,7 +27,7 @@ func init() {
 }
 
 type CanusbVCP struct {
-	BaseAdapter
+	*BaseAdapter
 	port         serial.Port
 	canRate      string
 	filter, mask string
@@ -50,7 +51,7 @@ func NewCanusbVCP(cfg *AdapterConfig) (Adapter, error) {
 }
 
 func (cu *CanusbVCP) SetFilter(filters []uint32) error {
-	return canusbSetFilter(&cu.BaseAdapter, filters)
+	return canusbSetFilter(cu.BaseAdapter, filters)
 }
 
 func (cu *CanusbVCP) Open(ctx context.Context) error {
@@ -75,7 +76,7 @@ func (cu *CanusbVCP) Open(ctx context.Context) error {
 	p.ResetInputBuffer()
 
 	go cu.recvManager(ctx)
-	go canusbSendManager(ctx, &cu.BaseAdapter, cu.sendSem, cu.port)
+	go canusbSendManager(ctx, cu.BaseAdapter, cu.sendSem, cu.port)
 
 	// Open the CAN channel
 	cu.sendChan <- &CANFrame{
@@ -104,7 +105,8 @@ func (cu *CanusbVCP) Close() error {
 }
 
 func (cu *CanusbVCP) recvManager(ctx context.Context) {
-	parseFn := canusbCreateParser(cu.buff, &cu.BaseAdapter, cu.sendSem)
+	defer log.Println("close recvManager")
+	parseFn := canusbCreateParser(cu.buff, cu.BaseAdapter, cu.sendSem)
 
 	readBuffer := make([]byte, 64)
 	for {

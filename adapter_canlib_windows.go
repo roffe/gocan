@@ -54,7 +54,7 @@ func init() {
 var _ Adapter = (*CANlib)(nil)
 
 type CANlib struct {
-	BaseAdapter
+	*BaseAdapter
 	channel      int
 	readHandle   canlib.Handle
 	writeHandle  canlib.Handle

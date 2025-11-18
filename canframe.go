@@ -31,14 +31,9 @@ type CANFrame struct {
 
 // NewExtendedFrame creates a new CANFrame and copies the data slice
 func NewExtendedFrame(identifier uint32, data []byte, frameType CANFrameType) *CANFrame {
-	d := make([]byte, len(data))
-	copy(d, data)
-	return &CANFrame{
-		Identifier: identifier,
-		Data:       d,
-		FrameType:  frameType,
-		Extended:   true,
-	}
+	frame := NewFrame(identifier, data, frameType)
+	frame.Extended = true
+	return frame
 }
 
 // NewFrame creates a new CANFrame and copies the data slice
@@ -53,7 +48,7 @@ func NewFrame(identifier uint32, data []byte, frameType CANFrameType) *CANFrame 
 }
 
 // Returns the length of the data (DLC)
-func (f *CANFrame) Length() int {
+func (f *CANFrame) DLC() int {
 	return len(f.Data)
 }
 

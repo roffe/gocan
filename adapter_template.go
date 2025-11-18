@@ -5,7 +5,7 @@ import (
 )
 
 type Template struct {
-	BaseAdapter
+	*BaseAdapter
 }
 
 func NewTemplate(name string, cfg *AdapterConfig) (Adapter, error) {

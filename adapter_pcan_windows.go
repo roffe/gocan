@@ -33,8 +33,8 @@ func init() {
 		return
 	}
 	//log.Printf("Attached Channels Count: %d\n", len(channels))
-	for _, channel := range channels {
-		name := cString(channel.DeviceName[:])
+	for i, channel := range channels {
+		name := fmt.Sprintf("PCAN #%d %s", i, cString(channel.DeviceName[:]))
 		if err := RegisterAdapter(&AdapterInfo{
 			Name:               name,
 			Description:        "PEAK-System CAN adapter for Windows",
@@ -53,7 +53,7 @@ func init() {
 }
 
 type PCAN struct {
-	BaseAdapter
+	*BaseAdapter
 	ch     pcan.TPCANHandle
 	rate   pcan.TPCANBaudrate
 	closed bool

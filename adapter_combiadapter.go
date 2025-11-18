@@ -117,7 +117,7 @@ var combiValidCommands = map[byte]struct{}{
 // =====================
 
 type CombiAdapter struct {
-	BaseAdapter
+	*BaseAdapter
 
 	// USB handles
 	usbCtx *gousb.Context
@@ -460,6 +460,7 @@ func (ca *CombiAdapter) sendManager(ctx context.Context) {
 				continue
 			}
 			ca.sendCANMessage(ctx, frame)
+			time.Sleep(1 * time.Millisecond) // device needs small delay between frames
 		}
 	}
 }
@@ -467,10 +468,10 @@ func (ca *CombiAdapter) sendManager(ctx context.Context) {
 func (ca *CombiAdapter) sendCANMessage(ctx context.Context, frame *CANFrame) {
 	buf := ca.txPool.Get().([]byte)
 	defer ca.txPool.Put(buf)
-
+	dlc := frame.DLC()
 	binary.LittleEndian.PutUint32(buf[3:], frame.Identifier)
-	copy(buf[7:], frame.Data[:min(frame.Length(), 8)])
-	buf[15] = uint8(frame.Length())
+	copy(buf[7:], frame.Data[:min(dlc, 8)])
+	buf[15] = uint8(dlc)
 	buf[16] = boolToByte(frame.Extended)
 	buf[17] = boolToByte(frame.RTR)
 	// buf[18] is the pre-set terminator (0)

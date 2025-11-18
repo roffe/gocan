@@ -16,10 +16,9 @@ import (
 )
 
 /*
-THIS IS NOT A FUNCTIONAL ADAPTER YET. WORK IN PROGRESS.
+THIS IS EXPERIMENTAL DRIVER AND MAY NOT WORK AS EXPECTED
 */
 
-/*
 func init() {
 	if err := RegisterAdapter(&AdapterInfo{
 		Name:               "ELM327",
@@ -35,10 +34,9 @@ func init() {
 		panic(err)
 	}
 }
-*/
 
 type ELM327 struct {
-	BaseAdapter
+	*BaseAdapter
 	port serial.Port
 
 	currentID uint32

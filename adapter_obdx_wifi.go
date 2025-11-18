@@ -29,7 +29,7 @@ func init() {
 }
 
 type OBDXProWifi struct {
-	BaseAdapter
+	*BaseAdapter
 	conn      net.Conn
 	filters   []*dvi.Command
 	closeOnce sync.Once

@@ -73,20 +73,19 @@ func (c *Client) AdapterName() string {
 func (c *Client) Wait(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
-		return nil
+		return ctx.Err()
 	case err := <-c.adapter.Err():
 		return err
 	}
 }
 
 // Close the client and underlying adapter
-func (c *Client) Close() error {
-	var err error
+func (c *Client) Close() (err error) {
 	c.closeOnce.Do(func() {
 		err = c.adapter.Close()
 		c.fh.close()
 	})
-	return err
+	return
 }
 
 // Send a CAN Frame
@@ -173,7 +172,7 @@ func (c *Client) SubscribeChan(ctx context.Context, channel chan *CANFrame, iden
 
 // Subscribe to CAN identifiers and return a message channel
 func (c *Client) Subscribe(ctx context.Context, identifiers ...uint32) *Subscriber {
-	return c.newSub(10, identifiers...)
+	return c.newSub(40, identifiers...)
 }
 
 func (c *Client) newSub(bufferSize int, identifiers ...uint32) *Subscriber {

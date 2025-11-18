@@ -39,7 +39,7 @@ func init() {
 }
 
 type Canusb struct {
-	BaseAdapter
+	*BaseAdapter
 
 	h *canusb.CANHANDLE
 
@@ -220,7 +220,7 @@ func (cu *Canusb) run(ctx context.Context) {
 			}
 			msg := &canusb.CANMsg{
 				ID:    frame.Identifier,
-				Len:   uint8(frame.Length()),
+				Len:   uint8(frame.DLC()),
 				Flags: 0,
 			}
 			copy(msg.Data[:], frame.Data)

@@ -12,7 +12,7 @@ import (
 )
 
 type SLCan struct {
-	BaseAdapter
+	*BaseAdapter
 	port   serial.Port
 	closed bool
 }
@@ -178,7 +178,7 @@ func (sl *SLCan) handleSend(frame *CANFrame, outBuf *[]byte) error {
 	buf = append(buf, nybbleToHex(n2), nybbleToHex(n1), nybbleToHex(n0))
 
 	// DLC (single hex digit)
-	dlc := frame.Length()
+	dlc := frame.DLC()
 	buf = append(buf, nybbleToHex(byte(dlc)&0xF))
 
 	for i := range dlc {
@@ -234,6 +234,8 @@ func (sl *SLCan) parse(ctx context.Context, buf, readBuf []byte) []byte {
 				default:
 					sl.Error(ErrDroppedFrame)
 				}
+			case 'z': // CANusb ack last command
+
 			default:
 				sl.Warn("Unknown>> " + string(buf))
 			}

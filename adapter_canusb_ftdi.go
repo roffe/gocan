@@ -11,7 +11,7 @@ import (
 )
 
 type CanusbFTDI struct {
-	BaseAdapter
+	*BaseAdapter
 	port         *ftdi.Device
 	canRate      string
 	filter, mask string
@@ -40,7 +40,7 @@ func NewCanusbFTDI(name string, index uint64) func(cfg *AdapterConfig) (Adapter,
 }
 
 func (cu *CanusbFTDI) SetFilter(filters []uint32) error {
-	return canusbSetFilter(&cu.BaseAdapter, filters)
+	return canusbSetFilter(cu.BaseAdapter, filters)
 }
 
 func (cu *CanusbFTDI) Open(ctx context.Context) error {
@@ -78,10 +78,10 @@ func (cu *CanusbFTDI) Open(ctx context.Context) error {
 
 	cu.port.Purge(ftdi.FT_PURGE_RX)
 
-	parseFn := canusbCreateParser(cu.buff, &cu.BaseAdapter, cu.sendSem)
+	parseFn := canusbCreateParser(cu.buff, cu.BaseAdapter, cu.sendSem)
 
 	go cu.recvManager(ctx, parseFn)
-	go canusbSendManager(ctx, &cu.BaseAdapter, cu.sendSem, cu.port)
+	go canusbSendManager(ctx, cu.BaseAdapter, cu.sendSem, cu.port)
 
 	// Open the CAN channel
 	cu.sendChan <- &CANFrame{

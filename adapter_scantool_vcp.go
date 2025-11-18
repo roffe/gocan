@@ -66,7 +66,7 @@ func init() {
 }
 
 type ScantoolVCP struct {
-	BaseAdapter
+	*BaseAdapter
 
 	baseName     string
 	canrateCMD   string
@@ -96,7 +96,7 @@ func NewScantoolVCP(name string) func(cfg *AdapterConfig) (Adapter, error) {
 
 func (stn *ScantoolVCP) SetFilter(filters []uint32) error {
 	stn.filter, stn.mask = scantoolCANfilter(stn.cfg.CANFilter)
-	return scantoolSetFilter(&stn.BaseAdapter, stn.filter, stn.mask)
+	return scantoolSetFilter(stn.BaseAdapter, stn.filter, stn.mask)
 }
 
 func (stn *ScantoolVCP) Open(ctx context.Context) error {
@@ -153,7 +153,7 @@ func (stn *ScantoolVCP) Open(ctx context.Context) error {
 	}
 
 	scm := &scantoolManager{
-		BaseAdapter: &stn.BaseAdapter,
+		BaseAdapter: stn.BaseAdapter,
 		port:        stn.port,
 	}
 	go scm.run(ctx)

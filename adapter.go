@@ -40,14 +40,13 @@ func (a *AdapterCapabilities) String() string {
 }
 
 type AdapterConfig struct {
-	Debug         bool
-	Port          string
-	PortBaudrate  int
-	CANRate       float64
-	CANFilter     []uint32
-	UseExtendedID bool // only used for j2534 when setting upp frame filters
-	PrintVersion  bool
-	//OnMessage              func(string)
+	Debug                  bool
+	Port                   string
+	PortBaudrate           int
+	CANRate                float64
+	CANFilter              []uint32
+	UseExtendedID          bool // only used for j2534 when setting upp frame filters
+	PrintVersion           bool
 	MinimumFirmwareVersion string
 	AdditionalConfig       map[string]string // for future use
 }

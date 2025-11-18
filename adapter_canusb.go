@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"strconv"
 	"time"
 
@@ -286,6 +287,8 @@ func canusbCreateParser(buff *bytes.Buffer, ba *BaseAdapter, sendSem <-chan stru
 }
 
 func canusbSendManager(ctx context.Context, ba *BaseAdapter, sendSem chan struct{}, port io.Writer) {
+	defer log.Println("close sendManager")
+
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
@@ -336,7 +339,7 @@ func canusbSendManager(ctx context.Context, ba *BaseAdapter, sendSem chan struct
 			var out [27]byte
 			i := 0
 
-			dlc := msg.Length() // assume classic CAN 0..8
+			dlc := msg.DLC() // assume classic CAN 0..8
 			data := msg.Data[:dlc]
 
 			if msg.Extended {

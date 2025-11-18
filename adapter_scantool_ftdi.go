@@ -14,7 +14,7 @@ import (
 )
 
 type ScantoolFTDI struct {
-	BaseAdapter
+	*BaseAdapter
 
 	baseName     string
 	canrateCMD   string
@@ -48,7 +48,7 @@ func NewScantoolFTDI(name string, idx uint64) func(cfg *AdapterConfig) (Adapter,
 
 func (stn *ScantoolFTDI) SetFilter(filters []uint32) error {
 	stn.filter, stn.mask = scantoolCANfilter(stn.cfg.CANFilter)
-	return scantoolSetFilter(&stn.BaseAdapter, stn.filter, stn.mask)
+	return scantoolSetFilter(stn.BaseAdapter, stn.filter, stn.mask)
 }
 
 func (stn *ScantoolFTDI) Open(ctx context.Context) error {
@@ -102,7 +102,7 @@ func (stn *ScantoolFTDI) Open(ctx context.Context) error {
 	}
 
 	go stn.recvManager(ctx)
-	go scantoolSendManager(ctx, stn.port, &stn.BaseAdapter, stn.sendSem)
+	go scantoolSendManager(ctx, stn.port, stn.BaseAdapter, stn.sendSem)
 	//go scantoolSendManagerOld(ctx, stn.cfg.Debug, stn.port, stn.sendChan, stn.sendSem, stn.closeChan, stn.setError, stn.cfg.OnMessage)
 	return nil
 }

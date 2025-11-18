@@ -37,7 +37,7 @@ func init() {
 }
 
 type J2534 struct {
-	BaseAdapter
+	*BaseAdapter
 
 	h *passthru.PassThru
 
@@ -348,10 +348,12 @@ func (ma *J2534) sendManager(ctx context.Context) {
 				txflags = passthru.CAN_29BIT_ID
 			}
 
+			dlc := f.DLC() // assume classic CAN 0..8
+
 			msg := &passthru.PassThruMsg{
 				ProtocolID:     ma.protocol,
-				DataSize:       4 + uint32(f.Length()),
-				ExtraDataIndex: 4 + uint32(f.Length()),
+				DataSize:       4 + uint32(dlc),
+				ExtraDataIndex: 4 + uint32(dlc),
 				TxFlags:        txflags,
 			}
 			if ma.protocol == passthru.SW_CAN_PS && !ma.tech2passThru {

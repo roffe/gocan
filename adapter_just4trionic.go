@@ -30,7 +30,7 @@ func init() {
 }
 
 type Just4Trionic struct {
-	BaseAdapter
+	*BaseAdapter
 	port    serial.Port
 	canRate string
 	closed  bool
@@ -289,11 +289,13 @@ func (a *Just4Trionic) sendManager(ctx context.Context) {
 				continue
 			}
 
+			dlc := v.DLC()
+
 			f = "t" + strconv.FormatUint(uint64(v.Identifier), 16) +
-				strconv.Itoa(v.Length()) +
+				strconv.Itoa(dlc) +
 				hex.EncodeToString(v.Data)
 
-			for i := v.Length(); i < 8; i++ {
+			for i := dlc; i < 8; i++ {
 				f += "00"
 			}
 			f += "\r"

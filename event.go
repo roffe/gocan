@@ -36,6 +36,12 @@ type Event struct {
 	Details string
 }
 
+// Returns a formatted string representation of the event.
 func (e Event) String() string {
 	return fmt.Sprintf("[%s] %s", e.Type.String(), e.Details)
+}
+
+// Returns the raw details of the event.
+func (e Event) Raw() string {
+	return e.Details
 }

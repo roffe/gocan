@@ -2,6 +2,7 @@ package gocan
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -14,8 +15,6 @@ import (
 	"go.bug.st/serial"
 	"golang.org/x/mod/semver"
 )
-
-var txAddress = "192.168.4.1:1337"
 
 func init() {
 	if err := RegisterAdapter(&AdapterInfo{
@@ -48,7 +47,7 @@ func init() {
 }
 
 type Txbridge struct {
-	BaseAdapter
+	*BaseAdapter
 	port io.ReadWriteCloser
 }
 
@@ -63,7 +62,7 @@ func NewTxbridge(name string) func(cfg *AdapterConfig) (Adapter, error) {
 func (tx *Txbridge) Open(ctx context.Context) error {
 	switch tx.name {
 	case "txbridge wifi":
-		address := txAddress
+		address := "192.168.4.1:1337"
 		if value, exists := tx.cfg.AdditionalConfig["address"]; exists && value != "" {
 			address = value
 		} else if value := os.Getenv("TXBRIDGE_ADDRESS"); value != "" {
@@ -179,9 +178,9 @@ func (tx *Txbridge) Close() error {
 }
 
 func (tx *Txbridge) sendManager(_ context.Context) {
+	defer log.Println("sendManager exited")
 	if tx.cfg.Debug {
 		log.Println("sendManager start")
-		defer log.Println("sendManager exited")
 	}
 	for {
 		select {
@@ -198,7 +197,7 @@ func (tx *Txbridge) sendManager(_ context.Context) {
 
 			cmd := &serialcommand.SerialCommand{
 				Command: 't',
-				Data:    append([]byte{uint8(frame.Identifier >> 8), uint8(frame.Identifier), byte(frame.Length())}, frame.Data...),
+				Data:    append([]byte{uint8(frame.Identifier >> 8), uint8(frame.Identifier), byte(frame.DLC())}, frame.Data...),
 			}
 			buf, err := cmd.MarshalBinary()
 			if err != nil {
@@ -215,9 +214,9 @@ func (tx *Txbridge) sendManager(_ context.Context) {
 }
 
 func (tx *Txbridge) recvManager(ctx context.Context) {
+	defer log.Println("recvManager exited")
 	if tx.cfg.Debug {
 		log.Println("recvManager start")
-		defer log.Println("recvManager exited")
 	}
 	var parsingCommand bool
 	var command uint8
@@ -241,9 +240,9 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 
 		n, err := tx.port.Read(readbuf)
 		if err != nil {
-			//if errors.Is(err, net.ErrClosed) {
-			//	return
-			//}
+			if errors.Is(err, net.ErrClosed) {
+				return
+			}
 			tx.Fatal(err)
 			return
 		}
@@ -290,11 +289,11 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 
 				switch command {
 				case 'T', 't':
-					tx.sendFrame(NewFrame(
-						uint32(data[0])<<8|uint32(data[1]),
-						data[2:],
-						Incoming,
-					))
+					tx.recvFrame(&CANFrame{
+						Identifier: uint32(data[0])<<8 | uint32(data[1]),
+						Data:       data[2:],
+						FrameType:  Incoming,
+					})
 				case 'e':
 					switch data[1] {
 					case 0x31:
@@ -311,30 +310,30 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 					continue
 
 				case 'R':
-					tx.sendFrame(NewFrame(
-						SystemMsgDataRequest,
-						data,
-						Incoming,
-					))
+					tx.recvFrame(&CANFrame{
+						Identifier: SystemMsgDataRequest,
+						Data:       data,
+						FrameType:  Incoming,
+					})
 				case 'r':
-					tx.sendFrame(NewFrame(
-						SystemMsgDataResponse,
-						data,
-						Incoming,
-					))
+					tx.recvFrame(&CANFrame{
+						Identifier: SystemMsgDataResponse,
+						Data:       data,
+						FrameType:  Incoming,
+					})
 				case 'w':
 					// log.Printf("WBLReading: % X", cmd.Data[:commandSize])
-					tx.sendFrame(NewFrame(
-						SystemMsgWBLReading,
-						data,
-						Incoming,
-					))
+					tx.recvFrame(&CANFrame{
+						Identifier: SystemMsgWBLReading,
+						Data:       data,
+						FrameType:  Incoming,
+					})
 				case 'W':
-					tx.sendFrame(NewFrame(
-						SystemMsgWriteResponse,
-						data,
-						Incoming,
-					))
+					tx.recvFrame(&CANFrame{
+						Identifier: SystemMsgWriteResponse,
+						Data:       data,
+						FrameType:  Incoming,
+					})
 				default:
 					tx.Error(fmt.Errorf("unknown command: %q: %x", command, data))
 					cmdbuffPtr = 0
@@ -360,7 +359,7 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 	}
 }
 
-func (tx *Txbridge) sendFrame(frame *CANFrame) {
+func (tx *Txbridge) recvFrame(frame *CANFrame) {
 	select {
 	case tx.recvChan <- frame:
 	default:
