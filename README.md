@@ -2,10 +2,11 @@
 
 A Go Linux/Windows/OSX CAN library
 
-Linux maintainer wanted! Please contact me if you want to help out.
+Linux maintainer wanted! Please contact me at gocan@roffe.nu if you want to help out.
 
 ## Build tags
 
+* ftdi - d2xx based FTDI support
 * canlib - requires client32.dll
 * canusb - requires canusbdrv(64).dll
 * combi - requires libusb-1.0.dll
@@ -42,6 +43,13 @@ Import the package in your imports
 * CANable Nano and Pro 1.0 & 2.0 running [slcan](https://github.com/normaldotcom/canable-fw)
 * [YACA](https://github.com/roffe/yaca)
 
+### d2xx based FTDI adapters
+
+these adapters can be accessible directly using the [d2xx api](https://ftdichip.com/wp-content/uploads/2023/09/D2XX_Programmers_Guide.pdf) from FTDI
+
+* [OBDLink SX/EX](https://www.obdlink.com/)
+* [Canusb adapter](https://www.canusb.com/)
+
 ### libusb
 
 * CombiAdapter
@@ -60,9 +68,10 @@ Supported via [goCANlib](https://github.com/roffe/gocanlib), Tested with the fol
 
 ### J2534
 
-Support for both 32 & 64bit DLL's. Your GOARCH will controll which it will look for.
+Support for both 32 & 64bit DLL's. Your GOARCH will controll which DLL it will look for.
 
-Do note that not all vendors provide 64bit DLL's so you migh need to build your software with GOARCH=386 to be able to use the j2534 DLL
+Do note that not all vendors provide 64bit DLL's so you migh need to build your software with GOARCH=386 to be able to use the j2534 DLL.
+I've made a experimental CAN gateway that can be accessed over gRCP on linux or named pipes on windows to be able to use 32bit DLL's on 64bit systems. See [goCANGateway](https://github.com/roffe/gocangateway)
 
 Most adapters that comes with a J2534 DLL will work. The list given is just ones verified to work.
 
@@ -74,7 +83,7 @@ Most adapters that comes with a J2534 DLL will work. The list given is just ones
 * GM MDI
 * OBDX Pro GT/VT: https://www.obdxpro.com/
 * Kvaser Leaf Light V2: https://kvaser.com/
-* PCAN32
+* PCAN-USB
 
 #### Linux
 * Tactrix Openport 2.0: https://github.com/dschultzca/j2534
