@@ -37,7 +37,7 @@ func createStreamMeta(adapterName string, cfg *AdapterConfig) metadata.MD {
 	for _, id := range cfg.CANFilter {
 		filterIDs = append(filterIDs, strconv.FormatUint(uint64(id), 10))
 	}
-	return metadata.Pairs(
+	md := metadata.Pairs(
 		"adapter", adapterName,
 		"port", cfg.Port,
 		"port_baudrate", strconv.Itoa(cfg.PortBaudrate),
@@ -45,8 +45,11 @@ func createStreamMeta(adapterName string, cfg *AdapterConfig) metadata.MD {
 		"canfilter", strings.Join(filterIDs, ","),
 		"debug", strconv.FormatBool(cfg.Debug),
 		"useextendedid", strconv.FormatBool(cfg.UseExtendedID),
-		"minversion", cfg.MinimumFirmwareVersion,
 	)
+	if val, found := cfg.AdditionalConfig["minversion"]; found && val != "" {
+		md.Append("minversion", val)
+	}
+	return md
 }
 
 func (c *GWClient) Open(gctx context.Context) error {

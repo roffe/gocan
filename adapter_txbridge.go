@@ -102,7 +102,12 @@ func (tx *Txbridge) Open(ctx context.Context) error {
 
 	tx.port.Write([]byte("ccc"))
 
-	if tx.cfg.MinimumFirmwareVersion != "" {
+	var minVersion string
+	if val, found := tx.cfg.AdditionalConfig["minversion"]; found && val != "" {
+		minVersion = val
+	}
+
+	if minVersion != "" {
 		cmd := serialcommand.NewSerialCommand('v', []byte{0x10})
 
 		buf, err := cmd.MarshalBinary()
@@ -134,9 +139,9 @@ func (tx *Txbridge) Open(ctx context.Context) error {
 
 		tx.Info("txbridge firmware version: " + string(cmd.Data))
 
-		if ver := semver.Compare("v"+string(cmd.Data), "v"+tx.cfg.MinimumFirmwareVersion); ver != 0 {
+		if ver := semver.Compare("v"+string(cmd.Data), "v"+minVersion); ver != 0 {
 			tx.port.Close()
-			return fmt.Errorf("txbridge firmware %s is required, please update the dongle", tx.cfg.MinimumFirmwareVersion)
+			return fmt.Errorf("txbridge firmware %s is required, please update the dongle", minVersion)
 		}
 	}
 
