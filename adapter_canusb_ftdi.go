@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"time"
 
 	ftdi "github.com/roffe/gocan/pkg/ftdi"
 )
@@ -44,32 +45,39 @@ func (cu *CanusbFTDI) SetFilter(filters []uint32) error {
 }
 
 func (cu *CanusbFTDI) Open(ctx context.Context) error {
-	if p, err := ftdi.Open(ftdi.DeviceInfo{
+	p, err := ftdi.Open(ftdi.DeviceInfo{
 		Index: cu.devIndex,
-	}); err != nil {
+	})
+	if err != nil {
 		return fmt.Errorf("failed to open ftdi device: %w", err)
-	} else {
-		cu.port = p
-		if err := p.SetLineProperty(ftdi.LineProperties{Bits: 8, StopBits: 0, Parity: ftdi.NONE}); err != nil {
-			p.Close()
-			return err
-		}
-
-		if err := p.SetBaudRate(3000000); err != nil {
-			p.Close()
-			return err
-		}
-
-		if err := p.SetLatency(1); err != nil {
-			p.Close()
-			return err
-		}
-
-		if err := p.SetTimeout(4, 4); err != nil {
-			p.Close()
-			return err
-		}
 	}
+	cu.port = p
+	if err := p.SetLineProperty(ftdi.LineProperties{Bits: 8, StopBits: 0, Parity: ftdi.NONE}); err != nil {
+		p.Close()
+		return err
+	}
+
+	if err := p.SetBaudRate(3000000); err != nil {
+		p.Close()
+		return err
+	}
+
+	if err := p.SetLatency(1); err != nil {
+		p.Close()
+		return err
+	}
+
+	if err := p.SetTimeout(4, 4); err != nil {
+		p.Close()
+		return err
+	}
+
+	p.Write([]byte{'C', '\r'})
+	time.Sleep(100 * time.Millisecond)
+	p.Purge(ftdi.FT_PURGE_RX)
+
+	parseFn := canusbCreateParser(cu.buff, cu.BaseAdapter, cu.sendSem)
+	go cu.recvManager(ctx, parseFn)
 
 	if err := canusbInit(cu.port, cu.canRate, cu.filter, cu.mask); err != nil {
 		cu.port.Close()
@@ -78,9 +86,6 @@ func (cu *CanusbFTDI) Open(ctx context.Context) error {
 
 	cu.port.Purge(ftdi.FT_PURGE_RX)
 
-	parseFn := canusbCreateParser(cu.buff, cu.BaseAdapter, cu.sendSem)
-
-	go cu.recvManager(ctx, parseFn)
 	go canusbSendManager(ctx, cu.BaseAdapter, cu.sendSem, cu.port)
 
 	// Open the CAN channel

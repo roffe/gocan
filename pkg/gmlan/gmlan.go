@@ -34,6 +34,7 @@ const (
 	RETURN_TO_NORMAL_MODE          = 0x20
 	REPORT_PROGRAMMED_STATE        = 0xA2
 	READ_DATA_BY_IDENTIFIER        = 0x1A
+	READ_DIAGNOSTIC_INFORMATION    = 0xA9
 	READ_DATA_BY_PACKET_IDENTIFIER = 0xAA
 	SECURITY_ACCESS                = 0x27
 	REQUEST_DOWNLOAD               = 0x34
@@ -85,6 +86,36 @@ func WithRecvID(recvID ...uint32) GMLanOption {
 	}
 }
 
+/*
+8.1 ClearDiagnosticInformation ($04) Service. The ClearDiagnosticInformation service is used by the tester
+to clear diagnostic information in one or multiple nodes’ memory. The ClearDiagnosticInformation service is
+based on the ClearDiagnosticInformation service specified in ISO 15031-5 (SAE J1979: test mode $04).
+
+8.1.1
+Service Description. The node shall send a positive response upon receipt of a
+ClearDiagnosticInformation request (even if no DTCs are stored). It is understood that it may take the node
+additional time after the positive response to actually complete the clearing of all DTC information. If the
+amount of time to complete the clear DTC information exceeds 1 s, the worst case time must be documented
+in the Component Technical Specification. If a node supports multiple copies of DTC status information in
+memory (e.g., one copy in Random Access Memory (RAM) and one copy inElectronically Eraseable
+Programmable Read Only Memory (EEPROM)), the node shall clear the copy used by the DTC status
+reporting service ($A9) followed by the remaining copy
+*/
+
+func (cl *Client) ClearDiagnosticInformation(ctx context.Context, id uint32) error {
+	frame := &gocan.CANFrame{
+		Identifier: id,
+		Data:       []byte{0x01, 0x04},
+		FrameType:  gocan.ResponseRequired,
+	}
+	resp, err := cl.c.SendAndWait(ctx, frame, cl.defaultTimeout, cl.recvID...)
+	if err != nil {
+		return fmt.Errorf("ClearDiagnosticInformation[1]: %w", err)
+	}
+	//log.Println(resp.String())
+	return CheckErr(resp)
+}
+
 // 8.2 InitiateDiagnosticOperation ($10) Service.
 /*
 This service allows the tester to perform the following tasks:
@@ -129,10 +160,19 @@ This service allows the tester to perform the following tasks:
    to the dual wire link ECUs remains enabled as long as the diagnostic VN is active in the
    gateway (or longer if the ECU would otherwise keep t
 */
-func (cl *Client) InitiateDiagnosticOperation(ctx context.Context, subFunc byte) error {
+
+type DiagnosticOperationLevel byte
+
+const (
+	LEV_DADTC DiagnosticOperationLevel = 0x02 /* disableAllDTCs                               */
+	LEV_EDDDC DiagnosticOperationLevel = 0x03 /* enableDTCsDuringDevCntrl                     */
+	LEV_WULNK DiagnosticOperationLevel = 0x04 /* wakeUpLinks                                 */
+)
+
+func (cl *Client) InitiateDiagnosticOperation(ctx context.Context, level DiagnosticOperationLevel) error {
 	frame := &gocan.CANFrame{
 		Identifier: cl.canID,
-		Data:       []byte{0x02, INITIATE_DIAGNOSTIC_OPERATION, subFunc},
+		Data:       []byte{0x02, INITIATE_DIAGNOSTIC_OPERATION, byte(level)},
 		FrameType:  gocan.ResponseRequired,
 	}
 	resp, err := cl.c.SendAndWait(ctx, frame, cl.defaultTimeout, cl.recvID...)
@@ -952,22 +992,6 @@ func (cl *Client) TesterPresentNoResponseAllowed() error {
 	return cl.c.Send(0x101, []byte{0xFE, 0x01, 0x3E}, gocan.Outgoing)
 }
 
-// ReadDiagnosticInformation $A9 Service
-//
-//	readStatusOfDTCByStatusMask $81 Request
-//	    DTCStatusMask $12= 0001 0010
-//	      0 Bit 7 warningIndicatorRequestedState
-//	      0 Bit 6 currentDTCSincePowerUp
-//	      0 Bit 5 testNotPassedSinceCurrentPowerUp
-//	      1 Bit 4 historyDTC
-//	      0 Bit 3 testFailedSinceDTCCleared
-//	      0 Bit 2 testNotPassedSinceDTCCleared
-//	      1 Bit 1 currentDTC
-//	      0 Bit 0 DTCSupportedByCalibration
-func (cl *Client) ReadDiagnosticInformationStatusOfDTCByStatusMask(ctx context.Context, DTCStatusMask byte) ([][]byte, error) {
-	return cl.readDiagnosticInformation(ctx, 0x81, []byte{DTCStatusMask})
-}
-
 // 8.16 ReportProgrammedState ($A2) Service.
 //
 // The reportProgrammedState is used by the tester to determine:
@@ -1073,7 +1097,31 @@ func (cl *Client) ProgrammingMode(ctx context.Context, subFunc byte) error {
 	}
 }
 
-// 8.18 ReadDiagnosticInformation ($) Service.
+// ReadDiagnosticInformation $A9 Service
+//
+//	readStatusOfDTCByStatusMask $81 Request
+//	    DTCStatusMask $12= 0001 0010
+//	      0 Bit 7 warningIndicatorRequestedState
+//	      0 Bit 6 currentDTCSincePowerUp
+//	      0 Bit 5 testNotPassedSinceCurrentPowerUp
+//	      1 Bit 4 historyDTC
+//	      0 Bit 3 testFailedSinceDTCCleared
+//	      0 Bit 2 testNotPassedSinceDTCCleared
+//	      1 Bit 1 currentDTC
+//	      0 Bit 0 DTCSupportedByCalibration
+func (cl *Client) ReadDiagnosticInformationStatusOfDTCByStatusMask(ctx context.Context, DTCStatusMask byte) ([]DTC, error) {
+	return cl.ReadDiagnosticInformation(ctx, LEV_RSDTCBS, DTCStatusMask)
+}
+
+type DiagnosticInformationLevel byte
+
+const (
+	LEV_RSDTCBN = 0x80 /* readStatusOfDTCByDTCNumber                   */
+	LEV_RSDTCBS = 0x81 /* readStatusOfDTCByStatusMask                  */
+	LEV_SOCDTCC = 0x82 /* sendOnChangeDTCCount                         */
+)
+
+// 8.18 ReadDiagnosticInformation ($A9) Service.
 //
 // This service allows a tester to read the status of
 // node-resident Diagnostic Trouble Code (DTC) information from any controller, or group of controllers within a
@@ -1083,41 +1131,48 @@ func (cl *Client) ProgrammingMode(ctx context.Context, subFunc byte) error {
 // 3. Enable a node resident algorithm which periodically calculates the number of DTCs that match a tester
 // defined DTC status mask. The ECU shall send a response message each time the calculation yields a
 // different result than the one calculated the previous time.
-func (cl *Client) readDiagnosticInformation(ctx context.Context, subFunc byte, payload []byte) ([][]byte, error) {
-	if len(payload) > 3 {
+func (cl *Client) ReadDiagnosticInformation(ctx context.Context, level DiagnosticInformationLevel, DTCMaskRecord ...byte) ([]DTC, error) {
+	if len(DTCMaskRecord) > 3 {
 		return nil, errors.New("to big payload for readDiagnosticInformation")
 	}
-	header := []byte{0x03, 0xA9, subFunc}
-	frame := gocan.NewFrame(cl.canID, append(header, payload...), gocan.CANFrameType{Type: 2, Responses: 15})
+	payload := []byte{0x02 + byte(len(DTCMaskRecord)), 0xA9, byte(level)}
+	payload = append(payload, DTCMaskRecord...)
+	frame := &gocan.CANFrame{
+		Identifier: cl.canID,
+		Data:       payload,
+		FrameType:  gocan.ResponseRequiredWithResponses(15),
+	}
+
+	codeSub := cl.c.Subscribe(ctx, 0x5E8)
+	defer codeSub.Close()
+
 	resp, err := cl.c.SendAndWait(ctx, frame, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
 		return nil, err
 	}
 
-	var out [][]byte
-	if err := CheckErr(resp); err != nil {
-		if strings.Contains(err.Error(), "Response pending") {
-			ch := cl.c.Subscribe(ctx, cl.recvID...)
-			defer ch.Close()
-		outer:
-			for {
-				select {
-				case resp := <-ch.Chan():
-					if resp.Data[1] == 0x00 && resp.Data[2] == 0x00 && resp.Data[3] == 0x00 { // No more DTCs
-						break outer
-					}
-					//log.Println("append")
-					out = append(out, []byte{resp.Data[1], resp.Data[2], resp.Data[3], resp.Data[4]})
-				case <-time.After(00 * time.Millisecond):
-					break outer
-				}
+	if err := CheckErr(resp); err != nil && (resp.Data[3] != 0x78) { // Response pending
+		return nil, err
+	}
+
+	var out []DTC
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case resp := <-codeSub.Chan():
+			if resp.Data[1] == 0x00 && resp.Data[2] == 0x00 && resp.Data[3] == 0x00 { // No more DTCs
+				return out, nil
 			}
-		} else {
-			//log.Println("not pending")
-			return nil, err
+			out = append(out, DTC{
+				Code:   DecodeDTCSlice([]byte{resp.Data[1], resp.Data[2]}),
+				Status: resp.Data[4],
+			})
+		case <-time.After(500 * time.Millisecond):
+			log.Println("DTC response: timeout")
+			return out, nil
 		}
 	}
-	return out, nil
 }
 
 // 8.19 ReadDataByPacketIdentifier ($AA) Service.

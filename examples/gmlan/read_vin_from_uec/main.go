@@ -37,7 +37,7 @@ func main() {
 
 		gm.TesterPresentNoResponseAllowed()
 
-		if err := gm.InitiateDiagnosticOperation(ctx, 0x02); err != nil {
+		if err := gm.InitiateDiagnosticOperation(ctx, gmlan.LEV_DADTC); err != nil {
 			log.Fatal(err)
 		}
 		defer func() {

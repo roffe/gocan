@@ -125,9 +125,9 @@ func canusbClose(port io.Writer) error {
 
 func canusbInit(port io.Writer, canRate, filter, mask string) error {
 	var cmds = []string{
-		"C", "", "", // Empty buffer
-		"V", // Get Version number of both CANUSB hardware and software
-		//"N",        // Get Serial number of the CANUSB
+		//"C", "C", "C", // Empty buffer
+		"V",     // Get Version number of both CANUSB hardware and software
+		"N",     // Get Serial number of the CANUSB
 		"Z0",    // Sets Time Stamp OFF for received frames
 		canRate, // Setup CAN bit-rates
 		filter,
@@ -140,7 +140,7 @@ func canusbInit(port io.Writer, canRate, filter, mask string) error {
 		if err != nil {
 			return err
 		}
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(15 * time.Millisecond)
 	}
 	return nil
 }

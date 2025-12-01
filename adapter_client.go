@@ -8,7 +8,6 @@ import (
 	"log"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/roffe/gocan/proto"
 	"google.golang.org/grpc"
@@ -21,8 +20,7 @@ var _ Adapter = (*GWClient)(nil)
 
 type GWClient struct {
 	*BaseAdapter
-	closeOnce sync.Once
-	conn      *grpc.ClientConn
+	conn *grpc.ClientConn
 }
 
 func NewGWClient(adapterName string, cfg *AdapterConfig) (*GWClient, error) {
@@ -168,7 +166,9 @@ func (c *GWClient) recvMessage(identifier uint32, data []byte) {
 func (c *GWClient) Close() error {
 	c.BaseAdapter.Close()
 	if c.conn != nil {
-		return c.conn.Close()
+		err := c.conn.Close()
+		c.conn = nil
+		return err
 	}
 	return nil
 }

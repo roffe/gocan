@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
@@ -83,7 +82,7 @@ func (stn *ScantoolFTDI) Open(ctx context.Context) error {
 	}
 
 	for _, from := range scantoolBaudrates {
-		log.Println("trying to change baudrate from", from, "to", to, "bps")
+		stn.Info(fmt.Sprintf("trying to change baudrate from %d to %d bps", from, to))
 		if err := scantoolTrySpeed(stn.port, from, to, speedSetter, resetInputBuffer, stn.Info); err == nil {
 			found = true
 			break

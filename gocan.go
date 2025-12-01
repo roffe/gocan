@@ -4,6 +4,7 @@ package gocan
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -73,6 +74,10 @@ func (c *Client) AdapterName() string {
 func (c *Client) Wait(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
+		err := ctx.Err()
+		if errors.Is(err, context.Canceled) {
+			return nil
+		}
 		return ctx.Err()
 	case err := <-c.adapter.Err():
 		return err

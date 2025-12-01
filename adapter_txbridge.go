@@ -306,7 +306,7 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 					case 0x32:
 						tx.sendEvent(EventTypeError, "invalid sequence")
 					default:
-						tx.sendEvent(EventTypeError, fmt.Sprintf("xerror: %X", data))
+						tx.sendEvent(EventTypeError, fmt.Sprintf("Unknown: %X", data))
 					}
 					cmdbuffPtr = 0
 					commandChecksum = 0

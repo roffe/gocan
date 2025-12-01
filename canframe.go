@@ -10,15 +10,27 @@ import (
 )
 
 type CANFrameType struct {
-	Type      int
+	Type      ResponseType
 	Responses int
 }
 
-var (
-	Incoming         = CANFrameType{Type: 0, Responses: 0}
-	Outgoing         = CANFrameType{Type: 1, Responses: 0}
-	ResponseRequired = CANFrameType{Type: 2, Responses: 1} // Used for ELM and STN adapters to signal we want the adapter to wait for a response
+type ResponseType int
+
+const (
+	ResponseTypeIncoming         ResponseType = 0
+	ResponseTypeOutgoing         ResponseType = 1
+	ResponseTypeResponseRequired ResponseType = 2 // Used for ELM and STN adapters to signal we want the adapter to wait for a response
 )
+
+var (
+	Incoming         = CANFrameType{Type: ResponseTypeIncoming, Responses: 0}
+	Outgoing         = CANFrameType{Type: ResponseTypeOutgoing, Responses: 0}
+	ResponseRequired = CANFrameType{Type: ResponseTypeResponseRequired, Responses: 1} // Used for ELM and STN adapters to signal we want the adapter to wait for a response
+)
+
+func ResponseRequiredWithResponses(responses int) CANFrameType {
+	return CANFrameType{Type: ResponseTypeResponseRequired, Responses: responses}
+}
 
 type CANFrame struct {
 	Identifier uint32
