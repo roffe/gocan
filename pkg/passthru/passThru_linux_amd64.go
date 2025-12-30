@@ -300,7 +300,7 @@ func FindDLLs() (_ string, libs []J2534DLL) {
 		var config J2534Config
 		err = json.Unmarshal(byteValue, &config)
 		if err != nil {
-			return nil
+			return
 		}
 
 		if strings.HasPrefix(config.FUNCTIONLIB, "~/") {
