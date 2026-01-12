@@ -46,6 +46,10 @@ func (sl *SLCan) Open(ctx context.Context) error {
 		Parity:   serial.NoParity,
 		DataBits: 8,
 		StopBits: serial.OneStopBit,
+		InitialStatusBits: &serial.ModemOutputBits{
+			DTR: false,
+			RTS: false,
+		},
 	}
 	p, err := serial.Open(sl.cfg.Port, mode)
 	if err != nil {

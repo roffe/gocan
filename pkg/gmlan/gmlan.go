@@ -228,7 +228,6 @@ func (cl *Client) ReadDataByIdentifierFrame(ctx context.Context, frame *gocan.CA
 		return nil, fmt.Errorf("ReadDataByIdentifier[1]: %w", err)
 	}
 	if err := CheckErr(resp); err != nil {
-		log.Println(resp.String())
 		return nil, fmt.Errorf("ReadDataByIdentifier[2]: %w", err)
 	}
 	d := resp.Data
@@ -1208,7 +1207,7 @@ func (cl *Client) ReadDataByPacketIdentifier(ctx context.Context, subFunc byte, 
 
 	resp, err := cl.c.SendAndWait(ctx, f, cl.defaultTimeout, cl.recvID...)
 	if err != nil {
-		return nil, fmt.Errorf("ReadDataByPacketIdentifier: %w", err)
+		return nil, fmt.Errorf("ReadDataByPacketIdentifier[1]: %w", err)
 	}
 
 	// log.Println(resp.String())
@@ -1253,7 +1252,7 @@ func (cl *Client) DeviceControl(ctx context.Context, command byte) error {
 }
 
 func (cl *Client) DeviceControlWithCode(ctx context.Context, command byte, code []byte) error {
-	payload := []byte{0x07, DEVICE_CONTROL, command}
+	payload := []byte{0x02 + uint8(len(code)), DEVICE_CONTROL, command}
 	payload = append(payload, code...)
 	frame := gocan.NewFrame(cl.canID, payload, gocan.ResponseRequired)
 	resp, err := cl.c.SendAndWait(ctx, frame, cl.defaultTimeout, cl.recvID...)

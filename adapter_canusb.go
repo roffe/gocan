@@ -185,7 +185,104 @@ func canusbCANrate(rate float64) (string, error) {
 	}
 }
 
-func canusbAcceptanceFilters(idList []uint32) (string, string) {
+func CANUSBAccept11(ids []uint32) (ac, am [4]byte, err error) {
+	if len(ids) == 0 {
+		return ac, am, fmt.Errorf("CANUSBAccept11: empty id slice")
+	}
+
+	const idMask = 0x7FF // 11-bit
+
+	base := ids[0] & idMask
+	var diff uint32
+
+	for _, raw := range ids[1:] {
+		if raw > idMask {
+			return ac, am, fmt.Errorf("CANUSBAccept11: id 0x%X > 0x7FF (not 11-bit)", raw)
+		}
+		id := raw & idMask
+		diff |= base ^ id
+	}
+
+	// maskID: 1 where *all* IDs share the same bit, 0 where they differ
+	maskID := (^diff) & idMask
+	codeID := base & maskID
+
+	// ---- Map into SJA1000 dual-standard filter 2 layout ----
+	//
+	// Filter 2 uses:
+	//   AC2  = ACR2   = ID10..ID3  (8 bits)
+	//   AC3[7:5]      = ID2..ID0
+	//   AM2  = AMR2   = mask for ID10..ID3 (0 = care, 1 = don't care)
+	//   AM3[7:5]      = mask for ID2..ID0  (0 = care, 1 = don't care)
+	//   AM3[4]        = mask for RTR (we set to 1 to ignore RTR)
+	//   AM3[3:0]      = data bits for filter 1; we leave them 0 (same as manual example).
+	//
+	// First break ID/mask into those fields:
+	id10_3 := byte((codeID >> 3) & 0xFF) // ID10..ID3
+	id2_0 := byte(codeID & 0x7)          // ID2..ID0
+
+	mask10_3 := byte((maskID >> 3) & 0xFF)
+	mask2_0 := byte(maskID & 0x7)
+
+	// ---- Build AC bytes ----
+
+	// Filter 1: same as CANUSB example – effectively "mostly off".
+	ac[0] = 0x00 // AC0
+	ac[1] = 0x00 // AC1
+
+	// Filter 2:
+	ac[2] = id10_3     // AC2 = ID10..3
+	ac[3] = id2_0 << 5 // AC3[7:5] = ID2..0, rest 0
+
+	// ---- Build AM bytes (0 = care, 1 = don't care) ----
+
+	// Filter 1 part (ID + data bits). We follow the manual's example:
+	// AM0=0, AM1=0, lower nibble of AM3=0. That means filter 1 only
+	// accepts a very small subset of frames (essentially ID=0 etc).
+	am[0] = 0x00 // AM0
+	am[1] = 0x00 // AM1
+
+	// Filter 2 masks:
+	// In maskID we used 1 = "care", 0 = "don't care".
+	// SJA1000 expects the inverse: 0 = care, 1 = don't care.
+	am[2] = ^mask10_3 // AM2 = mask for ID10..3
+
+	// AM3:
+	//   bits 7..5  -> ID2..0 mask (0=care, 1=don't care)
+	//   bit 4      -> RTR mask (1 = ignore RTR, accept both data/RTR)
+	//   bits 3..0  -> data bits for filter 1 (we keep them 0 as in example)
+	idLowMaskBits := ^(mask2_0 << 5) & 0xE0 // upper 3 bits, RTR=0
+	am[3] = idLowMaskBits | 0x10            // set RTR mask=1 (don't care RTR)
+
+	return ac, am, nil
+}
+
+// Helper to produce the actual CANUSB ASCII commands for 11-bit IDs.
+// Example output for ids 0x300..0x3FF:
+//
+//	M00006000
+//	m00001FF0
+func CANUSBCmds11(ids []uint32) (mCmd, maskCmd string, err error) {
+	ac, am, err := CANUSBAccept11(ids)
+	if err != nil {
+		return "", "", err
+	}
+
+	mCmd = fmt.Sprintf("M%02X%02X%02X%02X", ac[0], ac[1], ac[2], ac[3])
+	maskCmd = fmt.Sprintf("m%02X%02X%02X%02X", am[0], am[1], am[2], am[3])
+	return mCmd, maskCmd, nil
+}
+
+func canusbAcceptanceFilters(ids []uint32) (string, string) {
+	filt, mask, err := CANUSBCmds11(ids)
+	if err != nil {
+		log.Println("canusbAcceptanceFilters:", err)
+		return "M00000000", "mFFFFFFFF"
+	}
+	return filt, mask
+}
+
+func canusbAcceptanceFilters2(idList []uint32) (string, string) {
 	if len(idList) == 1 && idList[0] == 0 {
 		return "\r", "\r"
 	}
@@ -204,6 +301,8 @@ func canusbAcceptanceFilters(idList []uint32) (string, string) {
 	}
 	code |= code << 16
 	mask |= mask << 16
+
+	log.Println(fmt.Sprintf("M%08X", code), fmt.Sprintf("m%08X", mask))
 
 	return fmt.Sprintf("M%08X", code), fmt.Sprintf("m%08X", mask)
 }
@@ -287,7 +386,9 @@ func canusbCreateParser(buff *bytes.Buffer, ba *BaseAdapter, sendSem <-chan stru
 }
 
 func canusbSendManager(ctx context.Context, ba *BaseAdapter, sendSem chan struct{}, port io.Writer) {
-	defer log.Println("close sendManager")
+	if ba.cfg.Debug {
+		defer log.Println("close sendManager")
+	}
 
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()

@@ -3,6 +3,6 @@
     "go.buildTags": "canusb canlib j2534 combi pcan",
     "go.buildFlags": [
         "-tags",
-        "canusb,canlib,ftdi,j2534,combi,pcan",
+        "canusb,canlib,ftdi,j2534,combi,pcan,rcan",
     ],
 }
