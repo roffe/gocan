@@ -92,6 +92,6 @@ Most adapters that comes with a J2534 DLL will work. The list given is just ones
 
 ### Other
 
-* SocketCAN
+* SocketCAN, note. to run from user space set cap_net_admin for target application ```sudo setcap cap_net_admin=eip APPNAME```
 * OBDX Pro GT BLE & Wifi
 * Combiadapter via libusb

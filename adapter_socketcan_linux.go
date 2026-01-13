@@ -4,6 +4,7 @@ package gocan
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"runtime"
 	"strings"
@@ -12,12 +13,13 @@ import (
 	"go.einride.tech/can"
 	"go.einride.tech/can/pkg/candevice"
 	"go.einride.tech/can/pkg/socketcan"
+	"golang.org/x/sys/unix"
 )
 
 func init() {
 	for _, dev := range FindDevices() {
 		name := "SocketCAN " + dev
-		if err := Register(&AdapterInfo{
+		if err := RegisterAdapter(&AdapterInfo{
 			Name:               name,
 			Description:        "Linux Driver",
 			RequiresSerialPort: false,
@@ -41,7 +43,7 @@ type SocketCAN struct {
 }
 
 func (a *SocketCAN) SetFilter(uint32s []uint32) error {
-	//Support lib do not support this, for now SW filtering
+
 	return nil
 }
 
@@ -74,7 +76,14 @@ func (a *SocketCAN) Open(ctx context.Context) error {
 		return err
 	}
 
-	conn, err := socketcan.DialContext(ctx, "can", a.cfg.Port)
+	var filters = make([]socketcan.IDFilter, len(a.cfg.CANFilter))
+	for i, filter := range a.cfg.CANFilter {
+
+		filters[i].ID = filter
+		filters[i].Mask = unix.CAN_SFF_MASK
+	}
+
+	conn, err := socketcan.DialContext(ctx, "can", a.cfg.Port, socketcan.WithFilterReceivedFramesByID(filters))
 
 	a.tx = socketcan.NewTransmitter(conn)
 	a.rx = socketcan.NewReceiver(conn)
@@ -98,24 +107,20 @@ func (a *SocketCAN) recvManager(ctx context.Context) {
 	runtime.LockOSThread()
 	for {
 		select {
-		case <-a.close:
+		case <-ctx.Done():
 			return
 		default:
 			if a.rx.Receive() {
 				f := a.rx.Frame()
-				for i := 0; i < len(a.cfg.CANFilter); i++ {
-					if f.ID == a.cfg.CANFilter[i] {
-						frame := NewFrame(
-							f.ID,
-							f.Data[0:f.Length],
-							Incoming,
-						)
-						select {
-						case a.recv <- frame:
-						default:
-							a.cfg.OnMessage(ErrDroppedFrame.Error())
-						}
-					}
+				frame := NewFrame(
+					f.ID,
+					f.Data[0:f.Length],
+					Incoming,
+				)
+				select {
+				case a.recvChan <- frame:
+				default:
+					a.Error(ErrDroppedFrame)
 				}
 			}
 		}
@@ -126,22 +131,21 @@ func (a *SocketCAN) sendManager(ctx context.Context) {
 	runtime.LockOSThread()
 	for {
 		select {
-		case <-a.close:
+		case <-ctx.Done():
 			return
-		case f := <-a.send:
+		case f := <-a.sendChan:
 			frame := can.Frame{}
 			frame.IsExtended = a.cfg.UseExtendedID
-			frame.ID = f.Identifier()
-			frame.Length = uint8(f.Length())
+			frame.ID = f.Identifier
+			frame.Length = uint8(f.DLC())
 			data := can.Data{}
-			copy(data[:], f.Data())
+			copy(data[:], f.Data)
 			frame.Data = data
 			if err := a.tx.TransmitFrame(ctx, frame); err != nil {
-				a.cfg.OnMessage("send error: " + err.Error())
+				a.Error(fmt.Errorf("send error: " + err.Error()))
 			}
-			delay := 20 * time.Millisecond
-
-			time.Sleep(delay)
+			//workaround, delay to prevent can flasher fail
+			time.Sleep(time.Millisecond)
 		}
 	}
 }
