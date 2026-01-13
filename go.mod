@@ -8,13 +8,15 @@ require (
 	github.com/fatih/color v1.18.0
 	github.com/google/gousb v1.1.3
 	go.bug.st/serial v1.6.4
-	go.einride.tech/can v0.12.1
-	golang.org/x/sync v0.17.0
+	golang.org/x/sync v0.17.0 // indirect
 	google.golang.org/grpc v1.76.0
 	google.golang.org/protobuf v1.36.10
 )
 
-require github.com/Microsoft/go-winio v0.6.2
+require (
+	github.com/Microsoft/go-winio v0.6.2
+	go.einride.tech/can v0.16.1
+)
 
 require (
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
@@ -44,3 +46,5 @@ require (
 	github.com/creack/goselect v0.1.2 // indirect
 	golang.org/x/sys v0.34.0
 )
+
+replace go.einride.tech/can => github.com/samuelbrian/can-go v0.0.2
