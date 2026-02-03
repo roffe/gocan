@@ -8,7 +8,7 @@ require (
 	github.com/fatih/color v1.18.0
 	github.com/google/gousb v1.1.3
 	go.bug.st/serial v1.6.4
-	golang.org/x/sync v0.17.0 // indirect
+	golang.org/x/sync v0.17.0
 	google.golang.org/grpc v1.76.0
 	google.golang.org/protobuf v1.36.10
 )

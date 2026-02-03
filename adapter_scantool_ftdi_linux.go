@@ -19,42 +19,22 @@ func (stn *ScantoolFTDI) recvManager(ctx context.Context) {
 	// buf is our raw read buffer from FTDI.
 	buf := make([]byte, 256)
 
-	var (
-		rxCnt int32
-		err   error
-	)
-
 	for ctx.Err() == nil {
-		rxCnt, err = stn.port.GetQueueStatus()
+		n, err := stn.port.Read(buf)
 		if err != nil {
 			if !stn.closed {
-				stn.setError(fmt.Errorf("failed to get queue status: %w", err))
-			}
-			return
-		}
-		if rxCnt == 0 {
-			time.Sleep(300 * time.Microsecond)
-			continue
-		}
-
-		// NOTE: we assume rxCnt <= len(buf). If the adapter can burst more than 256 bytes,
-		// you probably want a bigger buf or a loop here.
-		readBuffer := buf[:rxCnt]
-
-		n, err := stn.port.Read(readBuffer)
-		if err != nil {
-			if !stn.closed {
-				stn.setError(fmt.Errorf("failed to read: %w", err))
+				stn.Error(fmt.Errorf("failed to read: %w", err))
 			}
 			return
 		}
 		if n == 0 {
+			time.Sleep(300 * time.Microsecond)
 			continue
 		}
 
 		// Parse incoming bytes into lines, split by '\r'
 		// and handle '>' prompts inline.
-		for _, b := range readBuffer[:n] {
+		for _, b := range buf[:n] {
 
 			switch b {
 			case '>':
@@ -75,7 +55,7 @@ func (stn *ScantoolFTDI) recvManager(ctx context.Context) {
 
 				if stn.cfg.Debug {
 					// Only here do we pay for a string alloc, in debug builds.
-					stn.cfg.OnMessage("<i> " + string(lineBuf))
+					stn.Debug("<i> " + string(lineBuf))
 				}
 
 				switch {
@@ -101,7 +81,7 @@ func (stn *ScantoolFTDI) recvManager(ctx context.Context) {
 					f, err := scantoolDecodeFrame(lineBuf)
 					if err != nil {
 						// We will only allocate here to build the debug string.
-						stn.cfg.OnMessage(fmt.Sprintf("failed to decode frame: %s %v", string(lineBuf), err))
+						stn.Error(fmt.Errorf("failed to decode frame: %s %w", string(lineBuf), err))
 						lineBuf = lineBuf[:0]
 						continue
 					}
@@ -110,7 +90,7 @@ func (stn *ScantoolFTDI) recvManager(ctx context.Context) {
 					case stn.recvChan <- f:
 						// ok
 					default:
-						stn.sendErrorEvent(ErrDroppedFrame)
+						stn.Error(ErrDroppedFrame)
 					}
 					lineBuf = lineBuf[:0]
 				}

@@ -20,6 +20,7 @@ func init() {
 		return
 	}
 	for _, dev := range devs {
+		//log.Println("Found FTDI device:", dev.Description, "S/N:", dev.SerialNumber)
 		switch dev.Description {
 		case OBDLinkSX, OBDLinkEX, STN1170, STN2120:
 			if err := RegisterAdapter(&AdapterInfo{
@@ -31,7 +32,7 @@ func init() {
 					KLine: true,
 					SWCAN: false,
 				},
-				New: NewScantoolFTDI("d2xx "+dev.Description, dev.Index),
+				New: NewScantoolFTDI("d2xx "+dev.Description, dev.Index, dev.SerialNumber),
 			}); err != nil {
 				panic(err)
 			}
@@ -46,7 +47,7 @@ func init() {
 					KLine: false,
 					SWCAN: true,
 				},
-				New: NewCanusbFTDI(name, dev.Index),
+				New: NewCanusbFTDI(name, dev.Index, dev.SerialNumber),
 			}); err != nil {
 				panic(err)
 			}

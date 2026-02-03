@@ -146,6 +146,8 @@ func (stn *ScantoolVCP) Open(ctx context.Context) error {
 		return errors.New("failed to switch adapter baudrate")
 	}
 
+	time.Sleep(50 * time.Millisecond)
+
 	scantoolInit(stn.cfg.Debug, stn.port, stn.protocolCMD, stn.canrateCMD, stn.filter, stn.mask, stn.Info)
 	if err := stn.port.ResetInputBuffer(); err != nil {
 		stn.port.Close()

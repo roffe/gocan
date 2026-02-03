@@ -19,16 +19,18 @@ type CanusbFTDI struct {
 	buff         *bytes.Buffer
 	sendSem      chan struct{}
 	devIndex     uint64
+	serial       string
 	closed       bool
 }
 
-func NewCanusbFTDI(name string, index uint64) func(cfg *AdapterConfig) (Adapter, error) {
+func NewCanusbFTDI(name string, index uint64, serial string) func(cfg *AdapterConfig) (Adapter, error) {
 	return func(cfg *AdapterConfig) (Adapter, error) {
 		cu := &CanusbFTDI{
 			BaseAdapter: NewBaseAdapter(name, cfg),
 			buff:        bytes.NewBuffer(nil),
 			sendSem:     make(chan struct{}, 1),
 			devIndex:    index,
+			serial:      serial,
 		}
 		rate, err := canusbCANrate(cfg.CANRate)
 		if err != nil {
@@ -46,8 +48,9 @@ func (cu *CanusbFTDI) SetFilter(filters []uint32) error {
 
 func (cu *CanusbFTDI) Open(ctx context.Context) error {
 	p, err := ftdi.Open(ftdi.DeviceInfo{
-		Index: cu.devIndex,
-	})
+		Index:        cu.devIndex,
+		SerialNumber: cu.serial,
+	}, 0x6001)
 	if err != nil {
 		return fmt.Errorf("failed to open ftdi device: %w", err)
 	}

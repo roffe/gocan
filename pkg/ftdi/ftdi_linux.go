@@ -3,17 +3,20 @@ package ftdi
 import (
 	"errors"
 	"io"
+	"log"
 	"sync"
 	"unsafe"
 )
 
-// If installed on OSX using 'brew'
-// ;;#cgo CFLAGS: -I/usr/local/Cellar/libftdi/1.1/include/libftdi1/
-// ;;#cgo LDFLAGS: -lftdi1 -L/usr/local/Cellar/libftdi/1.1/lib/
-
-// #cgo pkg-config: libftdi
+// #cgo pkg-config: libftdi1
 // #include <ftdi.h>
+// #include <libusb.h>
+// #include <stdlib.h>
 import "C"
+
+func Init() error {
+	return nil
+}
 
 // Return Library version, formatted to match D2XX
 func GetLibraryVersion() uint32 {
@@ -25,31 +28,34 @@ func GetLibraryVersion() uint32 {
 }
 
 type DeviceInfo struct {
-	index        uint64
-	id           uint32 // used as interface number
+	Index        uint64
+	Id           uint32 // used as interface number
 	SerialNumber string
 	Description  string
-	manufacturer string
+	Manufacturer string
 	handle       unsafe.Pointer // the libusb device pointer
 }
 
 // TODO: Need to expand multi-interface devices, and then to other FTDI chips
 func GetDeviceList() (dl []DeviceInfo, e error) {
 	ctx := C.ftdi_new()
-	defer C.ftdi_free(ctx)
 	if ctx == nil {
 		return nil, errors.New("Failed to create FTDI context")
 	}
+	defer C.ftdi_free(ctx)
 
 	var dev_list *C.struct_ftdi_device_list
-	defer C.ftdi_list_free(&dev_list)
 
-	num := C.ftdi_usb_find_all(ctx, &dev_list, 0x0403, 0x6001)
+	num := C.ftdi_usb_find_all(ctx, &dev_list, 0, 0)
+
 	if num < 0 {
 		return nil, getErr(ctx)
 	}
+	if num == 0 {
+		return nil, nil
+	}
 
-	dl = make([]DeviceInfo, num*4)
+	dl = make([]DeviceInfo, num)
 
 	for i := 0; i < int(num); i++ {
 
@@ -63,18 +69,14 @@ func GetDeviceList() (dl []DeviceInfo, e error) {
 		if ret != 0 {
 			return nil, getErr(ctx)
 		}
-
-		var d DeviceInfo
-		d.handle = unsafe.Pointer(dev_list.dev)
-		d.manufacturer = C.GoString(&mnf_char[0])
-
-		for j, intrfce := range []string{"A", "B", "C", "D"} {
-			d.index = uint64(i*4 + j)
-			d.id = uint32(j + 1)
-			d.Description = C.GoString(&desc_char[0]) + " " + intrfce
-			d.SerialNumber = C.GoString(&ser_char[0]) + intrfce
-			dl[d.index] = d
+		d := DeviceInfo{
+			handle:       unsafe.Pointer(dev_list.dev),
+			Index:        uint64(i),
+			Manufacturer: C.GoString(&mnf_char[0]),
+			Description:  C.GoString(&desc_char[0]),
+			SerialNumber: C.GoString(&ser_char[0]),
 		}
+		dl[i] = d
 		dev_list = dev_list.next
 	}
 
@@ -87,19 +89,24 @@ type Device struct {
 	lock sync.Mutex
 }
 
-func Open(di DeviceInfo) (d *Device, e error) {
+func Open(di DeviceInfo, pid int) (d *Device, e error) {
 	ctx := C.ftdi_new()
 	if ctx == nil {
 		C.ftdi_free(ctx)
 		return d, errors.New("Failed to create FTDI context")
 	}
 
-	if ret := C.ftdi_set_interface(ctx, di.id); ret != 0 {
+	if ret := C.ftdi_set_interface(ctx, di.Id); ret != 0 {
 		C.ftdi_free(ctx)
 		return d, getErr(ctx)
 	}
 
-	if ret := C.ftdi_usb_open_dev(ctx, (*C.struct_usb_device)(di.handle)); ret != 0 {
+	cstr := C.CString(di.SerialNumber)
+	defer C.free(unsafe.Pointer(cstr))
+
+	log.Printf("%q", di.SerialNumber)
+
+	if ret := C.ftdi_usb_open_desc(ctx, 0x0403, C.int(pid), nil, cstr); ret != 0 {
 		C.ftdi_free(ctx)
 		return d, getErr(ctx)
 	}
@@ -235,12 +242,33 @@ func (d *Device) Reset() (e error) {
 	return nil
 }
 
-func (d *Device) Purge() (e error) {
+type PurgeFlag uint8
+
+const (
+	FT_PURGE_RX   PurgeFlag = 0x01
+	FT_PURGE_TX   PurgeFlag = 0x02
+	FT_PURGE_BOTH PurgeFlag = FT_PURGE_RX | FT_PURGE_TX
+)
+
+func (d *Device) Purge(flags PurgeFlag) (e error) {
 	d.lock.Lock()
 	defer d.lock.Unlock()
-	if ret := C.ftdi_usb_purge_buffers(d.ctx); ret < 0 {
-		return getErr(d.ctx)
+
+	switch flags {
+	case FT_PURGE_RX:
+		if ret := C.ftdi_tciflush(d.ctx); ret < 0 {
+			return getErr(d.ctx)
+		}
+	case FT_PURGE_TX:
+		if ret := C.ftdi_tcoflush(d.ctx); ret < 0 {
+			return getErr(d.ctx)
+		}
+	case FT_PURGE_BOTH:
+		if ret := C.ftdi_tcioflush(d.ctx); ret < 0 {
+			return getErr(d.ctx)
+		}
 	}
+
 	return nil
 }
 

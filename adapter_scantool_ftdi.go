@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -21,17 +22,20 @@ type ScantoolFTDI struct {
 	filter, mask string
 	sendSem      chan struct{}
 
-	port     *ftdi.Device
+	port *ftdi.Device
+
 	devIndex uint64
+	serial   string
 
 	closed bool
 }
 
-func NewScantoolFTDI(name string, idx uint64) func(cfg *AdapterConfig) (Adapter, error) {
+func NewScantoolFTDI(name string, idx uint64, serial string) func(cfg *AdapterConfig) (Adapter, error) {
 	return func(cfg *AdapterConfig) (Adapter, error) {
 		stn := &ScantoolFTDI{
 			BaseAdapter: NewBaseAdapter(name, cfg),
 			devIndex:    idx,
+			serial:      serial,
 			sendSem:     make(chan struct{}, 1),
 			baseName:    strings.TrimPrefix(name, "d2xx "),
 		}
@@ -52,7 +56,7 @@ func (stn *ScantoolFTDI) SetFilter(filters []uint32) error {
 
 func (stn *ScantoolFTDI) Open(ctx context.Context) error {
 	var err error
-	stn.port, err = ftdi.Open(ftdi.DeviceInfo{Index: stn.devIndex})
+	stn.port, err = ftdi.Open(ftdi.DeviceInfo{Index: stn.devIndex, SerialNumber: stn.serial}, 0x6015)
 	if err != nil {
 		return fmt.Errorf("failed to open ftdi device: %w", err)
 	}
@@ -78,6 +82,7 @@ func (stn *ScantoolFTDI) Open(ctx context.Context) error {
 		return stn.port.Purge(ftdi.FT_PURGE_RX)
 	}
 	speedSetter := func(baud int) error {
+		log.Println(baud)
 		return stn.port.SetBaudRate(uint(baud))
 	}
 

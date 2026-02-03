@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	rCANVID = 0xFFFF
+	rCANVID = 0xffff
 	rCANPID = 0x1337
 )
 
@@ -29,7 +29,7 @@ const (
 )
 
 const (
-	rCANMaxCommandSize = 64
+	rCANMaxCommandSize = 512
 )
 
 type RCanDevice struct {
@@ -42,13 +42,15 @@ type RCanDevice struct {
 	in     *gousb.InEndpoint
 	out    *gousb.OutEndpoint
 
+	readStream *gousb.ReadStream
+
 	closeOnce sync.Once
 }
 
 func init() {
 	if err := RegisterAdapter(&AdapterInfo{
 		Name:               "rCAN",
-		Description:        "WinUSB CAN device by roffe.nu",
+		Description:        "CAN device by roffe.nu",
 		RequiresSerialPort: false,
 		Capabilities:       AdapterCapabilities{HSCAN: true},
 		New:                NewrCAN,
@@ -66,6 +68,7 @@ func NewrCAN(cfg *AdapterConfig) (Adapter, error) {
 func (r *RCanDevice) Open(ctx context.Context) error {
 	// --- Discover & bind USB ---
 	ctxUSB := gousb.NewContext()
+	ctxUSB.Debug(3)
 	dev, err := ctxUSB.OpenDeviceWithVIDPID(rCANVID, rCANPID)
 	if err != nil {
 		if dev == nil {
@@ -117,6 +120,13 @@ func (r *RCanDevice) Open(ctx context.Context) error {
 	r.usbCtx, r.dev, r.devCfg = ctxUSB, dev, cfg
 	r.iface, r.in, r.out = iface, in, out
 
+	stream, err := r.in.NewStream(rCANMaxCommandSize, 2) // 2 transfers in flight
+	if err != nil {
+		r.closeUSB()
+		return err
+	}
+	r.readStream = stream
+
 	// Start I/O goroutines after endpoints are ready
 	go r.recvManager(ctx)
 	go r.sendManager(ctx)
@@ -125,8 +135,6 @@ func (r *RCanDevice) Open(ctx context.Context) error {
 		r.closeUSB()
 		return err
 	}
-
-	time.Sleep(50 * time.Millisecond)
 
 	speedBytes := make([]byte, 2)
 	binary.LittleEndian.PutUint16(speedBytes, uint16(r.cfg.CANRate))
@@ -153,12 +161,16 @@ func (r *RCanDevice) Close() error {
 
 func (r *RCanDevice) closeAdapter() error {
 	r.out.Write([]byte{0x03})
-	time.Sleep(150 * time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
 	r.closeUSB()
 	return nil
 }
 
 func (r *RCanDevice) closeUSB() {
+	if r.readStream != nil {
+		r.readStream.Close()
+	}
+
 	if r.iface != nil {
 		r.iface.Close()
 	}
@@ -179,10 +191,8 @@ func (r *RCanDevice) recvManager(ctx context.Context) {
 	}
 
 	const (
-		cmdCAN        = 0x05
-		canHeaderSize = 4
+		canHeaderSize = 3
 		maxDLC        = 8
-		readTimeout   = 100 * time.Millisecond
 	)
 
 	readBuf := make([]byte, rCANMaxCommandSize)
@@ -198,31 +208,24 @@ func (r *RCanDevice) recvManager(ctx context.Context) {
 		default:
 		}
 
-		// Non-blocking read with short timeout
-		rctx, cancel := context.WithTimeout(ctx, readTimeout)
-		n, err := r.in.ReadContext(rctx, readBuf)
-		cancel()
-
+		n, err := r.readStream.ReadContext(ctx, readBuf)
 		if err != nil {
-			r.Fatal(fmt.Errorf("failed to read from rCAN: %w", err))
-			continue
+			r.Fatal(fmt.Errorf("failed to read from usb device: %w", err))
+			return
 		}
 		if n == 0 {
 			continue
 		}
 
 		// Process all bytes from this read
-		for i := 0; i < n; i++ {
-			b := readBuf[i]
-
+		for i := range n {
 			// Prevent buffer overflow
-			if commandBuffPtr >= len(commandBuff) {
+			if commandBuffPtr >= rCANMaxCommandSize {
 				log.Printf("Command buffer overflow, resetting")
 				commandBuffPtr = 0
 				continue
 			}
-
-			commandBuff[commandBuffPtr] = b
+			commandBuff[commandBuffPtr] = readBuf[i]
 			commandBuffPtr++
 
 			// Early exit if we don't have enough data yet
@@ -230,22 +233,20 @@ func (r *RCanDevice) recvManager(ctx context.Context) {
 				continue
 			}
 
-			// Check if we have a full command
-			if commandBuff[0] == cmdCAN {
-				dlc := int(commandBuff[3])
+			switch commandBuff[0] {
+			case 0x05:
+				dlc := int(commandBuff[1] >> 4)
 				// Validate DLC
 				if dlc > maxDLC {
 					log.Printf("Invalid DLC: %d, resetting buffer", dlc)
 					commandBuffPtr = 0
 					continue
 				}
-
 				if commandBuffPtr == canHeaderSize+dlc {
-					// Full command received
 					r.processCommand(commandBuff[:commandBuffPtr])
 					commandBuffPtr = 0
 				}
-			} else {
+			default:
 				// Unknown command - shift buffer
 				log.Printf("Unknown command received: 0x%02X", commandBuff[0])
 				commandBuffPtr--
@@ -257,13 +258,21 @@ func (r *RCanDevice) recvManager(ctx context.Context) {
 	}
 }
 
-func (r *RCanDevice) recvManager23(ctx context.Context) {
+func (r *RCanDevice) recvManager2(ctx context.Context) {
 	if r.cfg.Debug {
 		defer log.Println("recvManager exited")
 	}
+
+	const (
+		cmdCAN        = 0x05
+		canHeaderSize = 3
+		maxDLC        = 8
+	)
+
 	readBuf := make([]byte, rCANMaxCommandSize)
 	commandBuff := make([]byte, rCANMaxCommandSize)
 	var commandBuffPtr int
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -271,45 +280,55 @@ func (r *RCanDevice) recvManager23(ctx context.Context) {
 		case <-r.closeChan:
 			return
 		default:
-			rctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
-			n, err := r.in.ReadContext(rctx, readBuf)
-			cancel()
-			if err != nil {
-				//r.Error(fmt.Errorf("failed to read from rCAN: %w", err))
-				r.Fatal(fmt.Errorf("failed to read from rCAN: %w", err))
+		}
+
+		n, err := r.in.Read(readBuf)
+
+		if err != nil {
+			log.Println(err)
+			r.Fatal(fmt.Errorf("failed to read from usb device: %w", err))
+			return
+		}
+		if n == 0 {
+			log.Println(0)
+			continue
+		}
+
+		// Process all bytes from this read
+		for i := range n {
+			// Prevent buffer overflow
+			if commandBuffPtr >= rCANMaxCommandSize {
+				log.Printf("Command buffer overflow, resetting")
+				commandBuffPtr = 0
 				continue
 			}
-			if n == 0 {
+			commandBuff[commandBuffPtr] = readBuf[i]
+			commandBuffPtr++
+
+			// Early exit if we don't have enough data yet
+			if commandBuffPtr < canHeaderSize {
 				continue
 			}
 
-			for _, b := range readBuf[:n] {
-				commandBuff[commandBuffPtr] = b
-				commandBuffPtr++
-				// Check if we have a full command
-				switch commandBuff[0] {
-				case 0x05: // CAN frame
-					// byte 0: command (0x05)
-					// byte 1: ID high
-					// byte 2: ID low
-					// byte 3: DLC
-					// byte 4-11: data
-					if commandBuffPtr >= 4 {
-						dlc := int(commandBuff[3])
-						if commandBuffPtr == 4+dlc {
-							// Full command received
-							r.processCommand(commandBuff[:commandBuffPtr])
-							commandBuffPtr = 0
-						}
-					}
-				default:
-					//r.Error(fmt.Errorf("unknown command received: % 02X", commandBuff[0]))
-					log.Printf("Unknown command received: % 02X\n", commandBuff[0])
-					//commandBuffPtr = 0
-					// shift commandBuff left by one
-					copy(commandBuff, commandBuff[1:commandBuffPtr])
-					commandBuffPtr--
-					commandBuff = append(commandBuff, []byte{0x00}...)
+			switch commandBuff[0] {
+			case cmdCAN:
+				dlc := int((commandBuff[1] & 0xF0) >> 4)
+				// Validate DLC
+				if dlc > maxDLC {
+					log.Printf("Invalid DLC: %d, resetting buffer", dlc)
+					commandBuffPtr = 0
+					continue
+				}
+				if commandBuffPtr == canHeaderSize+dlc {
+					r.processCommand(commandBuff[:commandBuffPtr])
+					commandBuffPtr = 0
+				}
+			default:
+				// Unknown command - shift buffer
+				log.Printf("Unknown command received: 0x%02X", commandBuff[0])
+				commandBuffPtr--
+				if commandBuffPtr > 0 {
+					copy(commandBuff[0:], commandBuff[1:commandBuffPtr+1])
 				}
 			}
 		}
@@ -319,14 +338,17 @@ func (r *RCanDevice) recvManager23(ctx context.Context) {
 func (r *RCanDevice) processCommand(commandBuff []byte) {
 	switch commandBuff[0] {
 	case 0x05: // CAN frame
-		id := binary.LittleEndian.Uint16([]byte{commandBuff[2], commandBuff[1]})
-		dlc := int(commandBuff[3])
+		id := binary.LittleEndian.Uint16([]byte{commandBuff[2], commandBuff[1] & 0x0F})
+		dlc := int(commandBuff[1] & 0xF0 >> 4)
 		data := make([]byte, dlc)
-		copy(data, commandBuff[4:4+dlc])
+		copy(data, commandBuff[3:3+dlc])
 		frame := &CANFrame{
 			Identifier: uint32(id),
 			Extended:   false,
 			Data:       data,
+		}
+		if r.cfg.Debug {
+			log.Println(frame.String())
 		}
 		select {
 		case r.recvChan <- frame:

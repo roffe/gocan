@@ -33,7 +33,7 @@ type Spi struct {
 func InitializeSpi(d *Device) (s *Spi, e error) {
 	s = &Spi{d, 0x0B, 0x08}
 	d.Reset()
-	d.Purge(FT_PURGE_RX | FT_PURGE_TX)
+	d.Purge(FT_PURGE_BOTH)
 	d.SetTransferSize(CHUNK_SIZE, CHUNK_SIZE)
 	d.SetChars(0, 0)
 	//d.SetTimeouts(1000)
