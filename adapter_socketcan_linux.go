@@ -142,7 +142,7 @@ func (a *SocketCAN) sendManager(ctx context.Context) {
 			copy(data[:], f.Data)
 			frame.Data = data
 			if err := a.tx.TransmitFrame(ctx, frame); err != nil {
-				a.Error(fmt.Errorf("send error: " + err.Error()))
+				a.Error(fmt.Errorf("send error: %w", err))
 			}
 			//workaround, delay to prevent can flasher fail
 			time.Sleep(time.Millisecond)
