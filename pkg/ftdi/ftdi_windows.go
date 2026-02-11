@@ -175,7 +175,7 @@ func GetDeviceList() (di []DeviceInfo, e error) {
 	return di, nil
 }
 
-func Open(di DeviceInfo) (*Device, error) {
+func Open(di DeviceInfo, _ int) (*Device, error) {
 	var dev Device
 	r, _, _ := ftOpen.Call(uintptr(di.Index), uintptr(unsafe.Pointer(&dev)))
 	if r != FT_OK {
