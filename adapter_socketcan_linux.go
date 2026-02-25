@@ -8,7 +8,6 @@ import (
 	"net"
 	"runtime"
 	"strings"
-	"time"
 
 	"go.einride.tech/can"
 	"go.einride.tech/can/pkg/candevice"
@@ -144,8 +143,6 @@ func (a *SocketCAN) sendManager(ctx context.Context) {
 			if err := a.tx.TransmitFrame(ctx, frame); err != nil {
 				a.Error(fmt.Errorf("send error: %w", err))
 			}
-			//workaround, delay to prevent can flasher fail
-			time.Sleep(time.Millisecond)
 		}
 	}
 }
