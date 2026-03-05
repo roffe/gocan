@@ -67,10 +67,11 @@ func (a *Drewtech) Open(ctx context.Context) error {
 		return fmt.Errorf("PassThruConnect failed: %w", err)
 	}
 
-	// Start pass-all filter
-	log.Println("Starting filter...")
-	if err := dev.PassThruStartMsgFilter(); err != nil {
-		return fmt.Errorf("PassThruStartMsgFilter failed: %w", err)
+	if len(a.cfg.CANFilter) > 0 {
+		err := a.SetFilter(a.cfg.CANFilter)
+		if err != nil {
+			return err
+		}
 	}
 
 	go a.sendManager(ctx)
@@ -79,6 +80,15 @@ func (a *Drewtech) Open(ctx context.Context) error {
 }
 
 func (a *Drewtech) SetFilter(filters []uint32) error {
+	a.dev.filterID = make([]uint32, len(filters))
+	log.Println("Starting filter...")
+	for i, filter := range filters {
+		id, err := a.dev.PassThruStartMsgFilter(filter, 0xffffffff)
+		if err != nil {
+			return fmt.Errorf("PassThruStartMsgFilter failed: %w", err)
+		}
+		a.dev.filterID[i] = id
+	}
 	return nil
 }
 
@@ -87,8 +97,10 @@ func (a *Drewtech) Close() error {
 	a.BaseAdapter.Close()
 	if a.dev != nil {
 		// Stop filter
-		if err := a.dev.PassThruStopMsgFilter(); err != nil {
-			log.Printf("StopMsgFilter: %v", err)
+		for i := range a.dev.filterID {
+			if err := a.dev.PassThruStopMsgFilter(a.dev.filterID[i]); err != nil {
+				log.Printf("StopMsgFilter: %v", err)
+			}
 		}
 
 		// Small delay to process remaining frames
@@ -211,11 +223,11 @@ func (p *Packet) Sequence() uint16 {
 }
 
 func (p *Packet) IsCANRx() bool {
-	return p.Length == 0x24 && len(p.Payload) >= 1 && p.Payload[0] == SubCmdCANRx
+	return (p.Length >= 0x1b && p.Length < 0x25) && len(p.Payload) >= 1 && p.Payload[0] == SubCmdCANRx
 }
 
 func (p *Packet) ParseCANFrame() (*CANFrame, error) {
-	if len(p.Payload) < 28 {
+	if len(p.Payload) < 26 {
 		return nil, fmt.Errorf("payload too short")
 	}
 	dataLen := int(binary.LittleEndian.Uint16(p.Payload[18:20]))
@@ -227,7 +239,7 @@ func (p *Packet) ParseCANFrame() (*CANFrame, error) {
 		dlc = 8
 	}
 	data := make([]byte, 8)
-	copy(data, p.Payload[24:32])
+	copy(data, p.Payload[24:len(p.Payload)])
 	return &CANFrame{
 		//Timestamp:  binary.LittleEndian.Uint32(p.Payload[12:16]),
 		Identifier: binary.BigEndian.Uint32(p.Payload[20:24]),
@@ -316,7 +328,7 @@ type Device struct {
 
 	seq      uint32
 	channel  uint8
-	filterID uint32
+	filterID []uint32
 
 	// Async handling
 	running atomic.Bool
@@ -705,33 +717,35 @@ func (d *Device) PassThruConnect(baudRate uint32) error {
 }
 
 // PassThruStartMsgFilter starts a pass-all filter
-func (d *Device) PassThruStartMsgFilter() error {
+func (d *Device) PassThruStartMsgFilter(patern, mask uint32) (uint32, error) {
 	payload := make([]byte, 24)
 	payload[0] = SubCmdStartMsgFilter
 	payload[1] = FlagRequestFinal
 	binary.LittleEndian.PutUint16(payload[2:4], d.nextSeq())
-	payload[14] = 0x01 // filter type
-	payload[15] = 0x04 // flags
+	payload[14] = 0x01                                 // filter type
+	payload[15] = 0x04                                 // flags
+	binary.BigEndian.PutUint32(payload[16:20], mask)   //mask
+	binary.BigEndian.PutUint32(payload[20:24], patern) //pattern
 
 	pkt := &Packet{Length: 0x1C, Direction: DirectionOut, Channel: d.channel, Payload: payload}
 	resp, err := d.sendAndWait(pkt, 2*time.Second)
 	if err != nil {
-		return err
+		return 0, err
 	}
-
+	var filterID = uint32(0)
 	if len(resp.Payload) >= 16 {
-		d.filterID = binary.LittleEndian.Uint32(resp.Payload[12:16])
+		filterID = binary.LittleEndian.Uint32(resp.Payload[12:16])
 	}
-	return nil
+	return filterID, nil
 }
 
 // PassThruStopMsgFilter stops the current filter
-func (d *Device) PassThruStopMsgFilter() error {
+func (d *Device) PassThruStopMsgFilter(filterID uint32) error {
 	payload := make([]byte, 12)
 	payload[0] = SubCmdStopMsgFilter
 	payload[1] = FlagRequestFinal
 	binary.LittleEndian.PutUint16(payload[2:4], d.nextSeq())
-	binary.LittleEndian.PutUint16(payload[6:8], uint16(d.filterID&0xFFFF))
+	binary.LittleEndian.PutUint16(payload[6:8], uint16(filterID&0xFFFF))
 
 	pkt := &Packet{Length: 0x10, Direction: DirectionOut, Channel: d.channel, Payload: payload}
 	_, err := d.sendAndWait(pkt, 2*time.Second)
