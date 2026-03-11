@@ -26,6 +26,12 @@ type Client struct {
 }
 
 const (
+	AccessLevel01 = 0x01
+	AccessLevelFB = 0xFB
+	AccessLevelFD = 0xFD
+)
+
+const (
 	TRANSFER_DATA                  = 0x36
 	DEVICE_CONTROL                 = 0xAE
 	DISABLE_NORMAL_COMMUNICATION   = 0x28
@@ -109,6 +115,12 @@ func (cl *Client) ClearDiagnosticInformation(ctx context.Context, id uint32) err
 		FrameType:  gocan.ResponseRequired,
 	}
 	resp, err := cl.c.SendAndWait(ctx, frame, cl.defaultTimeout, cl.recvID...)
+	if err != nil {
+		return fmt.Errorf("ClearDiagnosticInformation[1]: %w", err)
+	}
+	if resp.Data[1] == 0x7F && resp.Data[2] == 0x04 && resp.Data[3] == 0x78 {
+		resp, err = cl.c.Recv(ctx, time.Second*5, cl.recvID...)
+	}
 	if err != nil {
 		return fmt.Errorf("ClearDiagnosticInformation[1]: %w", err)
 	}
@@ -780,6 +792,14 @@ func (cl *Client) WriteDataByIdentifier(ctx context.Context, pid byte, data []by
 	if err != nil {
 		return fmt.Errorf("WriteDataByIdentifier: %w", err)
 	}
+	// Responce not ready!
+	if resp.Data[1] == 0x7F && resp.Data[2] == WRITE_DATA_BY_IDENTIFIER && resp.Data[3] == 0x78 {
+		resp, err = cl.c.Recv(ctx, time.Second*5, cl.recvID...)
+	}
+	if err != nil {
+		return fmt.Errorf("WriteDataByIdentifier: %w", err)
+	}
+
 	if err := CheckErr(resp); err != nil {
 		//		log.Println(frame.String())
 		//		log.Println(resp.String())
