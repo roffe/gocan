@@ -1,6 +1,6 @@
 module github.com/roffe/gocan
 
-go 1.25.5
+go 1.26.0
 
 require (
 	github.com/albenik/bcd v0.0.0-20170831201648-635201416bc7
