@@ -5,10 +5,10 @@ go 1.26.0
 require (
 	github.com/albenik/bcd v0.0.0-20170831201648-635201416bc7
 	github.com/bendikro/dl v0.0.0-20190410215913-e41fdb9069d4
-	github.com/fatih/color v1.18.0
+	github.com/fatih/color v1.19.0
 	github.com/google/gousb v1.1.3
 	go.bug.st/serial v1.6.4
-	golang.org/x/sync v0.17.0
+	golang.org/x/sync v0.20.0
 	google.golang.org/grpc v1.76.0
 	google.golang.org/protobuf v1.36.10
 )
@@ -34,7 +34,7 @@ require (
 	github.com/golang/mock v1.6.0 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/josharian/native v1.1.0 // indirect
-	github.com/mattn/go-isatty v0.0.20 // indirect
+	github.com/mattn/go-isatty v0.0.22 // indirect
 	github.com/mdlayher/netlink v1.7.2 // indirect
 	github.com/mdlayher/socket v0.5.1 // indirect
 	golang.org/x/mod v0.25.0
@@ -44,7 +44,7 @@ require (
 
 require (
 	github.com/creack/goselect v0.1.2 // indirect
-	golang.org/x/sys v0.34.0
+	golang.org/x/sys v0.44.0
 )
 
 replace go.einride.tech/can => github.com/samuelbrian/can-go v0.0.2

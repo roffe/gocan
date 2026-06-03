@@ -1,0 +1,255 @@
+//go:build canlib
+
+package gocan
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log"
+	"strings"
+	"sync"
+
+	"github.com/roffe/gocan/pkg/canlib"
+)
+
+const (
+	defaultReadTimeoutMs  = 20
+	defaultWriteTimeoutMs = defaultReadTimeoutMs
+)
+
+func init() {
+	if err := canlib.Init(); err != nil {
+		log.Println("Kvaser driver not loaded:", err)
+		return
+	}
+	channels, err := canlib.GetNumberOfChannels()
+	if err == nil {
+		for channel := range channels {
+			devDescr, err := canlib.GetChannelDataString(channel, canlib.CHANNELDATA_DEVDESCR_ASCII)
+			if err != nil {
+				panic(err)
+			}
+			if strings.HasPrefix(devDescr, "Kvaser Virtual") {
+				continue
+			}
+			name := fmt.Sprintf("CANlib #%d %v", channel, devDescr)
+			if err := RegisterAdapter(&AdapterInfo{
+				Name:               name,
+				Description:        "Canlib driver for Kvaser devices",
+				RequiresSerialPort: false,
+				Capabilities: AdapterCapabilities{
+					HSCAN: true,
+					KLine: false,
+					SWCAN: false,
+				},
+				New: NewCANlib(channel, name),
+			}); err != nil {
+				panic(err)
+			}
+		}
+	}
+}
+
+var _ Adapter = (*CANlib)(nil)
+
+type CANlib struct {
+	*BaseAdapter
+	channel      int
+	readHandle   canlib.Handle
+	writeHandle  canlib.Handle
+	timeoutRead  uint32
+	timeoutWrite uint32
+	closeOnce    sync.Once
+}
+
+func NewCANlib(channel int, name string) func(cfg *AdapterConfig) (Adapter, error) {
+	return func(cfg *AdapterConfig) (Adapter, error) {
+		return &CANlib{
+			channel:      channel,
+			BaseAdapter:  NewBaseAdapter(name, cfg),
+			timeoutRead:  defaultReadTimeoutMs,
+			timeoutWrite: defaultWriteTimeoutMs,
+		}, nil
+	}
+}
+
+func (k *CANlib) Open(ctx context.Context) error {
+	if k.cfg.PrintVersion {
+		k.Info("CANlib v" + canlib.GetVersion())
+	}
+
+	if err := k.openChannels(); err != nil {
+		return err
+	}
+
+	if err := k.setSpeed(k.cfg.CANRate); err != nil {
+		err1 := k.readHandle.Close()
+		err2 := k.writeHandle.Close()
+		return fmt.Errorf("setSpeed: %v, RH: %v WH: %v", err, err1, err2)
+	}
+
+	go k.recvManager(ctx)
+	go k.sendManager(ctx)
+
+	if err := k.readHandle.BusOn(); err != nil {
+		return err
+	}
+
+	return k.writeHandle.BusOn()
+}
+
+func (k *CANlib) SetFilter(filters []uint32) error {
+	return nil
+}
+
+func (k *CANlib) Close() error {
+	k.BaseAdapter.Close()
+	k.closeOnce.Do(func() {
+		if err := k.readHandle.BusOff(); err != nil {
+			log.Println("CANlib.BusOff() off error:", err)
+		}
+		if err := k.writeHandle.BusOff(); err != nil {
+			log.Println("CANlib.BusOff() off error:", err)
+		}
+		if err := k.readHandle.FlushReceiveQueue(); err != nil {
+			log.Println("CANlib.FlushReceiveQueue() flush error:", err)
+		}
+		if err := k.writeHandle.FlushReceiveQueue(); err != nil {
+			log.Println("CANlib.FlushReceiveQueue() flush error:", err)
+		}
+		if err := k.readHandle.FlushTransmitQueue(); err != nil {
+			log.Println("CANlib.FlushTransmitQueue() flush error:", err)
+		}
+		if err := k.writeHandle.FlushTransmitQueue(); err != nil {
+			log.Println("CANlib.FlushTransmitQueue() flush error:", err)
+		}
+		if err := k.readHandle.Close(); err != nil {
+			log.Println("CANlib.Close() close error:", err)
+		}
+		if err := k.writeHandle.Close(); err != nil {
+			log.Println("CANlib.Close() close error:", err)
+		}
+	})
+	return nil
+}
+
+func (k *CANlib) openChannels() (err error) {
+	k.readHandle, err = canlib.OpenChannel(k.channel, canlib.OPEN_REQUIRE_INIT_ACCESS)
+	if err != nil {
+		return fmt.Errorf("OpenChannel error: %v", err)
+	}
+	k.writeHandle, err = canlib.OpenChannel(k.channel, canlib.OPEN_NO_INIT_ACCESS)
+	if err != nil {
+		k.readHandle.Close()
+		return fmt.Errorf("OpenChannel error: %v", err)
+	}
+	return
+}
+
+func (k *CANlib) setSpeed(CANRate float64) error {
+	var freq canlib.BusParamsFreq
+
+	log.Println(CANRate)
+
+	switch CANRate {
+
+	case 1000:
+		freq = canlib.BITRATE_1M
+	case 615.384:
+		// err := k.writeHandle.SetBusParams(615384, 0x40, 0x37, 0, 0, 0)
+		err := k.readHandle.SetBusParamsC200(0x40, 0x37)
+		if err != nil {
+			return err
+		}
+		return k.writeHandle.SetBusParamsC200(0x40, 0x37)
+
+	case 500:
+		freq = canlib.BITRATE_500K
+	case 250:
+		freq = canlib.BITRATE_250K
+	case 125:
+		freq = canlib.BITRATE_125K
+	case 100:
+		freq = canlib.BITRATE_100K
+	case 83:
+		freq = canlib.BITRATE_83K
+	case 62:
+		freq = canlib.BITRATE_62K
+	case 50:
+		freq = canlib.BITRATE_50K
+	case 10:
+		freq = canlib.BITRATE_10K
+	default:
+		if err := k.readHandle.SetBitrate(int(k.cfg.CANRate * 1000)); err != nil {
+			return err
+		}
+		return k.writeHandle.SetBitrate(int(k.cfg.CANRate * 1000))
+	}
+	if err := k.readHandle.SetBusParams(freq, 0, 0, 0, 0, 0); err != nil {
+		return err
+	}
+	return k.writeHandle.SetBusParams(freq, 0, 0, 0, 0, 0)
+}
+
+func (k *CANlib) sendManager(ctx context.Context) {
+	if k.cfg.Debug {
+		defer log.Println("kvaser sendManager exited")
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-k.closeChan:
+			return
+		case msg := <-k.sendChan:
+			if msg.Identifier >= SystemMsg {
+				continue
+			}
+			if err := k.writeHandle.WriteWait(msg.Identifier, msg.Data, canlib.MSG_STD, k.timeoutWrite); err != nil {
+				k.Error(fmt.Errorf("Send: %w", err))
+			}
+		}
+	}
+}
+
+func (k *CANlib) recvManager(ctx context.Context) {
+	if k.cfg.Debug {
+		defer log.Println("kvaser recvManager exited")
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-k.closeChan:
+			return
+		default:
+		}
+		msg, err := k.readHandle.ReadWait(k.timeoutRead)
+		if err != nil {
+			if err == canlib.ErrNoMsg || err == canlib.ErrTimeout {
+				continue
+			}
+			k.Error(fmt.Errorf("recv error: %w", err))
+			continue
+		}
+		if err := k.recvMessage(msg); err != nil {
+			k.Error(err)
+		}
+	}
+}
+
+func (k *CANlib) recvMessage(msg *canlib.CANMessage) error {
+	if len(msg.Data) < int(msg.DLC) {
+		return errors.New("recvManager invalid data length")
+	}
+	frame := NewFrame(uint32(msg.Identifier), msg.Data[:msg.DLC], Incoming)
+	frame.Extended = msg.Flags&uint32(canlib.MSG_EXT) != 0
+	frame.RTR = msg.Flags&uint32(canlib.MSG_RTR) != 0
+	select {
+	case k.recvChan <- frame:
+		return nil
+	default:
+		return errors.New("recvManager dropped frame")
+	}
+}
