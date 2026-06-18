@@ -1,7 +1,6 @@
 package gocan
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -69,9 +68,8 @@ func (c *GWClient) Open(gctx context.Context) error {
 		return fmt.Errorf("error receiving init response: %w", err)
 	}
 
-	if !bytes.Equal(initResp.Data, []byte("OK")) {
-		log.Printf("init response: %X", initResp.Data)
-		return fmt.Errorf("unexpected init response: %s", string(initResp.Data))
+	if ev := initResp.GetEvent(); ev == nil || ev.GetMessage() != "OK" {
+		return fmt.Errorf("unexpected init response: %v", initResp)
 	}
 
 	go c.sendManager(ctx, stream)
@@ -80,7 +78,7 @@ func (c *GWClient) Open(gctx context.Context) error {
 	return nil
 }
 
-func (c *GWClient) sendManager(ctx context.Context, stream grpc.BidiStreamingClient[proto.CANFrame, proto.CANFrame]) {
+func (c *GWClient) sendManager(ctx context.Context, stream grpc.BidiStreamingClient[proto.CANFrame, proto.StreamMessage]) {
 	if c.cfg.Debug {
 		log.Println("sendManager started")
 		defer log.Println("sendManager done")
@@ -100,22 +98,16 @@ func (c *GWClient) sendManager(ctx context.Context, stream grpc.BidiStreamingCli
 	}
 }
 
-func (c *GWClient) sendMessage(stream grpc.BidiStreamingClient[proto.CANFrame, proto.CANFrame], msg *CANFrame) error {
-	var id uint32 = msg.Identifier
-	typ := proto.CANFrameTypeEnum(msg.FrameType.Type)
-	resps := uint32(msg.FrameType.Responses)
-	frame := &proto.CANFrame{
-		Id:   &id,
-		Data: msg.Data,
-		FrameType: &proto.CANFrameType{
-			FrameType: &typ,
-			Responses: &resps,
-		},
-	}
-	return stream.Send(frame)
+func (c *GWClient) sendMessage(stream grpc.BidiStreamingClient[proto.CANFrame, proto.StreamMessage], msg *CANFrame) error {
+	return stream.Send(&proto.CANFrame{
+		Id:        msg.Identifier,
+		Data:      msg.Data,
+		FrameType: proto.CANFrameTypeEnum(msg.FrameType.Type),
+		Responses: uint32(msg.FrameType.Responses),
+	})
 }
 
-func (c *GWClient) recvManager(_ context.Context, stream grpc.BidiStreamingClient[proto.CANFrame, proto.CANFrame]) {
+func (c *GWClient) recvManager(_ context.Context, stream grpc.BidiStreamingClient[proto.CANFrame, proto.StreamMessage]) {
 	for {
 		in, err := stream.Recv()
 		if err != nil {
@@ -124,14 +116,6 @@ func (c *GWClient) recvManager(_ context.Context, stream grpc.BidiStreamingClien
 				case codes.Canceled:
 					log.Println("client recv canceled")
 					return
-					//case codes.PermissionDenied:
-					//	fmt.Println(e.Message()) // this will print PERMISSION_DENIED_TEST
-					//case codes.Internal:
-					//	fmt.Println("Has Internal Error")
-					//case codes.Aborted:
-					//	fmt.Println("gRPC Aborted the call")
-					//default:
-					//	log.Println(e.Code(), e.Message())
 				}
 			}
 
@@ -139,27 +123,36 @@ func (c *GWClient) recvManager(_ context.Context, stream grpc.BidiStreamingClien
 			return
 		}
 
-		c.recvMessage(in.GetId(), in.GetData())
+		switch p := in.GetPayload().(type) {
+		case *proto.StreamMessage_Frame:
+			c.deliverFrame(p.Frame)
+		case *proto.StreamMessage_Event:
+			c.deliverEvent(p.Event)
+		}
 	}
 }
 
-func (c *GWClient) recvMessage(identifier uint32, data []byte) {
-	switch identifier {
-	case SystemMsg:
-		c.Info(string(data))
-		return
-	case SystemMsgError:
-		c.sendEvent(EventTypeError, string(data))
-		return
-	case SystemMsgUnrecoverableError:
-		c.Fatal(errors.New(string(data)))
-		return
-	}
-	frame := NewFrame(identifier, data, Incoming)
+func (c *GWClient) deliverFrame(f *proto.CANFrame) {
+	frame := NewFrame(f.GetId(), f.GetData(), Incoming)
 	select {
 	case c.recvChan <- frame:
 	default:
 		c.Error(ErrDroppedFrame)
+	}
+}
+
+func (c *GWClient) deliverEvent(e *proto.Event) {
+	switch e.GetLevel() {
+	case proto.EventLevel_EVENT_FATAL:
+		c.Fatal(errors.New(e.GetMessage()))
+	case proto.EventLevel_EVENT_ERROR:
+		c.sendEvent(EventTypeError, e.GetMessage())
+	case proto.EventLevel_EVENT_WARN:
+		c.Warn(e.GetMessage())
+	case proto.EventLevel_EVENT_DEBUG:
+		c.Debug(e.GetMessage())
+	default: // EVENT_INFO
+		c.Info(e.GetMessage())
 	}
 }
 

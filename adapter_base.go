@@ -64,13 +64,7 @@ func (base *BaseAdapter) Event() <-chan Event {
 
 func (base *BaseAdapter) Close() {
 	base.closeOnce.Do(func() {
-		//log.Println("close baseAdapter")
 		close(base.closeChan)
-		select {
-		case base.errChan <- nil:
-		default:
-			log.Println("failed to send <nil> to errchan")
-		}
 	})
 }
 
@@ -90,23 +84,29 @@ func (base *BaseAdapter) Fatal(err error) {
 	})
 }
 
-func (base *BaseAdapter) sendEvent(eventType EventType, details string) {
+// emit delivers an event to the event channel without blocking. The channel is
+// buffered; if it is full the event is dropped (and logged) rather than
+// stalling the adapter. Fatal failures use Fatal/errChan and are never dropped.
+func (base *BaseAdapter) emit(ev Event) {
 	select {
-	case base.evtChan <- Event{Type: eventType, Details: details}:
+	case base.evtChan <- ev:
 	default:
-		_, file, no, ok := runtime.Caller(1)
+		_, file, no, ok := runtime.Caller(2)
 		if ok {
-			log.Printf("%s#%d event channel full: %s\n", filepath.Base(file), no, details)
+			log.Printf("%s#%d event channel full: %s\n", filepath.Base(file), no, ev.Details)
 		} else {
-			log.Printf("event channel full: %s", details)
+			log.Printf("event channel full: %s", ev.Details)
 		}
 	}
+}
 
+func (base *BaseAdapter) sendEvent(eventType EventType, details string) {
+	base.emit(Event{Type: eventType, Details: details})
 }
 
 // Send an error event
 func (base *BaseAdapter) Error(err error) {
-	base.sendEvent(EventTypeError, err.Error())
+	base.emit(Event{Type: EventTypeError, Details: err.Error(), Err: err})
 }
 
 // Send a warning event

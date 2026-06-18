@@ -29,6 +29,11 @@ func (s *Subscriber) wait(ctx context.Context) (*CANFrame, error) {
 	select {
 	case <-ctx.Done():
 		return nil, fmt.Errorf("timeout: %w", ctx.Err())
+	case <-s.cl.ctx.Done():
+		if err := s.cl.Err(); err != nil {
+			return nil, err
+		}
+		return nil, ErrClosed
 	case frame, ok := <-s.responseChan:
 		if !ok {
 			return nil, ErrResponsechannelClosed

@@ -15,8 +15,6 @@ type handler struct {
 	submap     map[uint32]map[*Subscriber]struct{}
 	globalSubs []*Subscriber
 
-	onEvent func(Event)
-
 	mu sync.Mutex
 }
 
@@ -73,21 +71,12 @@ func (h *handler) unregisterSub(sub *Subscriber) {
 
 func (h *handler) run(ctx context.Context) {
 	recvChan := h.adapter.Recv()
-	eventChan := h.adapter.Event()
 	for {
 		select {
 		case <-h.closeCh:
 			return
 		case <-ctx.Done():
 			return
-		case evt, ok := <-eventChan:
-			if !ok {
-				log.Println("event channel closed")
-				return
-			}
-			if h.onEvent != nil {
-				go h.onEvent(evt)
-			}
 		case frame, ok := <-recvChan:
 			if !ok {
 				log.Println("incoming channel closed")
@@ -123,11 +112,4 @@ func (h *handler) close() {
 	h.closeOnce.Do(func() {
 		close(h.closeCh)
 	})
-}
-
-// Set a function to be called on events
-func (h *handler) setOnEvent(fn func(Event)) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.onEvent = fn
 }
