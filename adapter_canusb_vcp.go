@@ -48,7 +48,7 @@ func init() {
 			KLine: false,
 			SWCAN: true,
 		},
-		New: NewCanusb,
+		New: NewCanusbVCP,
 	}); err != nil {
 		panic(err)
 	}
@@ -64,7 +64,7 @@ type CanusbVCP struct {
 	sendSem chan struct{} // one outstanding command at a time (manual §1.4/1.5)
 }
 
-func NewCanusb(cfg *AdapterConfig) (Adapter, error) {
+func NewCanusbVCP(cfg *AdapterConfig) (Adapter, error) {
 	rate, err := canusbBitRate(cfg.CANRate)
 	if err != nil {
 		return nil, err
@@ -175,7 +175,7 @@ func (cu *CanusbVCP) SetFilter(filters []uint32) error {
 	return nil
 }
 
-func (cu *Canusb) recvManager(ctx context.Context) {
+func (cu *CanusbVCP) recvManager(ctx context.Context) {
 	read := make([]byte, 64)
 	for {
 		select {
