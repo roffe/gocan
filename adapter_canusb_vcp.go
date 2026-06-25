@@ -54,7 +54,7 @@ func init() {
 	}
 }
 
-type Canusb struct {
+type CanusbVCP struct {
 	*BaseAdapter
 	port    serial.Port
 	canRate string // S/s command for the configured bit-rate
@@ -70,7 +70,7 @@ func NewCanusb(cfg *AdapterConfig) (Adapter, error) {
 		return nil, err
 	}
 	code, mask := canusbAcceptanceFilters(cfg.CANFilter)
-	return &Canusb{
+	return &CanusbVCP{
 		BaseAdapter: NewBaseAdapter("CANUSB", cfg),
 		canRate:     rate,
 		code:        code,
@@ -113,7 +113,7 @@ func canusbBitRate(rate float64) (string, error) {
 	}
 }
 
-func (cu *Canusb) Open(ctx context.Context) error {
+func (cu *CanusbVCP) Open(ctx context.Context) error {
 	p, err := serial.Open(cu.cfg.Port, &serial.Mode{
 		BaudRate: cu.cfg.PortBaudrate,
 		Parity:   serial.NoParity,
@@ -146,7 +146,7 @@ func (cu *Canusb) Open(ctx context.Context) error {
 	return nil
 }
 
-func (cu *Canusb) Close() error {
+func (cu *CanusbVCP) Close() error {
 	cu.BaseAdapter.Close()
 	if cu.port == nil {
 		return nil
@@ -167,7 +167,7 @@ func (cu *Canusb) Close() error {
 
 // SetFilter reconfigures the SJA1000 acceptance filter at runtime. The channel
 // must be closed to set M/m, so we bounce C -> M -> m -> O.
-func (cu *Canusb) SetFilter(filters []uint32) error {
+func (cu *CanusbVCP) SetFilter(filters []uint32) error {
 	code, mask := canusbAcceptanceFilters(filters)
 	for _, c := range []string{"C", code, mask, "O"} {
 		cu.sendChan <- &CANFrame{Identifier: SystemMsg, Data: []byte(c)}
@@ -200,7 +200,7 @@ func (cu *Canusb) recvManager(ctx context.Context) {
 }
 
 // parse accumulates bytes into CR-terminated lines and dispatches them.
-func (cu *Canusb) parse(data []byte) {
+func (cu *CanusbVCP) parse(data []byte) {
 	for _, b := range data {
 		switch b {
 		case bell: // command error: release the send semaphore
@@ -217,7 +217,7 @@ func (cu *Canusb) parse(data []byte) {
 	}
 }
 
-func (cu *Canusb) dispatch(line []byte) {
+func (cu *CanusbVCP) dispatch(line []byte) {
 	if cu.cfg.Debug {
 		cu.Debug("<< " + string(line))
 	}
@@ -247,7 +247,7 @@ func (cu *Canusb) dispatch(line []byte) {
 }
 
 // ack releases one slot of the send semaphore (non-blocking).
-func (cu *Canusb) ack() {
+func (cu *CanusbVCP) ack() {
 	select {
 	case <-cu.sendSem:
 	default:
@@ -258,7 +258,7 @@ func (cu *Canusb) ack() {
 //
 //	standard: t iii l dd..   (id 3 hex, dlc 1, data dlc*2 hex)
 //	extended: T iiiiiiii l dd..
-func (cu *Canusb) emitFrame(line []byte, extended bool) {
+func (cu *CanusbVCP) emitFrame(line []byte, extended bool) {
 	idLen := 3
 	if extended {
 		idLen = 8
@@ -304,7 +304,7 @@ func (cu *Canusb) emitFrame(line []byte, extended bool) {
 	}
 }
 
-func (cu *Canusb) sendManager(ctx context.Context) {
+func (cu *CanusbVCP) sendManager(ctx context.Context) {
 	ticker := time.NewTicker(time.Second) // poll status (manual §1.5: 500-1000ms)
 	defer ticker.Stop()
 	for {
@@ -331,7 +331,7 @@ func (cu *Canusb) sendManager(ctx context.Context) {
 	}
 }
 
-func (cu *Canusb) write(b []byte) {
+func (cu *CanusbVCP) write(b []byte) {
 	if cu.cfg.Debug {
 		cu.Debug(">> " + string(b))
 	}
