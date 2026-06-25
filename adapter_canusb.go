@@ -11,8 +11,6 @@ import (
 	"log"
 	"strconv"
 	"time"
-
-	"github.com/albenik/bcd"
 )
 
 func canusbDecodeFrame(buff []byte) (*CANFrame, error) {
@@ -32,8 +30,9 @@ func canusbDecodeFrame(buff []byte) (*CANFrame, error) {
 
 	//data, err := hex.DecodeString(string(buff[5 : 5+(msgLen*2)]))
 
-	data, err := hex.DecodeString(string(buff[5:]))
-	if err != nil {
+	body := buff[5:]
+	data := make([]byte, hex.DecodedLen(len(body)))
+	if _, err := hex.Decode(data, body); err != nil {
 		return nil, fmt.Errorf("failed to decode body: %v", err)
 	}
 	return NewFrame(
@@ -61,8 +60,9 @@ func canusbDecodeExtendedFrame(buff []byte) (*CANFrame, error) {
 
 	//data, err := hex.DecodeString(string(buff[5 : 5+(msgLen*2)]))
 
-	data, err := hex.DecodeString(string(buff[10:]))
-	if err != nil {
+	body := buff[10:]
+	data := make([]byte, hex.DecodedLen(len(body)))
+	if _, err := hex.Decode(data, body); err != nil {
 		return nil, fmt.Errorf("failed to decode body: %v", err)
 	}
 	return NewExtendedFrame(
@@ -86,7 +86,11 @@ Bit 7 Bus Error (BEI), see SJA1000 datasheet **
 */
 
 func canusbDecodeStatus(b []byte) error {
-	bs := int(bcd.ToUint16(b[1:]))
+	v, err := strconv.ParseUint(string(b[1:]), 16, 16)
+	if err != nil {
+		return fmt.Errorf("failed to decode status: %w", err)
+	}
+	bs := int(v)
 	//log.Printf("%08b\n", bs)
 	switch {
 	case checkBitSet(bs, 1):
@@ -112,7 +116,7 @@ func canusbDecodeStatus(b []byte) error {
 
 func checkBitSet(n, k int) bool {
 	v := n & (1 << (k - 1))
-	return v == 1
+	return v != 0
 }
 
 func canusbClose(port io.Writer) error {
@@ -276,7 +280,7 @@ func CANUSBCmds11(ids []uint32) (mCmd, maskCmd string, err error) {
 func canusbAcceptanceFilters(ids []uint32) (string, string) {
 	filt, mask, err := CANUSBCmds11(ids)
 	if err != nil {
-		log.Println("canusbAcceptanceFilters:", err)
+		//log.Println("canusbAcceptanceFilters:", err)
 		return "M00000000", "mFFFFFFFF"
 	}
 	return filt, mask

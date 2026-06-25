@@ -5,12 +5,13 @@ import (
 )
 
 type Mock struct {
-	BaseAdapter
+	*BaseAdapter
 }
 
-// Create a new Mock adapter used for testing
+// Create a new Mock adapter used for testing. Frames written to Send() are
+// echoed back on Recv() as Incoming frames.
 func NewMock(name string, cfg *AdapterConfig) (Adapter, error) {
-	return &Template{
+	return &Mock{
 		BaseAdapter: NewBaseAdapter(name, cfg),
 	}, nil
 }

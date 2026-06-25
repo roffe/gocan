@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/albenik/bcd"
 	"go.bug.st/serial"
 )
 
@@ -201,7 +200,11 @@ func (ya *YACA) parse(ctx context.Context, buff *bytes.Buffer, readBuffer []byte
 }
 
 func (ya *YACA) decodeStatus(b []byte) error {
-	bs := int(bcd.ToUint16(b[1:]))
+	v, err := strconv.ParseUint(string(b[1:]), 16, 16)
+	if err != nil {
+		return fmt.Errorf("failed to decode status: %w", err)
+	}
+	bs := int(v)
 	//log.Printf("%08b\n", bs)
 	switch {
 	case ya.checkBitSet(bs, 1):
@@ -227,7 +230,7 @@ func (ya *YACA) decodeStatus(b []byte) error {
 
 func (ya *YACA) checkBitSet(n, k int) bool {
 	v := n & (1 << (k - 1))
-	return v == 1
+	return v != 0
 }
 
 func (ya *YACA) sendManager(ctx context.Context) {
@@ -249,9 +252,7 @@ func (ya *YACA) sendManager(ctx context.Context) {
 			}
 			idb := make([]byte, 4)
 			binary.BigEndian.PutUint32(idb, v.Identifier)
-			f.WriteString("t" + hex.EncodeToString(idb)[5:] +
-				strconv.Itoa(v.DLC()) +
-				hex.EncodeToString(v.Data) + "\x0D")
+			fmt.Fprintf(f, "t%s%d%s\x0D", hex.EncodeToString(idb)[5:], v.DLC(), hex.EncodeToString(v.Data))
 			if _, err := ya.port.Write(f.Bytes()); err != nil {
 				ya.Fatal(fmt.Errorf("failed to write to com port: %s, %v", f.String(), err))
 				return

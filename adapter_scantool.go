@@ -281,14 +281,14 @@ func scantoolSendManagerOld(
 				continue
 			}
 			binary.BigEndian.PutUint32(idb, v.Identifier)
-			f.WriteString("STPXh:" + hex.EncodeToString(idb)[5:] + ",d:" + hex.EncodeToString(v.Data))
+			fmt.Fprintf(f, "STPXh:%s,d:%s", hex.EncodeToString(idb)[5:], hex.EncodeToString(v.Data))
 			if v.Timeout != 0 && v.Timeout != 200 {
-				f.WriteString(",t:" + strconv.Itoa(int(v.Timeout)))
+				fmt.Fprintf(f, ",t:%d", v.Timeout)
 			}
 			// timeout = 0
 			respCount := v.FrameType.Responses
 			if respCount > 0 {
-				f.WriteString(",r:" + strconv.Itoa(respCount))
+				fmt.Fprintf(f, ",r:%d", respCount)
 			}
 			f.WriteString("\r")
 			if debug {

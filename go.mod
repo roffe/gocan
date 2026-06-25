@@ -3,11 +3,10 @@ module github.com/roffe/gocan
 go 1.26.0
 
 require (
-	github.com/albenik/bcd v0.0.0-20170831201648-635201416bc7
 	github.com/bendikro/dl v0.0.0-20190410215913-e41fdb9069d4
 	github.com/fatih/color v1.19.0
 	github.com/google/gousb v1.1.3
-	go.bug.st/serial v1.6.4
+	go.bug.st/serial v1.7.1
 	golang.org/x/sync v0.20.0
 	google.golang.org/grpc v1.76.0
 	google.golang.org/protobuf v1.36.10
@@ -16,12 +15,6 @@ require (
 require (
 	github.com/Microsoft/go-winio v0.6.2
 	go.einride.tech/can v0.16.1
-)
-
-require (
-	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
-	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
-	github.com/stretchr/testify v1.11.1 // indirect
 )
 
 require (
@@ -42,9 +35,6 @@ require (
 	golang.org/x/tools v0.34.0 // indirect
 )
 
-require (
-	github.com/creack/goselect v0.1.2 // indirect
-	golang.org/x/sys v0.44.0
-)
+require golang.org/x/sys v0.46.0
 
 replace go.einride.tech/can => github.com/samuelbrian/can-go v0.0.2
