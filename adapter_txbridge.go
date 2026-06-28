@@ -7,7 +7,6 @@ import (
 	"io"
 	"log"
 	"net"
-	"os"
 	"strings"
 	"time"
 
@@ -20,7 +19,8 @@ func init() {
 	if err := RegisterAdapter(&AdapterInfo{
 		Name:               "txbridge wifi",
 		Description:        "txbridge over wifi",
-		RequiresSerialPort: false,
+		RequiresSerialPort: true,
+		SerialPortOptional: true,
 		Capabilities: AdapterCapabilities{
 			HSCAN: true,
 			KLine: false,
@@ -31,19 +31,21 @@ func init() {
 		panic(err)
 	}
 
-	if err := RegisterAdapter(&AdapterInfo{
-		Name:               "txbridge bluetooth",
-		Description:        "txbridge over bluetooth",
-		RequiresSerialPort: false,
-		Capabilities: AdapterCapabilities{
-			HSCAN: true,
-			KLine: false,
-			SWCAN: false,
-		},
-		New: NewTxbridge("txbridge bluetooth"),
-	}); err != nil {
-		panic(err)
-	}
+	/*
+		if err := RegisterAdapter(&AdapterInfo{
+			Name:               "txbridge bluetooth",
+			Description:        "txbridge over bluetooth",
+			RequiresSerialPort: true,
+			Capabilities: AdapterCapabilities{
+				HSCAN: true,
+				KLine: false,
+				SWCAN: false,
+			},
+			New: NewTxbridge("txbridge bluetooth"),
+		}); err != nil {
+			panic(err)
+		}
+	*/
 }
 
 type Txbridge struct {
@@ -63,11 +65,10 @@ func (tx *Txbridge) Open(ctx context.Context) error {
 	switch tx.name {
 	case "txbridge wifi":
 		address := "192.168.4.1:1337"
-		if value, exists := tx.cfg.AdditionalConfig["address"]; exists && value != "" {
-			address = value
-		} else if value := os.Getenv("TXBRIDGE_ADDRESS"); value != "" {
-			address = value
+		if strings.HasPrefix(tx.cfg.Port, "tcp://") {
+			address = tx.cfg.Port[len("tcp://"):]
 		}
+
 		if !strings.HasSuffix(address, ":1337") {
 			address += ":1337" // Ensure the port is always set
 		}
@@ -76,9 +77,9 @@ func (tx *Txbridge) Open(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		//if t, ok := tx.port.(*net.TCPConn); ok {
-		//	t.SetNoDelay(true)
-		//}
+		if t, ok := port.(*net.TCPConn); ok {
+			t.SetNoDelay(true) // low latency for small log messages
+		}
 		tx.port = port
 	case "txbridge bluetooth":
 		mode := &serial.Mode{
@@ -145,6 +146,11 @@ func (tx *Txbridge) Open(ctx context.Context) error {
 		}
 	}
 
+	//if err := tx.SetFilter(tx.cfg.CANFilter); err != nil {
+	//	tx.port.Close()
+	//	return err
+	//}
+
 	canRate := uint16(tx.cfg.CANRate)
 
 	cmd := &serialcommand.SerialCommand{
@@ -164,8 +170,29 @@ func (tx *Txbridge) Open(ctx context.Context) error {
 	return nil
 }
 
+// SetFilter installs the adapter's dynamic whitelist: only frames whose ID is
+// listed are forwarded over the link (the KWP IDs the firmware handles itself are
+// always passed). Can be called at any time. An empty list is a no-op so the
+// firmware keeps its boot default whitelist rather than going silent.
 func (tx *Txbridge) SetFilter(filters []uint32) error {
-	return nil
+	log.Printf("set filters: %03X", filters)
+	if len(filters) == 0 {
+		return nil
+	}
+	data := make([]byte, 0, len(filters)*2)
+	for _, id := range filters {
+		data = append(data, byte(id), byte(id>>8)) // 11-bit IDs, little-endian
+	}
+	cmd := &serialcommand.SerialCommand{Command: 'f', Data: data}
+	buf, err := cmd.MarshalBinary()
+	if err != nil {
+		return err
+	}
+	if tx.port == nil {
+		return fmt.Errorf("txbridge port not open")
+	}
+	_, err = tx.port.Write(buf)
+	return err
 }
 
 func (tx *Txbridge) Close() error {
@@ -284,7 +311,7 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 				copy(data, cmdbuff[:cmdbuffPtr])
 				if commandChecksum != b {
 					tx.sendEvent(EventTypeError, fmt.Sprintf("checksum error: expected %02X, got %02X", commandChecksum, b))
-					//tx.cfg.OnMessage(fmt.Sprintf("checksum error %q %02X != %02X", command, commandChecksum, b))
+					// tx.cfg.OnMessage(fmt.Sprintf("checksum error %q %02X != %02X", command, commandChecksum, b))
 					parsingCommand = false
 					commandSize = 0
 					commandChecksum = 0

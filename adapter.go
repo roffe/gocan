@@ -21,6 +21,7 @@ type AdapterInfo struct {
 	Name               string
 	Description        string
 	RequiresSerialPort bool
+	SerialPortOptional bool
 	Capabilities       AdapterCapabilities
 	New                func(*AdapterConfig) (Adapter, error)
 }
