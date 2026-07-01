@@ -140,9 +140,9 @@ func (tx *Txbridge) Open(ctx context.Context) error {
 
 		tx.Info("txbridge firmware version: " + string(cmd.Data))
 
-		if ver := semver.Compare("v"+string(cmd.Data), "v"+minVersion); ver != 0 {
+		if ver := semver.Compare("v"+string(cmd.Data), "v"+minVersion); ver < 0 {
 			tx.port.Close()
-			return fmt.Errorf("txbridge firmware %s is required, please update the dongle", minVersion)
+			return fmt.Errorf("txbridge firmware %s or newer is required (dongle has %s), please update the dongle", minVersion, string(cmd.Data))
 		}
 	}
 
@@ -191,8 +191,14 @@ func (tx *Txbridge) SetFilter(filters []uint32) error {
 	if tx.port == nil {
 		return fmt.Errorf("txbridge port not open")
 	}
-	_, err = tx.port.Write(buf)
-	return err
+	// Route through sendManager (the sole port writer) so this can't interleave
+	// with an in-flight frame and tear the wire framing.
+	select {
+	case tx.sendChan <- NewFrame(SystemMsg, buf, Outgoing):
+		return nil
+	case <-time.After(1 * time.Second):
+		return fmt.Errorf("SetFilter: send queue full")
+	}
 }
 
 func (tx *Txbridge) Close() error {
@@ -251,6 +257,7 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 		log.Println("recvManager start")
 	}
 	var parsingCommand bool
+	var haveLength bool // length byte read? distinguishes "no len yet" from len==0
 	var command uint8
 	var commandSize uint8
 	var commandChecksum uint8
@@ -258,7 +265,7 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 	cmdbuff := make([]byte, 256)
 	var cmdbuffPtr uint8
 
-	readbuf := make([]byte, 256)
+	readbuf := make([]byte, 4096)
 	for {
 		select {
 		case <-tx.closeChan:
@@ -287,6 +294,7 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 				switch b {
 				case 'e', 't', 'r', 'R', 'w', 'W', 'G':
 					parsingCommand = true
+					haveLength = false
 					command = b
 					commandSize = 0
 					commandChecksum = 0
@@ -297,8 +305,9 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 				}
 			}
 
-			if commandSize == 0 {
+			if !haveLength { // length byte; zero is a legitimate size, so don't sentinel on it
 				commandSize = b
+				haveLength = true
 				continue
 			}
 
@@ -321,12 +330,26 @@ func (tx *Txbridge) recvManager(ctx context.Context) {
 
 				switch command {
 				case 'T', 't':
+					// Guard: the 1-byte sum checksum is weak enough that a corrupted
+					// frame can pass with a short size; don't panic on data[0]/data[1].
+					if len(data) < 2 {
+						tx.sendEvent(EventTypeError, fmt.Sprintf("short %q frame: %X", command, data))
+						break
+					}
 					tx.recvFrame(&CANFrame{
 						Identifier: uint32(data[0])<<8 | uint32(data[1]),
 						Data:       data[2:],
 						FrameType:  Incoming,
 					})
 				case 'e':
+					if len(data) < 2 {
+						tx.sendEvent(EventTypeError, fmt.Sprintf("short %q frame: %X", command, data))
+						cmdbuffPtr = 0
+						commandChecksum = 0
+						commandSize = 0
+						parsingCommand = false
+						continue
+					}
 					switch data[1] {
 					case 0x31:
 						tx.sendEvent(EventTypeError, "read timeout")
@@ -412,6 +435,7 @@ func readSerialCommand(port io.Reader, timeout time.Duration) (*serialcommand.Se
 
 	var (
 		parsingCommand  bool
+		haveLength      bool // length byte read? distinguishes "no len yet" from len==0
 		command         byte
 		commandSize     byte
 		commandChecksum byte
@@ -437,8 +461,9 @@ func readSerialCommand(port io.Reader, timeout time.Duration) (*serialcommand.Se
 				continue
 			}
 
-			if commandSize == 0 {
+			if !haveLength { // length byte; zero is a legitimate size, so don't sentinel on it
 				commandSize = b
+				haveLength = true
 				continue
 			}
 
