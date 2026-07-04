@@ -55,9 +55,11 @@ type Txbridge struct {
 
 func NewTxbridge(name string) func(cfg *AdapterConfig) (Adapter, error) {
 	return func(cfg *AdapterConfig) (Adapter, error) {
-		return &Txbridge{
+		tx := &Txbridge{
 			BaseAdapter: NewBaseAdapter(name, cfg),
-		}, nil
+		}
+		tx.syncCapable = true // writeFrame confirms the frame is written to the port
+		return tx, nil
 	}
 }
 
@@ -232,22 +234,26 @@ func (tx *Txbridge) sendManager(_ context.Context) {
 				}
 				continue
 			}
-
-			cmd := &serialcommand.SerialCommand{
-				Command: 't',
-				Data:    append([]byte{uint8(frame.Identifier >> 8), uint8(frame.Identifier), byte(frame.DLC())}, frame.Data...),
-			}
-			buf, err := cmd.MarshalBinary()
-			if err != nil {
-				tx.Error(err)
-				continue
-			}
-			_, err = tx.port.Write(buf)
-			if err != nil {
-				tx.Error(err)
-				continue
-			}
+			tx.writeFrame(frame)
 		}
+	}
+}
+
+// writeFrame serializes and writes a single CAN frame to the port. The deferred
+// markSent releases a SendSync waiter on every exit path (success or error).
+func (tx *Txbridge) writeFrame(frame *CANFrame) {
+	defer frame.markSent()
+	cmd := &serialcommand.SerialCommand{
+		Command: 't',
+		Data:    append([]byte{uint8(frame.Identifier >> 8), uint8(frame.Identifier), byte(frame.DLC())}, frame.Data...),
+	}
+	buf, err := cmd.MarshalBinary()
+	if err != nil {
+		tx.Error(err)
+		return
+	}
+	if _, err := tx.port.Write(buf); err != nil {
+		tx.Error(err)
 	}
 }
 

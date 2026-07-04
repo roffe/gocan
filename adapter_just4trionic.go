@@ -40,6 +40,7 @@ func NewJust4Trionic(cfg *AdapterConfig) (Adapter, error) {
 	adapter := &Just4Trionic{
 		BaseAdapter: NewBaseAdapter("Just4Trionic", cfg),
 	}
+	adapter.syncCapable = true // markSent after the port write
 
 	/*
 		for _, f := range cfg.CANFilter {
@@ -302,6 +303,7 @@ func (a *Just4Trionic) sendManager(ctx context.Context) {
 			if _, err := a.port.Write([]byte(f)); err != nil {
 				a.Error(fmt.Errorf("failed to write to com port: %q, %w", f, err))
 			}
+			v.markSent()
 			if a.cfg.Debug {
 				a.Debug(">> " + f)
 			}

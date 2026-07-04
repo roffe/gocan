@@ -80,7 +80,7 @@ type ScantoolVCP struct {
 func NewScantoolVCP(name string) func(cfg *AdapterConfig) (Adapter, error) {
 	return func(cfg *AdapterConfig) (Adapter, error) {
 		stn := &ScantoolVCP{
-			BaseAdapter: NewBaseAdapter(name, cfg),
+			BaseAdapter: NewSyncBaseAdapter(name, cfg),
 			sendSem:     make(chan struct{}, 1),
 			baseName:    name,
 		}

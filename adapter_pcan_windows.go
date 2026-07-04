@@ -72,7 +72,7 @@ func NewPCANCHelper(name string, ch pcan.TPCANHandle) func(*AdapterConfig) (Adap
 
 func newPCAN(name string, cfg *AdapterConfig) (Adapter, error) {
 	pcan := &PCAN{
-		BaseAdapter: NewBaseAdapter(name, cfg),
+		BaseAdapter: NewSyncBaseAdapter(name, cfg),
 	}
 	var err error
 	pcan.rate, err = pcanCANrate(cfg.CANRate * 1000)
@@ -174,6 +174,7 @@ func (p *PCAN) sendManager(ctx context.Context) {
 			if err := pcan.CAN_Write(p.ch, &msg); err != nil {
 				p.Error(fmt.Errorf("failed to send frame: %w", err))
 			}
+			frame.markSent()
 		}
 	}
 }

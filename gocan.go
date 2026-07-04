@@ -282,6 +282,30 @@ func (c *Client) SendFrame(msg *CANFrame) error {
 	}
 }
 
+// SendSync sends a frame and blocks until the adapter has written it to the
+// hardware (or ctx / timeout fires). This gives natural inter-frame pacing that
+// plain async Send does not, since Send only queues into the adapter buffer.
+// On adapters that don't confirm write-completion it degrades to a plain Send.
+func (c *Client) SendSync(ctx context.Context, frame *CANFrame, timeout time.Duration) error {
+	if sc, ok := c.adapter.(interface{ SupportsSync() bool }); !ok || !sc.SupportsSync() {
+		return c.SendFrame(frame)
+	}
+	frame.sent = make(chan struct{}, 1)
+	if err := c.SendFrame(frame); err != nil {
+		return err
+	}
+	select {
+	case <-frame.sent:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-c.ctx.Done():
+		return ErrClosed
+	case <-time.After(timeout):
+		return nil // safety net; a sync-capable adapter should always signal
+	}
+}
+
 // Shortcommand to send a standard 11bit frame
 func (c *Client) Send(identifier uint32, data []byte, f CANFrameType) error {
 	return c.SendFrame(NewFrame(identifier, data, f))

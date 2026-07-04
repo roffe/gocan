@@ -35,7 +35,7 @@ func init() {
 
 func NewSLCan(cfg *AdapterConfig) (Adapter, error) {
 	sl := &SLCan{
-		BaseAdapter: NewBaseAdapter("SLCan", cfg),
+		BaseAdapter: NewSyncBaseAdapter("SLCan", cfg),
 	}
 	return sl, nil
 }
@@ -139,6 +139,7 @@ func (sl *SLCan) sendManager(ctx context.Context) {
 }
 
 func (sl *SLCan) handleSend(frame *CANFrame, outBuf *[]byte) error {
+	defer frame.markSent()
 	// System / control messages (like "O", "C", bitrate stuff)
 	if id := frame.Identifier; id >= SystemMsg {
 		if id == SystemMsg {

@@ -101,6 +101,7 @@ func (scm *scantoolManager) run(ctx context.Context) {
 			}
 
 			resp, err := scm.sendCommand(cmd)
+			frame.markSent()
 			if err != nil {
 				scm.Error(fmt.Errorf("failed to send command: %w", err))
 				continue

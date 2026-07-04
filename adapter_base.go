@@ -24,6 +24,17 @@ type BaseAdapter struct {
 
 	closeOnce sync.Once
 	closeChan chan struct{}
+
+	// syncCapable is set by adapters that call markSent after writing a frame to
+	// hardware, enabling Client.SendSync. Adapters that don't set it fall back to
+	// fire-and-forget sends.
+	syncCapable bool
+}
+
+// SupportsSync reports whether this adapter confirms frame write-completion
+// (i.e. calls markSent), which Client.SendSync relies on.
+func (base *BaseAdapter) SupportsSync() bool {
+	return base.syncCapable
 }
 
 func NewBaseAdapter(name string, cfg *AdapterConfig) *BaseAdapter {
@@ -36,6 +47,14 @@ func NewBaseAdapter(name string, cfg *AdapterConfig) *BaseAdapter {
 		evtChan:   make(chan Event, 100),
 		closeChan: make(chan struct{}),
 	}
+}
+
+// NewSyncBaseAdapter is NewBaseAdapter for adapters that call markSent after
+// writing each frame to hardware, enabling Client.SendSync (see SupportsSync).
+func NewSyncBaseAdapter(name string, cfg *AdapterConfig) *BaseAdapter {
+	b := NewBaseAdapter(name, cfg)
+	b.syncCapable = true
+	return b
 }
 
 // Name returns the adapter name.

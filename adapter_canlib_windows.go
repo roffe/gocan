@@ -67,7 +67,7 @@ func NewCANlib(channel int, name string) func(cfg *AdapterConfig) (Adapter, erro
 	return func(cfg *AdapterConfig) (Adapter, error) {
 		return &CANlib{
 			channel:      channel,
-			BaseAdapter:  NewBaseAdapter(name, cfg),
+			BaseAdapter:  NewSyncBaseAdapter(name, cfg),
 			timeoutRead:  defaultReadTimeoutMs,
 			timeoutWrite: defaultWriteTimeoutMs,
 		}, nil
@@ -210,6 +210,7 @@ func (k *CANlib) sendManager(ctx context.Context) {
 			if err := k.writeHandle.WriteWait(msg.Identifier, msg.Data, canlib.MSG_STD, k.timeoutWrite); err != nil {
 				k.Error(fmt.Errorf("Send: %w", err))
 			}
+			msg.markSent()
 		}
 	}
 }

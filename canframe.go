@@ -38,6 +38,21 @@ type CANFrame struct {
 	Data       []byte
 	FrameType  CANFrameType
 	Timeout    uint32
+	// sent is non-nil only for frames sent via Client.SendSync. The adapter
+	// signals it once the frame has been written to the hardware.
+	sent chan struct{}
+}
+
+// markSent notifies a SendSync waiter that the adapter has finished writing this
+// frame. Safe to call on any frame (no-op unless the frame was sent via SendSync)
+// and safe to call more than once.
+func (f *CANFrame) markSent() {
+	if f.sent != nil {
+		select {
+		case f.sent <- struct{}{}:
+		default:
+		}
+	}
 }
 
 // NewExtendedFrame creates a new CANFrame and copies the data slice

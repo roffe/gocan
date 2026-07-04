@@ -38,7 +38,7 @@ type YACA struct {
 
 func NewYACA(cfg *AdapterConfig) (Adapter, error) {
 	ya := &YACA{
-		BaseAdapter: NewBaseAdapter("YACA", cfg),
+		BaseAdapter: NewSyncBaseAdapter("YACA", cfg),
 	}
 	return ya, nil
 }
@@ -257,6 +257,7 @@ func (ya *YACA) sendManager(ctx context.Context) {
 				ya.Fatal(fmt.Errorf("failed to write to com port: %s, %v", f.String(), err))
 				return
 			}
+			v.markSent()
 			if ya.cfg.Debug {
 				fmt.Fprint(os.Stderr, ">> "+f.String()+"\n")
 			}

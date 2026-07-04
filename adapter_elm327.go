@@ -50,7 +50,7 @@ const (
 
 func NewELM327(cfg *AdapterConfig) (Adapter, error) {
 	el := &ELM327{
-		BaseAdapter: NewBaseAdapter("ELM327", cfg),
+		BaseAdapter: NewSyncBaseAdapter("ELM327", cfg),
 	}
 	return el, nil
 }
@@ -180,6 +180,7 @@ func (el *ELM327) run(ctx context.Context) {
 			}
 
 			resp, err := el.sendCommand(fmt.Sprintf("%02X", frame.Data))
+			frame.markSent()
 			if err != nil {
 				log.Printf("failed to send frame %v: %v", frame, err)
 				continue

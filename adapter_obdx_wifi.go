@@ -37,7 +37,7 @@ type OBDXProWifi struct {
 
 func NewOBDXProWifi(cfg *AdapterConfig) (Adapter, error) {
 	return &OBDXProWifi{
-		BaseAdapter: NewBaseAdapter("OBDX Pro Wifi", cfg),
+		BaseAdapter: NewSyncBaseAdapter("OBDX Pro Wifi", cfg),
 	}, nil
 }
 
@@ -133,7 +133,7 @@ func (a *OBDXProWifi) sendManager() {
 			if _, err := a.conn.Write(sendCmd.Bytes()); err != nil {
 				a.Error(fmt.Errorf("failed to send frame: %w", err))
 			}
-
+			frame.markSent()
 		}
 	}
 }

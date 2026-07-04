@@ -61,7 +61,7 @@ func init() {
 
 func NewrCAN(cfg *AdapterConfig) (Adapter, error) {
 	return &RCanDevice{
-		BaseAdapter: NewBaseAdapter("rCAN", cfg),
+		BaseAdapter: NewSyncBaseAdapter("rCAN", cfg),
 	}, nil
 }
 
@@ -379,6 +379,7 @@ func (r *RCanDevice) sendManager(ctx context.Context) {
 }
 
 func (r *RCanDevice) sendCANMessage(ctx context.Context, frame *CANFrame) {
+	defer frame.markSent()
 	wctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
 	defer cancel()
 

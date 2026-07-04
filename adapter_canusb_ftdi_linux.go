@@ -9,7 +9,7 @@ import (
 )
 
 func (cu *CanusbFTDI) recvManager(ctx context.Context, parseFn func([]byte)) {
-	port := cu.port // capture once; Close() may set cu.port = nil concurrently
+	port := cu.port             // capture once; Close() may set cu.port = nil concurrently
 	buf := make([]byte, 4*1024) // large enough for worst case
 	for ctx.Err() == nil {
 		n, err := port.Read(buf)

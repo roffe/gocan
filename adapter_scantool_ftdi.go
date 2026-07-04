@@ -33,7 +33,7 @@ type ScantoolFTDI struct {
 func NewScantoolFTDI(name string, idx uint64, serial string) func(cfg *AdapterConfig) (Adapter, error) {
 	return func(cfg *AdapterConfig) (Adapter, error) {
 		stn := &ScantoolFTDI{
-			BaseAdapter: NewBaseAdapter(name, cfg),
+			BaseAdapter: NewSyncBaseAdapter(name, cfg),
 			devIndex:    idx,
 			serial:      serial,
 			sendSem:     make(chan struct{}, 1),

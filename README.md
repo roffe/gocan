@@ -26,6 +26,22 @@ Import the package in your imports
 		"github.com/roffe/gocan"
 	)
 
+### Synchronous sends
+
+`Client.Send` / `Client.SendFrame` only queue a frame into the adapter's send
+buffer. When you need to know the frame has actually been written to the
+hardware (e.g. to pace frames against a slow ECU without guessing at sleeps),
+use `SendSync`:
+
+	err := c.SendSync(ctx, frame, 100*time.Millisecond)
+
+It blocks until the adapter confirms the write, the context is cancelled or
+the timeout fires. Adapters that confirm write-completion report it via
+`SupportsSync()`; on adapters that don't, `SendSync` degrades to a plain
+`SendFrame`. Adapter implementers: construct with `NewSyncBaseAdapter` (or set
+`syncCapable`) and call `frame.markSent()` on every exit path of the send
+routine once the frame has been handed to the hardware.
+
 ## Showcase
 
 * [Saab CAN flasher](https://github.com/roffe/gocanflasher)

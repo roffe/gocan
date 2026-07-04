@@ -484,6 +484,7 @@ func canusbSendManager(ctx context.Context, ba *BaseAdapter, sendSem chan struct
 				ba.Fatal(fmt.Errorf("failed to write to com port: %w", err))
 				return
 			}
+			msg.markSent()
 
 			if ba.cfg.Debug {
 				ba.Debug(">> " + string(out[:i]))

@@ -24,7 +24,7 @@ type GWClient struct {
 
 func NewGWClient(adapterName string, cfg *AdapterConfig) (*GWClient, error) {
 	return &GWClient{
-		BaseAdapter: NewBaseAdapter(adapterName, cfg),
+		BaseAdapter: NewSyncBaseAdapter(adapterName, cfg),
 	}, nil
 }
 
@@ -99,6 +99,7 @@ func (c *GWClient) sendManager(ctx context.Context, stream grpc.BidiStreamingCli
 }
 
 func (c *GWClient) sendMessage(stream grpc.BidiStreamingClient[proto.CANFrame, proto.StreamMessage], msg *CANFrame) error {
+	defer msg.markSent()
 	return stream.Send(&proto.CANFrame{
 		Id:        msg.Identifier,
 		Data:      msg.Data,

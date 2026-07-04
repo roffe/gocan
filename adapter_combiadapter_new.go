@@ -85,7 +85,7 @@ func init() {
 }
 
 func NewCombiNew(cfg *AdapterConfig) (Adapter, error) {
-	return &CombiAdapterNew{
+	ca := &CombiAdapterNew{
 		BaseAdapter: NewBaseAdapter("CombiAdapterNew", cfg),
 		txPool: sync.Pool{New: func() any {
 			// cmd, size(2), ID(4), data(8), len, ext, rtr, term
@@ -95,7 +95,9 @@ func NewCombiNew(cfg *AdapterConfig) (Adapter, error) {
 		adcValueChan:    make(chan float32),
 		thermoValueChan: make(chan float32, 1),
 		txAck:           make(chan struct{}, 1),
-	}, nil
+	}
+	ca.syncCapable = true // sendCANMessage blocks on the firmware TX ack, so write-completion is real
+	return ca, nil
 }
 
 // ============
@@ -132,7 +134,7 @@ func (ca *CombiAdapterNew) SetHardwareFilter(ctx context.Context, ids []uint32) 
 		binary.LittleEndian.PutUint32(payload[4*i:], id)
 	}
 
-	log.Printf("SetFilters: %X", payload)
+	log.Printf("SetFilters: %02X", ids)
 
 	// 200ms: on a busy bus the ACK is queued behind relayed frames in the USB stream.
 	return ca.sendCommand(ctx, cmdCanFilter, payload, 200)
@@ -433,6 +435,7 @@ func (ca *CombiAdapterNew) sendManager(ctx context.Context) {
 func (ca *CombiAdapterNew) sendCANMessage(frame *CANFrame) {
 	buf := ca.txPool.Get().([]byte)
 	defer ca.txPool.Put(buf)
+	defer frame.markSent() // release a SendSync waiter once this frame is written + acked (or on any early return)
 	dlc := frame.DLC()
 	binary.LittleEndian.PutUint32(buf[3:], frame.Identifier)
 	copy(buf[7:], frame.Data[:min(dlc, 8)])

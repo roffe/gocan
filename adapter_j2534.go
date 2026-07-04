@@ -62,7 +62,7 @@ func NewJ2534FromDLLName(name, dllPath string) func(cfg *AdapterConfig) (Adapter
 
 func NewJ2534(name string, cfg *AdapterConfig) (Adapter, error) {
 	ma := &J2534{
-		BaseAdapter: NewBaseAdapter(name, cfg),
+		BaseAdapter: NewSyncBaseAdapter(name, cfg),
 		channelID:   0,
 		deviceID:    0,
 		flags:       passthru.CAN_ID_BOTH | passthru.CAN_29BIT_ID,
@@ -364,6 +364,7 @@ func (ma *J2534) sendManager(ctx context.Context) {
 			if err := ma.sendMsg(msg); err != nil {
 				ma.Error(fmt.Errorf("send error: %w", err))
 			}
+			f.markSent()
 		}
 	}
 }

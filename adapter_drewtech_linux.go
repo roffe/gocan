@@ -35,7 +35,7 @@ type Drewtech struct {
 
 func NewDrewtech(cfg *AdapterConfig) (Adapter, error) {
 	return &Drewtech{
-		BaseAdapter: NewBaseAdapter("Drewtech Mongoose", cfg),
+		BaseAdapter: NewSyncBaseAdapter("Drewtech Mongoose", cfg),
 	}, nil
 }
 
@@ -134,6 +134,7 @@ func (a *Drewtech) sendManager(ctx context.Context) {
 			if err != nil {
 				a.Error(fmt.Errorf("send error: %w", err))
 			}
+			f.markSent()
 		}
 	}
 }

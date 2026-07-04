@@ -166,7 +166,7 @@ func init() {
 // NewCombi constructs an adapter with sane defaults.
 func NewCombi(cfg *AdapterConfig) (Adapter, error) {
 	return &CombiAdapter{
-		BaseAdapter: NewBaseAdapter("CombiAdapter", cfg),
+		BaseAdapter: NewSyncBaseAdapter("CombiAdapter", cfg),
 		txPool: sync.Pool{New: func() any {
 			// cmd, size(2), ID(4), data(8), len, ext, rtr, term
 			return []byte{cmdCanTxFrame, 0x00, 0x0F, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
@@ -466,6 +466,7 @@ func (ca *CombiAdapter) sendManager(ctx context.Context) {
 }
 
 func (ca *CombiAdapter) sendCANMessage(ctx context.Context, frame *CANFrame) {
+	defer frame.markSent()
 	buf := ca.txPool.Get().([]byte)
 	defer ca.txPool.Put(buf)
 	dlc := frame.DLC()

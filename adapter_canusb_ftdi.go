@@ -26,7 +26,7 @@ type CanusbFTDI struct {
 func NewCanusbFTDI(name string, index uint64, serial string) func(cfg *AdapterConfig) (Adapter, error) {
 	return func(cfg *AdapterConfig) (Adapter, error) {
 		cu := &CanusbFTDI{
-			BaseAdapter: NewBaseAdapter(name, cfg),
+			BaseAdapter: NewSyncBaseAdapter(name, cfg),
 			buff:        bytes.NewBuffer(nil),
 			sendSem:     make(chan struct{}, 1),
 			devIndex:    index,

@@ -54,7 +54,7 @@ func NewCanusbName(name string) func(*AdapterConfig) (Adapter, error) {
 
 func NewCanusb(name string, cfg *AdapterConfig) (Adapter, error) {
 	return &Canusb{
-		BaseAdapter: NewBaseAdapter(name, cfg),
+		BaseAdapter: NewSyncBaseAdapter(name, cfg),
 	}, nil
 }
 
@@ -236,6 +236,7 @@ func (cu *Canusb) run(ctx context.Context) {
 			if err := cu.h.Flush(canusb.FLUSH_WAIT); err != nil {
 				log.Println(err)
 			}
+			frame.markSent()
 		}
 	}
 }

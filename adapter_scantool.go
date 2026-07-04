@@ -227,6 +227,7 @@ func scantoolSendManager(ctx context.Context, port io.Writer, b *BaseAdapter, se
 				b.Fatal(fmt.Errorf("failed to write scantool frame: %w", err))
 				return
 			}
+			frame.markSent()
 		}
 	}
 }

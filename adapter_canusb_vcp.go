@@ -71,7 +71,7 @@ func NewCanusbVCP(cfg *AdapterConfig) (Adapter, error) {
 	}
 	code, mask := canusbAcceptanceFilters(cfg.CANFilter)
 	return &CanusbVCP{
-		BaseAdapter: NewBaseAdapter("CANUSB", cfg),
+		BaseAdapter: NewSyncBaseAdapter("CANUSB", cfg),
 		canRate:     rate,
 		code:        code,
 		mask:        mask,
@@ -327,6 +327,7 @@ func (cu *CanusbVCP) sendManager(ctx context.Context) {
 			}
 			cu.sendSem <- struct{}{}
 			cu.write(canusbEncode(msg))
+			msg.markSent()
 		}
 	}
 }

@@ -54,9 +54,11 @@ func NewSocketCANFromDevName(dev string) func(cfg *AdapterConfig) (Adapter, erro
 }
 
 func NewSocketCAN(cfg *AdapterConfig) (Adapter, error) {
-	return &SocketCAN{
+	a := &SocketCAN{
 		BaseAdapter: NewBaseAdapter("SocketCAN", cfg),
-	}, nil
+	}
+	a.syncCapable = true // TransmitFrame blocks until the kernel accepts the frame
+	return a, nil
 }
 
 func (a *SocketCAN) Open(ctx context.Context) error {
@@ -143,6 +145,7 @@ func (a *SocketCAN) sendManager(ctx context.Context) {
 			if err := a.tx.TransmitFrame(ctx, frame); err != nil {
 				a.Error(fmt.Errorf("send error: %w", err))
 			}
+			f.markSent()
 		}
 	}
 }
