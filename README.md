@@ -1,46 +1,175 @@
 # goCAN
 
-A Go Linux/Windows/OSX CAN library
+A Go CAN bus library for Linux, Windows and macOS with support for a wide
+range of CAN adapters — from cheap ELM327/STN serial dongles to SocketCAN,
+J2534 passthru devices, Kvaser, PCAN and more.
 
 Linux maintainer wanted! Please contact me at gocan@roffe.nu if you want to help out.
 
-## Build tags
-
-* ftdi - d2xx based FTDI support
-* canlib - requires client32.dll
-* canusb - requires canusbdrv(64).dll
-* combi - requires libusb-1.0.dll
-* j2538 - requires vendor DLL to be installed
-* pcan - requires PCANBasic.dll
-
-## Usage
-
-Get goCAN
+## Installation
 
 	go get github.com/roffe/gocan@latest
 
-Import the package in your imports
+```go
+import "github.com/roffe/gocan"
+```
 
-	import (
-		...
-		"github.com/roffe/gocan"
-	)
+Some adapter backends need vendor libraries and are only compiled in when you
+build with their tag (`go build -tags "combi,j2534"`):
+
+| Build tag | Enables                        | Requires                    |
+|-----------|--------------------------------|-----------------------------|
+| `ftdi`    | d2xx based FTDI adapters       | FTDI D2XX driver            |
+| `canlib`  | Kvaser Canlib                  | canlib32.dll                |
+| `canusb`  | Lawicel CANUSB via DLL         | canusbdrv(64).dll           |
+| `combi`   | CombiAdapter via libusb        | libusb-1.0.dll              |
+| `j2534`   | J2534 passthru devices         | vendor J2534 DLL            |
+| `pcan`    | PCAN-USB                       | PCANBasic.dll               |
+
+Serial adapters (ELM327/STN/OBDLink, slcan, CANUSB in VCP mode, txbridge…) and
+SocketCAN on Linux are always available without tags.
+
+## Quick start
+
+Adapters are looked up by name from a registry. `gocan.ListAdapterNames()`
+returns everything compiled into your binary; names include e.g. `"ELM327"`,
+`"CombiAdapterNew"`, `"txbridge wifi"` and on Linux one `"SocketCAN <dev>"`
+entry per interface found.
+
+```go
+package main
+
+import (
+	"context"
+	"log"
+	"time"
+
+	"github.com/roffe/gocan"
+)
+
+func main() {
+	ctx := context.Background()
+
+	c, err := gocan.New(ctx, "ELM327", &gocan.AdapterConfig{
+		Port:         "COM3",   // or /dev/ttyUSB0
+		PortBaudrate: 115200,   // serial adapters only
+		CANRate:      500,      // CAN bit rate in kbit/s
+		CANFilter:    []uint32{0x7E8}, // receive only these IDs (empty = everything)
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer c.Close()
+
+	// Fire-and-forget send: queues the frame to the adapter
+	if err := c.Send(0x7DF, []byte{0x02, 0x01, 0x0C, 0, 0, 0, 0, 0}, gocan.Outgoing); err != nil {
+		log.Fatal(err)
+	}
+
+	// Wait for a single frame with one of the given IDs
+	resp, err := c.Recv(ctx, 500*time.Millisecond, 0x7E8)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("id %03X data %X", resp.Identifier, resp.Data)
+}
+```
+
+If you already have an `Adapter` instance (e.g. from `gocan.NewAdapter`) use
+`gocan.NewWithOpts`, which also takes options such as `WithEventFunc` /
+`WithLogger`:
+
+```go
+dev, _ := gocan.NewAdapter("ELM327", cfg)
+c, err := gocan.NewWithOpts(ctx, dev, gocan.WithEventFunc(func(e gocan.Event) {
+	log.Println(e.String())
+}))
+```
+
+## Receiving frames
+
+For a stream of frames instead of a one-shot `Recv`, create a subscription
+filtered on zero or more CAN IDs (no IDs = all traffic):
+
+```go
+sub := c.Subscribe(ctx, 0x238, 0x258)
+defer sub.Close()
+for frame := range sub.Chan() {
+	log.Printf("%03X %X", frame.Identifier, frame.Data)
+}
+```
+
+`SubscribeFunc` runs a callback per frame instead, and `SubscribeChan` feeds a
+channel you own:
+
+```go
+sub := c.SubscribeFunc(ctx, func(f *gocan.CANFrame) {
+	log.Printf("%03X %X", f.Identifier, f.Data)
+}, 0x238)
+defer sub.Close()
+```
+
+## Request / response
+
+`SendAndWait` sends a frame and blocks until a frame with one of the given
+IDs arrives (or the timeout/context fires) — the everyday primitive for
+ECU protocols:
+
+```go
+frame := gocan.NewFrame(0x005, []byte{0xC9, 0, 0, 0, 0, 0, 0, 0}, gocan.ResponseRequired)
+resp, err := c.SendAndWait(ctx, frame, 1*time.Second, 0x00C)
+```
+
+### Frame types
+
+Every frame carries a `CANFrameType` that tells the adapter how to treat it:
+
+* `gocan.Outgoing` — fire and forget.
+* `gocan.ResponseRequired` — tells buffered adapters (ELM/STN family) to wait
+  for one response frame; use `ResponseRequiredWithResponses(n)` when a
+  request yields several.
+* `gocan.Incoming` — frames received from the bus.
 
 ### Synchronous sends
 
-`Client.Send` / `Client.SendFrame` only queue a frame into the adapter's send
-buffer. When you need to know the frame has actually been written to the
-hardware (e.g. to pace frames against a slow ECU without guessing at sleeps),
-use `SendSync`:
+`Send` / `SendFrame` only queue a frame into the adapter's send buffer. When
+you need to know the frame has actually been written to the hardware (e.g. to
+pace frames against a slow ECU without guessing at sleeps), use `SendSync`:
 
-	err := c.SendSync(ctx, frame, 100*time.Millisecond)
+```go
+err := c.SendSync(ctx, frame, 100*time.Millisecond)
+```
 
 It blocks until the adapter confirms the write, the context is cancelled or
 the timeout fires. Adapters that confirm write-completion report it via
 `SupportsSync()`; on adapters that don't, `SendSync` degrades to a plain
-`SendFrame`. Adapter implementers: construct with `NewSyncBaseAdapter` (or set
-`syncCapable`) and call `frame.markSent()` on every exit path of the send
-routine once the frame has been handed to the hardware.
+`SendFrame`.
+
+## Errors and lifecycle
+
+The client owns the adapter: `c.Close()` shuts both down. If the adapter dies
+on its own (unplugged USB, fatal driver error), the client's context is
+cancelled — `c.Done()` / `c.Err()` / `c.Wait(ctx)` let you observe that:
+
+```go
+go func() {
+	<-c.Done()
+	log.Println("bus gone:", c.Err())
+}()
+```
+
+Non-fatal adapter noise (status messages, recoverable errors) is delivered as
+`Event`s via `WithEventFunc`/`WithEventChan` options or `c.OnEvent(fn)` at any
+time.
+
+## Writing your own adapter
+
+Implement the `gocan.Adapter` interface (embed `gocan.BaseAdapter` for the
+channel plumbing) and register it with `gocan.RegisterAdapter` from an
+`init()`. If your send path can confirm that a frame has been written to the
+hardware, construct with `NewSyncBaseAdapter` and call `frame.markSent()` on
+every exit path of the send routine — that enables `SendSync` for your
+adapter. `adapter_template.go` is a minimal starting point.
 
 ## Showcase
 
