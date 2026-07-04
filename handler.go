@@ -53,12 +53,9 @@ func (h *handler) unregisterSub(sub *Subscriber) {
 				break
 			}
 		}
-		//close(sub.responseChan)
-		return
-	}
-	for id := range sub.identifiers {
-		if subs, ok := h.submap[id]; ok {
-			if _, exists := subs[sub]; exists {
+	} else {
+		for id := range sub.identifiers {
+			if subs, ok := h.submap[id]; ok {
 				delete(subs, sub)
 				if len(subs) == 0 {
 					delete(h.submap, id)
@@ -66,7 +63,11 @@ func (h *handler) unregisterSub(sub *Subscriber) {
 			}
 		}
 	}
-	close(sub.responseChan)
+	// Closing under h.mu is safe against deliver, which sends under the same
+	// lock. Caller-owned channels (SubscribeChan) are never closed here.
+	if sub.ownedChan {
+		close(sub.responseChan)
+	}
 }
 
 func (h *handler) run(ctx context.Context) {

@@ -1,13 +1,13 @@
 package gocan
 
 import (
-	"encoding/binary"
 	"fmt"
 	"strings"
-
-	"github.com/fatih/color"
 )
 
+// CANFrameType tells the adapter how to treat an outgoing frame: fire and
+// forget (Outgoing) or, on buffered adapters like the ELM/STN family, wait
+// for Responses response frames (ResponseRequired).
 type CANFrameType struct {
 	Type      ResponseType
 	Responses int
@@ -21,23 +21,35 @@ const (
 	ResponseTypeResponseRequired ResponseType = 2 // Used for ELM and STN adapters to signal we want the adapter to wait for a response
 )
 
+// Treat these as constants; mutating them affects every user in the process.
 var (
 	Incoming         = CANFrameType{Type: ResponseTypeIncoming, Responses: 0}
 	Outgoing         = CANFrameType{Type: ResponseTypeOutgoing, Responses: 0}
 	ResponseRequired = CANFrameType{Type: ResponseTypeResponseRequired, Responses: 1} // Used for ELM and STN adapters to signal we want the adapter to wait for a response
 )
 
+// ResponseRequiredWithResponses is ResponseRequired for commands that yield
+// more than one response frame.
 func ResponseRequiredWithResponses(responses int) CANFrameType {
 	return CANFrameType{Type: ResponseTypeResponseRequired, Responses: responses}
 }
 
+// CANFrame is a single CAN bus frame.
+//
+// Frames are single-use: the send methods attach per-send state (SendAndWait
+// stamps Timeout, SendSync installs a completion signal), so build a fresh
+// frame for every send instead of reusing one, especially across goroutines.
+// Frames received from the bus are shared by every matching subscriber and
+// must be treated as read-only, including the Data slice.
 type CANFrame struct {
 	Identifier uint32
 	Extended   bool
 	RTR        bool
 	Data       []byte
 	FrameType  CANFrameType
-	Timeout    uint32
+	// Timeout in milliseconds is a hint for buffered adapters waiting on a
+	// response. It is stamped by Client.SendAndWait.
+	Timeout uint32
 	// sent is non-nil only for frames sent via Client.SendSync. The adapter
 	// signals it once the frame has been written to the hardware.
 	sent chan struct{}
@@ -55,14 +67,14 @@ func (f *CANFrame) markSent() {
 	}
 }
 
-// NewExtendedFrame creates a new CANFrame and copies the data slice
+// NewExtendedFrame creates a new 29-bit CANFrame and copies the data slice.
 func NewExtendedFrame(identifier uint32, data []byte, frameType CANFrameType) *CANFrame {
 	frame := NewFrame(identifier, data, frameType)
 	frame.Extended = true
 	return frame
 }
 
-// NewFrame creates a new CANFrame and copies the data slice
+// NewFrame creates a new CANFrame and copies the data slice.
 func NewFrame(identifier uint32, data []byte, frameType CANFrameType) *CANFrame {
 	d := make([]byte, len(data))
 	copy(d, data)
@@ -73,27 +85,9 @@ func NewFrame(identifier uint32, data []byte, frameType CANFrameType) *CANFrame 
 	}
 }
 
-// Returns the length of the data (DLC)
+// DLC returns the length of the data.
 func (f *CANFrame) DLC() int {
 	return len(f.Data)
-}
-
-var (
-	yellow = color.New(color.FgHiBlue).SprintfFunc()
-	red    = color.New(color.FgRed).SprintfFunc()
-	green  = color.New(color.FgGreen).SprintfFunc()
-	// printable = regexp.MustCompile("[^A-Za-z0-9.,!?]+")
-)
-
-// returns the frame as a byte slice, 4 bytes for the identifier, 1 byte for the length and the data
-// if holding more than 8 bytes of data, it will be truncated
-func (f *CANFrame) Bytes() []byte {
-	data := make([]byte, 4, 13)
-	dataLen := min(len(f.Data), 8)
-	binary.LittleEndian.PutUint32(data, f.Identifier)
-	binary.Append(data, binary.LittleEndian, uint8(dataLen))
-	data = append(data, f.Data[:dataLen]...)
-	return data
 }
 
 func (f *CANFrame) String() string {
@@ -128,51 +122,6 @@ func (f *CANFrame) String() string {
 	fmt.Fprintf(&out, "%-72s", binView.String())
 	out.WriteString(" || ")
 	out.WriteString(onlyPrintable(f.Data))
-	return out.String()
-}
-
-func (f *CANFrame) ColorString() string {
-	var out strings.Builder
-
-	switch f.FrameType.Type {
-	case 0:
-		out.WriteString("<i> || ")
-	case 1:
-		out.WriteString("<o> || ")
-	case 2:
-		out.WriteString("<r> || ")
-
-	}
-
-	fmt.Fprintf(&out, "%s || ", green("0x%03X", f.Identifier))
-
-	fmt.Fprintf(&out, "%d || ", len(f.Data))
-
-	var hexView strings.Builder
-
-	for i, b := range f.Data {
-		hexView.WriteString(fmt.Sprintf("%02X", b))
-		if i != len(f.Data)-1 {
-			hexView.WriteString(" ")
-		}
-	}
-
-	fmt.Fprintf(&out, "%-23s", hexView.String())
-
-	out.WriteString(" || ")
-
-	var binView strings.Builder
-	for i, b := range f.Data {
-		binView.WriteString(fmt.Sprintf("%08b", b))
-		if i != len(f.Data)-1 {
-			binView.WriteString(" ")
-		}
-	}
-
-	fmt.Fprintf(&out, "%s", red(fmt.Sprintf("%-72s", binView.String())))
-
-	out.WriteString(" || ")
-	out.WriteString(yellow(onlyPrintable(f.Data)))
 	return out.String()
 }
 

@@ -8,6 +8,8 @@ import (
 	"sync"
 )
 
+// ADCCapable is implemented by adapters that expose analog inputs (e.g. the
+// CombiAdapter's ADC channels).
 type ADCCapable interface {
 	GetADCValue(ctx context.Context, channel int) (float64, error)
 }
@@ -62,17 +64,17 @@ func (base *BaseAdapter) Name() string {
 	return base.name
 }
 
-// Return the send channel for the adapter
+// Send returns the channel the client queues outgoing frames on.
 func (base *BaseAdapter) Send() chan<- *CANFrame {
 	return base.sendChan
 }
 
-// Return the receive channel for the adapter
+// Recv returns the channel incoming frames are delivered on.
 func (base *BaseAdapter) Recv() <-chan *CANFrame {
 	return base.recvChan
 }
 
-// Return the error channel for the adapter
+// Err returns the channel a fatal adapter error is reported on.
 func (base *BaseAdapter) Err() <-chan error {
 	return base.errChan
 }
@@ -87,7 +89,8 @@ func (base *BaseAdapter) Close() {
 	})
 }
 
-// Set a fatal adapter error, meaning communication is broken and cannot continue.
+// Fatal reports an unrecoverable adapter error: communication is broken and
+// the client will terminate. Only the first call has any effect.
 func (base *BaseAdapter) Fatal(err error) {
 	base.errOnce.Do(func() {
 		select {
@@ -123,22 +126,22 @@ func (base *BaseAdapter) sendEvent(eventType EventType, details string) {
 	base.emit(Event{Type: eventType, Details: details})
 }
 
-// Send an error event
+// Error emits a recoverable error as an event.
 func (base *BaseAdapter) Error(err error) {
 	base.emit(Event{Type: EventTypeError, Details: err.Error(), Err: err})
 }
 
-// Send a warning event
+// Warn emits a warning event.
 func (base *BaseAdapter) Warn(warn string) {
 	base.sendEvent(EventTypeWarning, warn)
 }
 
-// Send an info event
+// Info emits an informational event.
 func (base *BaseAdapter) Info(info string) {
 	base.sendEvent(EventTypeInfo, info)
 }
 
-// Send a debug event
+// Debug emits a debug event.
 func (base *BaseAdapter) Debug(debug string) {
 	base.sendEvent(EventTypeDebug, debug)
 }

@@ -5,8 +5,13 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 )
 
+// Adapter is a hardware (or virtual) CAN interface backend. The Client owns
+// the adapter: it drains Recv, Err and Event and feeds Send. Implementations
+// deliver incoming frames on Recv, report recoverable problems on Event and
+// signal an unrecoverable failure on Err, which terminates the client.
 type Adapter interface {
 	Name() string
 	Open(context.Context) error
@@ -17,6 +22,8 @@ type Adapter interface {
 	Event() <-chan Event
 }
 
+// AdapterInfo describes a registered adapter: its registry name, what it
+// needs (serial port) and what it can do.
 type AdapterInfo struct {
 	Name               string
 	Description        string
@@ -40,6 +47,8 @@ func (a *AdapterCapabilities) String() string {
 	return fmt.Sprintf("HSCAN: %v, SWCAN: %v, KLine: %v", a.HSCAN, a.SWCAN, a.KLine)
 }
 
+// AdapterConfig holds settings applied when an adapter is opened. Not every
+// field applies to every adapter; the comments note the main consumers.
 type AdapterConfig struct {
 	Debug            bool              // enable debug logging
 	Port             string            // port name or path to dll/so/dylib
@@ -51,16 +60,28 @@ type AdapterConfig struct {
 	AdditionalConfig map[string]string // Key value pairs for adapter specific configuration
 }
 
-var adapterMap = make(map[string]*AdapterInfo)
+var (
+	adapterMu  sync.Mutex
+	adapterMap = make(map[string]*AdapterInfo)
+)
 
+// NewAdapter constructs a registered adapter by name without opening it. Use
+// ListAdapterNames to discover what is available in this build.
 func NewAdapter(adapterName string, cfg *AdapterConfig) (Adapter, error) {
-	if adapter, found := adapterMap[adapterName]; found {
+	adapterMu.Lock()
+	adapter, found := adapterMap[adapterName]
+	adapterMu.Unlock()
+	if found {
 		return adapter.New(cfg)
 	}
 	return nil, fmt.Errorf("unknown adapter %q", adapterName)
 }
 
+// RegisterAdapter adds an adapter to the registry, typically from an init
+// function. It fails if the name is already taken.
 func RegisterAdapter(adapter *AdapterInfo) error {
+	adapterMu.Lock()
+	defer adapterMu.Unlock()
 	if _, found := adapterMap[adapter.Name]; !found {
 		adapterMap[adapter.Name] = adapter
 		return nil
@@ -68,8 +89,12 @@ func RegisterAdapter(adapter *AdapterInfo) error {
 	return fmt.Errorf("adapter %s already registered", adapter.Name)
 }
 
+// ListAdapterNames returns the names of all registered adapters, sorted
+// case-insensitively.
 func ListAdapterNames() []string {
-	var out []string
+	adapterMu.Lock()
+	defer adapterMu.Unlock()
+	out := make([]string, 0, len(adapterMap))
 	for name := range adapterMap {
 		out = append(out, name)
 	}
@@ -77,8 +102,11 @@ func ListAdapterNames() []string {
 	return out
 }
 
+// ListAdapters returns a copy of every registered adapter's info.
 func ListAdapters() []AdapterInfo {
-	var out []AdapterInfo
+	adapterMu.Lock()
+	defer adapterMu.Unlock()
+	out := make([]AdapterInfo, 0, len(adapterMap))
 	for _, adapter := range adapterMap {
 		out = append(out, *adapter)
 	}

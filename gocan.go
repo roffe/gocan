@@ -93,7 +93,8 @@ func WithEventHandler(fn func(Event)) Opt {
 	return WithEventFunc(fn)
 }
 
-// Create a new CAN client with given adapter name and config
+// New creates a CAN client using the named adapter from the registry (see
+// ListAdapterNames) opened with the given config.
 func New(ctx context.Context, adapterName string, cfg *AdapterConfig) (*Client, error) {
 	adapter, err := NewAdapter(adapterName, cfg)
 	if err != nil {
@@ -102,7 +103,8 @@ func New(ctx context.Context, adapterName string, cfg *AdapterConfig) (*Client, 
 	return NewWithOpts(ctx, adapter)
 }
 
-// Create a new CAN client with given adapter and options
+// NewWithOpts creates a CAN client around an already-constructed adapter and
+// opens it. Options can register event listeners before the adapter starts.
 func NewWithOpts(ctx context.Context, adapter Adapter, opts ...Opt) (*Client, error) {
 	cctx, cancel := context.WithCancelCause(ctx)
 	c := &Client{
@@ -198,12 +200,12 @@ func (c *Client) pump() {
 	}
 }
 
-// Return the underlying adapter
+// Adapter returns the underlying adapter.
 func (c *Client) Adapter() Adapter {
 	return c.adapter
 }
 
-// Return the name of the underlying adapter
+// AdapterName returns the name of the underlying adapter.
 func (c *Client) AdapterName() string {
 	return c.adapter.Name()
 }
@@ -253,7 +255,7 @@ func (c *Client) Wait(ctx context.Context) error {
 	}
 }
 
-// Close the client and underlying adapter
+// Close shuts down the client and the underlying adapter.
 func (c *Client) Close() (err error) {
 	c.closeOnce.Do(func() {
 		err = c.adapter.Close()
@@ -263,7 +265,8 @@ func (c *Client) Close() (err error) {
 	return
 }
 
-// Send a CAN Frame
+// SendFrame queues a frame to the adapter's send buffer. It returns once the
+// frame is queued, not when it reaches the bus; use SendSync for that.
 func (c *Client) SendFrame(msg *CANFrame) error {
 	select {
 	case c.adapter.Send() <- msg:
@@ -275,7 +278,7 @@ func (c *Client) SendFrame(msg *CANFrame) error {
 		return ErrClosed
 	case <-time.After(5 * time.Second):
 		return &TimeoutError{
-			Timeout: 5,
+			Timeout: 5 * time.Second,
 			Frames:  []uint32{msg.Identifier},
 			Type:    "send",
 		}
@@ -306,17 +309,19 @@ func (c *Client) SendSync(ctx context.Context, frame *CANFrame, timeout time.Dur
 	}
 }
 
-// Shortcommand to send a standard 11bit frame
+// Send builds and queues a standard 11-bit frame.
 func (c *Client) Send(identifier uint32, data []byte, f CANFrameType) error {
 	return c.SendFrame(NewFrame(identifier, data, f))
 }
 
-// Shortcommand to send a extended 29bit frame
+// SendExtended builds and queues an extended 29-bit frame.
 func (c *Client) SendExtended(identifier uint32, data []byte, f CANFrameType) error {
 	return c.SendFrame(NewExtendedFrame(identifier, data, f))
 }
 
-// Send and wait up to <timeout> for a answer on given identifiers
+// SendAndWait sends frame and waits up to timeout for a reply carrying one of
+// the given identifiers. It stamps frame.Timeout as a hint for buffered
+// adapters; frames are single-use and must not be sent again.
 func (c *Client) SendAndWait(ctx context.Context, frame *CANFrame, timeout time.Duration, identifiers ...uint32) (*CANFrame, error) {
 	frame.Timeout = uint32(timeout.Milliseconds())
 	sub := c.newSub(1, identifiers...)
@@ -331,7 +336,8 @@ func (c *Client) SendAndWait(ctx context.Context, frame *CANFrame, timeout time.
 	return sub.wait(waitCtx)
 }
 
-// Receive a single CAN frame with specific identifier and timeout
+// Recv waits up to timeout for a single frame carrying one of the given
+// identifiers (no identifiers = any frame).
 func (c *Client) Recv(ctx context.Context, timeout time.Duration, identifiers ...uint32) (*CANFrame, error) {
 	sub := c.newSub(1, identifiers...)
 	defer func() {
@@ -342,41 +348,43 @@ func (c *Client) Recv(ctx context.Context, timeout time.Duration, identifiers ..
 	return sub.wait(waitCtx)
 }
 
-// Subscribe to CAN identifiers with a callback function
+// SubscribeFunc invokes fn from a dedicated goroutine for every frame
+// carrying one of the given identifiers, until ctx is cancelled or the
+// returned Subscriber is closed.
 func (c *Client) SubscribeFunc(ctx context.Context, fn func(*CANFrame), identifiers ...uint32) *Subscriber {
 	sub := c.Subscribe(ctx, identifiers...)
 	go func() {
-		defer sub.Close()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case frame, ok := <-sub.responseChan:
-				if !ok {
-					return
-				}
-				fn(frame)
-			}
+		for frame := range sub.responseChan {
+			fn(frame)
 		}
 	}()
 	return sub
 }
 
-// Subscribe to CAN identifiers with provided channel
+// SubscribeChan delivers frames carrying one of the given identifiers to
+// channel. The caller owns the channel: the library never closes it, and
+// delivery is non-blocking, so frames are dropped if it is full. The
+// subscription is released when ctx is cancelled or Close is called.
 func (c *Client) SubscribeChan(ctx context.Context, channel chan *CANFrame, identifiers ...uint32) *Subscriber {
 	sub := &Subscriber{
+		createdAt:    callerInfo(2),
 		cl:           c,
 		identifiers:  toSet(identifiers),
 		filterCount:  len(identifiers),
 		responseChan: channel,
 	}
 	c.fh.registerSub(sub)
+	context.AfterFunc(ctx, sub.Close)
 	return sub
 }
 
-// Subscribe to CAN identifiers and return a message channel
+// Subscribe returns a Subscriber receiving frames that carry one of the given
+// identifiers (no identifiers = all traffic). The subscription is released
+// and its channel closed when ctx is cancelled or Close is called.
 func (c *Client) Subscribe(ctx context.Context, identifiers ...uint32) *Subscriber {
-	return c.newSub(40, identifiers...)
+	sub := c.newSub(40, identifiers...)
+	context.AfterFunc(ctx, sub.Close)
+	return sub
 }
 
 func (c *Client) newSub(bufferSize int, identifiers ...uint32) *Subscriber {
@@ -386,6 +394,7 @@ func (c *Client) newSub(bufferSize int, identifiers ...uint32) *Subscriber {
 		identifiers:  toSet(identifiers),
 		filterCount:  len(identifiers),
 		responseChan: make(chan *CANFrame, bufferSize),
+		ownedChan:    true,
 	}
 	c.fh.registerSub(sub)
 	return sub

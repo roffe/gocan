@@ -4,7 +4,6 @@ go 1.26.0
 
 require (
 	github.com/bendikro/dl v0.0.0-20190410215913-e41fdb9069d4
-	github.com/fatih/color v1.19.0
 	github.com/google/gousb v1.1.3
 	go.bug.st/serial v1.7.1
 	golang.org/x/sync v0.20.0
@@ -18,7 +17,6 @@ require (
 )
 
 require (
-	github.com/mattn/go-colorable v0.1.14 // indirect
 	golang.org/x/text v0.37.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260209200024-4cfbd4190f57 // indirect
 )
@@ -26,7 +24,6 @@ require (
 require (
 	github.com/golang/mock v1.6.0 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
-	github.com/mattn/go-isatty v0.0.22 // indirect
 	github.com/mdlayher/netlink v1.8.0 // indirect
 	github.com/mdlayher/socket v0.5.1 // indirect
 	golang.org/x/mod v0.36.0
