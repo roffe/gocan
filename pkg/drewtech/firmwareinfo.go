@@ -19,6 +19,9 @@ func ExtractVersions(data []byte) FirmwareInfo {
 	const fwOffset = 28
 	const blOffset = 32
 
+	if len(data) < blOffset+4 {
+		return FirmwareInfo{}
+	}
 	return FirmwareInfo{
 		FW: Version{
 			Major: data[fwOffset+3],
