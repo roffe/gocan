@@ -64,10 +64,8 @@ func (a *Drewtech) Open(ctx context.Context) error {
 		return fmt.Errorf("PassThruConnect failed: %w", err)
 	}
 
-	if len(a.cfg.CANFilter) > 0 {
-		if err := a.SetFilter(a.cfg.CANFilter); err != nil {
-			return err
-		}
+	if err := a.SetFilter(a.cfg.CANFilter); err != nil {
+		return err
 	}
 
 	go a.sendManager(ctx)
@@ -86,7 +84,8 @@ func (a *Drewtech) recvFrame(f *drewtech.CANFrame) {
 }
 
 // SetFilter replaces the installed PASS filters. A filter per CAN id is
-// required: with none installed the device forwards nothing.
+// required: with none installed the device forwards nothing, so an empty
+// list installs a single pass-all filter (mask 0 matches every id).
 func (a *Drewtech) SetFilter(filters []uint32) error {
 	for _, id := range a.filters {
 		if err := a.dev.PassThruStopMsgFilter(id); err != nil {
@@ -95,6 +94,14 @@ func (a *Drewtech) SetFilter(filters []uint32) error {
 	}
 	a.filters = a.filters[:0]
 	log.Printf("Starting filter... %02X", filters)
+	if len(filters) == 0 {
+		id, err := a.dev.PassThruStartMsgFilter(drewtech.PASS_FILTER, 0, 0)
+		if err != nil {
+			return fmt.Errorf("PassThruStartMsgFilter failed: %w", err)
+		}
+		a.filters = append(a.filters, id)
+		return nil
+	}
 	for _, filter := range filters {
 		id, err := a.dev.PassThruStartMsgFilter(drewtech.PASS_FILTER, filter, 0xffffffff)
 		if err != nil {
