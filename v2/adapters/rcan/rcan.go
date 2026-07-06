@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/gousb"
+	"github.com/gotmc/libusb/v2"
 	gocan "github.com/roffe/gocan/v2"
 )
 
@@ -18,9 +18,7 @@ const (
 	usbVID = 0xffff
 	usbPID = 0x1337
 
-	usbConfigNumber   = 1
 	usbInterfaceNum   = 0
-	usbAltSetting     = 0
 	usbOutEndpointNum = 0x01
 	usbInEndpointNum  = 0x81
 
@@ -31,6 +29,8 @@ const (
 	cmdOpen     = 0x02
 	cmdClose    = 0x03
 )
+
+const libusbErrTimeout = libusb.ErrorCode(-7) // LIBUSB_ERROR_TIMEOUT
 
 func init() {
 	gocan.Register(gocan.AdapterInfo{
@@ -45,15 +45,11 @@ type RCan struct {
 	cfg gocan.Config
 	bus *gocan.Bus
 
-	usbCtx *gousb.Context
-	dev    *gousb.Device
-	devCfg *gousb.Config
-	iface  *gousb.Interface
-	in     *gousb.InEndpoint
-	out    *gousb.OutEndpoint
+	usbCtx *libusb.Context
+	dev    *libusb.Device
+	handle *libusb.DeviceHandle
 
-	readStream *gousb.ReadStream
-	closeOnce  sync.Once
+	closeOnce sync.Once
 }
 
 func New(cfg gocan.Config) (gocan.Adapter, error) {
@@ -62,73 +58,38 @@ func New(cfg gocan.Config) (gocan.Adapter, error) {
 
 func (r *RCan) Open(ctx context.Context, bus *gocan.Bus) error {
 	r.bus = bus
-	usbCtx := gousb.NewContext()
-	dev, err := usbCtx.OpenDeviceWithVIDPID(usbVID, usbPID)
+	usbCtx, err := libusb.NewContext()
 	if err != nil {
-		if dev != nil {
-			dev.Close()
-		}
-		usbCtx.Close()
-		return err
+		return fmt.Errorf("libusb init: %w", err)
 	}
-	if dev == nil {
-		usbCtx.Close()
-		return errors.New("rCAN device not found")
-	}
-
-	cfg, err := dev.Config(usbConfigNumber)
+	dev, handle, err := usbCtx.OpenDeviceWithVendorProduct(usbVID, usbPID)
 	if err != nil {
+		usbCtx.Close()
+		return fmt.Errorf("rCAN device not found: %w", err)
+	}
+	_ = handle.SetAutoDetachKernelDriver(true) // no-op on Windows, helpful on Linux
+	if err := handle.ClaimInterface(usbInterfaceNum); err != nil {
+		handle.Close()
 		dev.Close()
 		usbCtx.Close()
-		return err
+		return fmt.Errorf("claim interface %d: %w", usbInterfaceNum, err)
 	}
-	iface, err := cfg.Interface(usbInterfaceNum, usbAltSetting)
-	if err != nil {
-		cfg.Close()
-		dev.Close()
-		usbCtx.Close()
-		return err
-	}
-	in, err := iface.InEndpoint(usbInEndpointNum)
-	if err != nil {
-		iface.Close()
-		cfg.Close()
-		dev.Close()
-		usbCtx.Close()
-		return fmt.Errorf("InEndpoint(%d): %w", usbInEndpointNum, err)
-	}
-	out, err := iface.OutEndpoint(usbOutEndpointNum)
-	if err != nil {
-		iface.Close()
-		cfg.Close()
-		dev.Close()
-		usbCtx.Close()
-		return err
-	}
-	r.usbCtx, r.dev, r.devCfg = usbCtx, dev, cfg
-	r.iface, r.in, r.out = iface, in, out
-
-	stream, err := r.in.NewStream(maxCommandSize, 2) // 2 transfers in flight
-	if err != nil {
-		r.closeUSB()
-		return err
-	}
-	r.readStream = stream
+	r.usbCtx, r.dev, r.handle = usbCtx, dev, handle
 
 	go r.readLoop(ctx)
 
 	// close (reset), set speed, open — mirrors the v1 bring-up.
-	if _, err := r.out.WriteContext(ctx, []byte{cmdClose}); err != nil {
+	if _, err := r.bulkOut([]byte{cmdClose}, 200); err != nil {
 		r.closeUSB()
 		return err
 	}
-	speedBytes := make([]byte, 2)
-	binary.LittleEndian.PutUint16(speedBytes, uint16(r.cfg.CANRate))
-	if _, err := r.out.WriteContext(ctx, append([]byte{cmdSetSpeed}, speedBytes...)); err != nil {
+	speed := []byte{cmdSetSpeed, 0, 0}
+	binary.LittleEndian.PutUint16(speed[1:], uint16(r.cfg.CANRate))
+	if _, err := r.bulkOut(speed, 200); err != nil {
 		r.closeUSB()
 		return err
 	}
-	if _, err := r.out.WriteContext(ctx, []byte{cmdOpen}); err != nil {
+	if _, err := r.bulkOut([]byte{cmdOpen}, 200); err != nil {
 		r.closeUSB()
 		return err
 	}
@@ -137,8 +98,8 @@ func (r *RCan) Open(ctx context.Context, bus *gocan.Bus) error {
 
 func (r *RCan) Close() error {
 	r.closeOnce.Do(func() {
-		if r.out != nil {
-			r.out.Write([]byte{cmdClose}) // best-effort channel close
+		if r.handle != nil {
+			r.bulkOut([]byte{cmdClose}, 40) // best-effort channel close
 			time.Sleep(20 * time.Millisecond)
 		}
 		r.closeUSB()
@@ -147,38 +108,44 @@ func (r *RCan) Close() error {
 }
 
 func (r *RCan) closeUSB() {
-	if r.readStream != nil {
-		r.readStream.Close()
-	}
-	if r.iface != nil {
-		r.iface.Close()
-	}
-	if r.devCfg != nil {
-		r.devCfg.Close()
+	if r.handle != nil {
+		_ = r.handle.ReleaseInterface(usbInterfaceNum)
+		_ = r.handle.Close()
 	}
 	if r.dev != nil {
 		r.dev.Close()
 	}
 	if r.usbCtx != nil {
-		r.usbCtx.Close()
+		_ = r.usbCtx.Close()
 	}
+}
+
+func (r *RCan) bulkOut(data []byte, timeoutMs int) (int, error) {
+	return r.handle.BulkTransferOut(usbOutEndpointNum, data, timeoutMs)
+}
+
+func (r *RCan) bulkIn(buf []byte, timeoutMs int) (int, error) {
+	return r.handle.BulkTransfer(usbInEndpointNum, buf, len(buf), timeoutMs)
+}
+
+func isUSBTimeout(err error) bool {
+	ec, ok := err.(libusb.ErrorCode)
+	return ok && ec == libusbErrTimeout
 }
 
 // Send writes one standard frame: cmd, idHi, idLo, dlc, data. Extended IDs
 // are not implemented by the firmware yet (matches v1).
-func (r *RCan) Send(ctx context.Context, f gocan.Frame) error {
+func (r *RCan) Send(_ context.Context, f gocan.Frame) error {
 	if f.Extended {
 		return errors.New("rCAN: extended IDs not implemented")
 	}
-	wctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
-	defer cancel()
 	var buf [4 + 8]byte
 	buf[0] = cmdCANFrame
 	buf[1] = byte(f.ID >> 8)
 	buf[2] = byte(f.ID)
 	buf[3] = f.Length
 	copy(buf[4:], f.Data[:f.Length])
-	_, err := r.out.WriteContext(wctx, buf[:4+f.Length])
+	_, err := r.bulkOut(buf[:4+f.Length], 10)
 	return err
 }
 
@@ -188,10 +155,13 @@ func (r *RCan) readLoop(ctx context.Context) {
 	commandBuff := make([]byte, maxCommandSize)
 	var commandBuffPtr int
 
-	for {
-		n, err := r.readStream.ReadContext(ctx, readBuf)
+	for ctx.Err() == nil {
+		n, err := r.bulkIn(readBuf, 100)
 		if err != nil {
-			if ctx.Err() == nil {
+			if isUSBTimeout(err) {
+				continue // idle, no data
+			}
+			if ctx.Err() == nil { // dead device, not a shutdown
 				r.bus.Fatal(fmt.Errorf("failed to read from usb device: %w", err))
 			}
 			return

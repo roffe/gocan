@@ -38,6 +38,9 @@ const (
 
 var baudrates = [...]uint{115200, 38400, 230400, 921600, 2000000, 1000000, 57600}
 
+// defaultReplyWait mirrors the STPTO250 device default set during init.
+const defaultReplyWait = 250 * time.Millisecond
+
 func init() {
 	register := func(name, desc string, caps gocan.Capabilities) {
 		gocan.Register(gocan.AdapterInfo{
@@ -162,7 +165,7 @@ func (st *Scantool) Open(ctx context.Context, bus *gocan.Bus) error {
 		"ATCAF0",       // automatic formatting off
 		st.canrateCMD,  // CAN bit-rate (may be empty)
 		"ATCFC0",       // automatic CAN flow control off
-		"ATST32",       // timeout 200 ms
+		"STPTO250",     // default reply wait 250 ms (STPX t: only sent when it differs)
 		"ATR0",         // replies off
 		st.mask,
 		st.filter,
@@ -206,19 +209,27 @@ func (st *Scantool) Send(ctx context.Context, f gocan.Frame) error {
 	var cmd bytes.Buffer
 	fmt.Fprintf(&cmd, "STPXh:%03x,d:", f.ID&0xFFF)
 	fmt.Fprintf(&cmd, "%x", f.Bytes())
-	if deadline, ok := ctx.Deadline(); ok {
-		if ms := time.Until(deadline).Milliseconds(); ms > 0 && ms != 200 {
-			fmt.Fprintf(&cmd, ",t:%d", ms)
-		}
-	}
+	// The ctx deadline is cancellation only, never a wire timeout: the reply
+	// wait is the WithResponseTimeout hint (Request stamps it from a near
+	// deadline) or the STPTO250 device default. t: rides along only when it
+	// differs (ceiled to whole ms, so deadline-derived ~249.9 ms is 250 and
+	// stays silent). STPX t: is 16-bit ms, larger values make the STN reject
+	// the whole command with '?'.
+	wait := defaultReplyWait
 	if n := gocan.ExpectedResponses(ctx); n > 0 {
+		if d := gocan.ResponseTimeout(ctx); d > 0 {
+			wait = min(d+time.Millisecond-1, 65535*time.Millisecond).Truncate(time.Millisecond)
+			if wait != defaultReplyWait {
+				fmt.Fprintf(&cmd, ",t:%d", wait.Milliseconds())
+			}
+		}
 		fmt.Fprintf(&cmd, ",r:%d", n)
 	}
 
 	if st.cfg.Debug {
 		st.bus.Emit(gocan.Event{Type: gocan.EventTypeDebug, Details: "<o> " + cmd.String()})
 	}
-	resp, err := st.sendCommand(ctx, cmd.String())
+	resp, err := st.sendCommand(ctx, cmd.String(), wait)
 	if err != nil {
 		// The port is our only link to the device; a failed exchange with no
 		// shutdown in progress means it is gone.
@@ -236,7 +247,7 @@ func (st *Scantool) Send(ctx context.Context, f gocan.Frame) error {
 func (st *Scantool) SetFilter(filters []uint32) error {
 	st.filter, st.mask = canFilter(filters)
 	for _, cmd := range []string{"STPC", st.mask, st.filter, "STPO"} {
-		if _, err := st.sendCommand(context.Background(), cmd); err != nil {
+		if _, err := st.sendCommand(context.Background(), cmd, 0); err != nil {
 			return err
 		}
 	}
@@ -271,14 +282,13 @@ func (st *Scantool) handleResponse(resp string) {
 }
 
 // sendCommand writes cmd and reads the full response up to the '>' prompt.
-func (st *Scantool) sendCommand(ctx context.Context, cmd string) (string, error) {
+// wait is the on-wire reply wait (STPX t:) the prompt may lag behind; zero
+// for commands that answer immediately.
+func (st *Scantool) sendCommand(ctx context.Context, cmd string, wait time.Duration) (string, error) {
 	if _, err := st.port.Write([]byte(cmd + "\r")); err != nil {
 		return "", fmt.Errorf("failed to send command: %w", err)
 	}
-	deadline := time.Now().Add(time.Second)
-	if d, ok := ctx.Deadline(); ok && d.After(deadline) {
-		deadline = d.Add(100 * time.Millisecond)
-	}
+	deadline := time.Now().Add(wait + time.Second)
 	st.line = st.line[:0]
 	var readBuf [64]byte
 	for {

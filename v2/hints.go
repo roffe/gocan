@@ -1,6 +1,9 @@
 package gocan
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 type expectedResponsesKey struct{}
 
@@ -22,4 +25,24 @@ func WithExpectedResponses(ctx context.Context, n int) context.Context {
 func ExpectedResponses(ctx context.Context) int {
 	n, _ := ctx.Value(expectedResponsesKey{}).(int)
 	return n
+}
+
+type responseTimeoutKey struct{}
+
+// WithResponseTimeout hints buffered adapters (the ELM/STN family) how long
+// to wait on the wire for the hinted reply frames of a single exchange — the
+// v2 form of v1's per-command timeout variable. Without it such adapters use
+// their own default (250 ms). Request stamps it automatically from its
+// context deadline when that deadline is near; the ctx deadline itself is
+// never used as a wire timeout (an operation-lifetime deadline says nothing
+// about one frame's reply).
+func WithResponseTimeout(ctx context.Context, d time.Duration) context.Context {
+	return context.WithValue(ctx, responseTimeoutKey{}, d)
+}
+
+// ResponseTimeout returns the reply-wait hint carried by ctx, or 0 when none
+// is set. For adapter implementations.
+func ResponseTimeout(ctx context.Context) time.Duration {
+	d, _ := ctx.Value(responseTimeoutKey{}).(time.Duration)
+	return d
 }

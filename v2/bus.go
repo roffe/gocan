@@ -7,6 +7,7 @@ import (
 	"iter"
 	"log/slog"
 	"sync"
+	"time"
 )
 
 // ErrClosed is the context cause set when a bus is shut down via Close. It is
@@ -195,13 +196,27 @@ func (b *Bus) Recv(ctx context.Context, identifiers ...uint32) (Frame, error) {
 	return b.waitSub(ctx, s)
 }
 
+// maxAutoResponseTimeout separates a per-request deadline from an inherited
+// operation-lifetime one: every real single-exchange wait in the wild is
+// 40 ms – 2 s, while dump/flash contexts run for minutes. Only the former is
+// forwarded to buffered adapters as a wire timeout.
+const maxAutoResponseTimeout = 10 * time.Second
+
 // Request sends frame and waits for a reply carrying one of the given
 // identifiers. Bound it with a context deadline. Unless the caller already
-// set one, an expected-responses hint of 1 is stamped for buffered adapters;
-// use WithExpectedResponses for commands answered by multiple frames.
+// set one, an expected-responses hint of 1 is stamped for buffered adapters,
+// and a near deadline (≤ 10 s) is stamped as their reply-wait; use
+// WithExpectedResponses / WithResponseTimeout to override.
 func (b *Bus) Request(ctx context.Context, frame Frame, replyIdentifiers ...uint32) (Frame, error) {
 	if ExpectedResponses(ctx) == 0 {
 		ctx = WithExpectedResponses(ctx, 1)
+	}
+	if ResponseTimeout(ctx) == 0 {
+		if d, ok := ctx.Deadline(); ok {
+			if remain := time.Until(d); remain > 0 && remain <= maxAutoResponseTimeout {
+				ctx = WithResponseTimeout(ctx, remain)
+			}
+		}
 	}
 	sctx, cancel := context.WithCancel(ctx)
 	defer cancel()

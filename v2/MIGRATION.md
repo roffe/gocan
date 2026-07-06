@@ -131,9 +131,14 @@ resp, err := bus.Request(rctx, gocan.NewFrame(0x7E0, data), 0x7E8)
 `Request` stamps a hint of 1 automatically, so single-reply exchanges need
 nothing. Plain `Send` without a hint is fire-and-forget (v1 `Outgoing`).
 Adapters read the hint with `gocan.ExpectedResponses(ctx)`; the ones that
-don't buffer replies simply never look. The ELM/STN family builds its
-`r:`/`t:` command parameters from the hint and the context deadline, so
-they behave exactly as they did under v1's `SendAndWait`.
+don't buffer replies simply never look.
+
+v1's per-command `timeout` variable became `gocan.WithResponseTimeout(ctx, d)`
+— the on-wire reply wait for one exchange. Buffered adapters default to
+250 ms without it, and `Request` stamps it from its context deadline when
+that deadline is near (≤ 10 s). A far deadline is never used: an
+operation-lifetime context (a 20-minute dump) says nothing about how long
+one frame's reply takes.
 
 To collect a multi-frame response, subscribe before sending:
 
