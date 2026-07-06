@@ -86,12 +86,37 @@ func WithRecvID(recvID ...uint32) GMLanOption {
 	}
 }
 
+// GMLAN $21 busyRepeatRequest means "repeat the request": give the node a
+// moment and try again before surfacing the error.
+const (
+	busyRetries    = 3
+	busyRetryDelay = 100 * time.Millisecond
+)
+
+// newWindow is context.WithCancel behind a helper: the $A9 receive window
+// deliberately outlives its creating loop iteration (closed by a deferred
+// call or on busy-retry), which vet's lostcancel check cannot follow.
+func newWindow(parent context.Context) (context.Context, context.CancelFunc) {
+	return context.WithCancel(parent)
+}
+
 // request sends payload on the client canID and waits for a reply on the
-// recvIDs, bounded by timeout.
+// recvIDs, bounded by timeout. A busyRepeatRequest reply is retried up to
+// busyRetries times.
 func (cl *Client) request(ctx context.Context, payload []byte, timeout time.Duration) (gocan.Frame, error) {
-	rctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	return cl.c.Request(rctx, gocan.NewFrame(cl.canID, payload), cl.recvID...)
+	for attempt := 0; ; attempt++ {
+		rctx, cancel := context.WithTimeout(ctx, timeout)
+		resp, err := cl.c.Request(rctx, gocan.NewFrame(cl.canID, payload), cl.recvID...)
+		cancel()
+		if err != nil || !isBusyReply(payload[1], resp) || attempt >= busyRetries {
+			return resp, err
+		}
+		select {
+		case <-time.After(busyRetryDelay):
+		case <-ctx.Done():
+			return resp, ctx.Err()
+		}
+	}
 }
 
 // recv waits for a single reply on the recvIDs, bounded by timeout.
@@ -314,6 +339,9 @@ func (cl *Client) ReturnToNormalMode(ctx context.Context) error {
 	resp, err := cl.request(ctx, []byte{0x01, RETURN_TO_NORMAL_MODE}, cl.defaultTimeout)
 	if err != nil {
 		return fmt.Errorf("ReturnToNormalMode[1]: %w", err)
+	}
+	if resp.Data[1] == 0x60 { // positive response; CheckErr would misread it as the T8 busy frame
+		return nil
 	}
 	return CheckErr(resp)
 }
@@ -965,16 +993,62 @@ func (cl *Client) ReadDiagnosticInformation(ctx context.Context, level Diagnosti
 	payload := []byte{0x02 + byte(len(DTCMaskRecord)), 0xA9, byte(level)}
 	payload = append(payload, DTCMaskRecord...)
 
+	// The DTCs stream as UUDT frames on 0x5E8 at ~50 ms intervals after the
+	// (response-pending) USDT reply, terminated by an endOfDTCReport marker
+	// (GMW3110 8.18.3.3) — nothing announces the count up front. Buffered
+	// adapters (ELM/STN) hold one receive window open for the whole stream
+	// (the wire hints below) and deliver frames as they arrive; Send blocks
+	// for the window's lifetime there, so it runs in a goroutine and the
+	// window context is cancelled as soon as the marker arrives instead of
+	// waiting out the full wire wait.
 	sctx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	defer cancel() // also closes a still-open adapter window (wctx below is a child)
 	codeChan := cl.c.Subscribe(sctx, 0x5E8)
+	respChan := cl.c.Subscribe(sctx, cl.recvID...)
+	frame := gocan.NewFrame(cl.canID, payload)
 
-	rctx, rcancel := context.WithTimeout(ctx, cl.defaultTimeout)
-	rctx = gocan.WithExpectedResponses(rctx, 15)
-	resp, err := cl.c.Request(rctx, gocan.NewFrame(cl.canID, payload), cl.recvID...)
-	rcancel()
-	if err != nil {
-		return nil, err
+	var resp gocan.Frame
+	var wcancel context.CancelFunc
+	defer func() { wcancel() }() // closes the (deliberately still open) window on exit
+	for attempt := 0; ; attempt++ {
+		var wctx context.Context
+		wctx, wcancel = newWindow(sctx)
+		hctx := gocan.WithExpectedResponses(gocan.WithResponseTimeout(wctx, 1500*time.Millisecond), 30)
+		sendDone := make(chan error, 1)
+		go func() { sendDone <- cl.c.Send(hctx, frame) }()
+
+		select {
+		case resp = <-respChan:
+		case err := <-sendDone:
+			// streaming adapter: send returned before the ECU replied
+			if err != nil {
+				return nil, err
+			}
+			select {
+			case resp = <-respChan:
+			case <-time.After(cl.defaultTimeout):
+				return nil, errors.New("readDiagnosticInformation: no response")
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		case <-time.After(3 * time.Second):
+			return nil, errors.New("readDiagnosticInformation: no response")
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+
+		if !isBusyReply(0xA9, resp) {
+			break // leave the window open: the UUDT stream is still arriving
+		}
+		wcancel() // close this attempt's window before opening the next
+		if attempt >= busyRetries {
+			return nil, CheckErr(resp)
+		}
+		select {
+		case <-time.After(busyRetryDelay):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	}
 
 	if err := CheckErr(resp); err != nil && (resp.Data[3] != 0x78) { // Response pending
@@ -994,8 +1068,9 @@ func (cl *Client) ReadDiagnosticInformation(ctx context.Context, level Diagnosti
 				return out, nil
 			}
 			out = append(out, DTC{
-				Code:   DecodeDTCSlice([]byte{resp.Data[1], resp.Data[2]}),
-				Status: resp.Data[4],
+				Code:        DecodeDTCSlice([]byte{resp.Data[1], resp.Data[2]}),
+				FailureType: resp.Data[3],
+				Status:      resp.Data[4],
 			})
 		case <-time.After(500 * time.Millisecond):
 			log.Println("DTC response: timeout")

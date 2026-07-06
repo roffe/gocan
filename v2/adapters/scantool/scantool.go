@@ -21,8 +21,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
-	"strings"
 	"time"
 
 	gocan "github.com/roffe/gocan/v2"
@@ -36,7 +36,11 @@ const (
 	STN2120   = "STN2120"
 )
 
-var baudrates = [...]uint{115200, 38400, 230400, 921600, 2000000, 1000000, 57600}
+// Hunt order: the power-up default (PP 0C = 115.2 kbps, also where an
+// ATZ'd close leaves the device) first, then the target rate (a device
+// left switched by a crashed session), then the rest. cfg.PortBaudrate,
+// when set, is tried before all of these.
+var baudrates = [...]uint{115200, 2_000_000, 38400, 230400, 921600, 1_000_000, 57600}
 
 // defaultReplyWait mirrors the STPTO250 device default set during init.
 const defaultReplyWait = 250 * time.Millisecond
@@ -137,25 +141,37 @@ func (st *Scantool) Open(ctx context.Context, bus *gocan.Bus) error {
 		return err
 	}
 
-	// Hunt for the adapter's current baud rate and move it to 2 Mbit.
+	// Hunt for the adapter's current baud rate and move it to 2 Mbit. A
+	// failed handshake leaves the device reverted to its old rate (STBRT),
+	// and a device mid-reboot answers nothing, so keep sweeping the
+	// candidate rates until the overall deadline.
 	const target = 2_000_000
-	found := false
-	for _, from := range baudrates {
-		if err := st.trySpeed(from, target); err == nil {
-			found = true
-			break
+	rates := make([]uint, 0, len(baudrates)+1)
+	if st.cfg.PortBaudrate > 0 {
+		rates = append(rates, uint(st.cfg.PortBaudrate))
+	}
+	for _, r := range baudrates {
+		if !slices.Contains(rates, r) {
+			rates = append(rates, r)
 		}
-		time.Sleep(200 * time.Millisecond)
 	}
-	if !found {
-		st.port.Close()
-		return errors.New("failed to switch adapter baudrate")
+	deadline := time.Now().Add(4 * time.Second)
+	var err error
+hunt:
+	for {
+		for _, from := range rates {
+			if err = st.trySpeed(from, target); err == nil {
+				break hunt
+			}
+		}
+		if time.Now().After(deadline) {
+			st.port.Close()
+			return fmt.Errorf("failed to switch adapter baudrate: %w", err)
+		}
 	}
-
-	time.Sleep(50 * time.Millisecond)
 
 	initCmds := []string{
-		"ATE0",         // echo off
+		"ATE0",         // echo off (insurance; the probe already sent it)
 		"STUFC0",       // flow control off
 		"ATS0",         // spaces off
 		"ATV1",         // variable DLC on
@@ -166,6 +182,7 @@ func (st *Scantool) Open(ctx context.Context, bus *gocan.Bus) error {
 		st.canrateCMD,  // CAN bit-rate (may be empty)
 		"ATCFC0",       // automatic CAN flow control off
 		"STPTO250",     // default reply wait 250 ms (STPX t: only sent when it differs)
+		"STCMM1",       // ACK received frames (normal node): an unACKed ECU retransmits back-to-back, flooding the reply window with duplicates (seen on STN1130 v5.10.1)
 		"ATR0",         // replies off
 		st.mask,
 		st.filter,
@@ -177,15 +194,18 @@ func (st *Scantool) Open(ctx context.Context, bus *gocan.Bus) error {
 		if st.cfg.Debug {
 			st.bus.Emit(gocan.Event{Type: gocan.EventTypeDebug, Details: ">> " + cmd})
 		}
-		if _, err := st.port.Write([]byte(cmd + "\r")); err != nil {
+		lines, err := st.exec(cmd, 200*time.Millisecond)
+		if err != nil {
 			st.port.Close()
-			return fmt.Errorf("scantool init write failed: %w", err)
+			return fmt.Errorf("scantool init %q: %w", cmd, err)
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if err := st.port.ResetInputBuffer(); err != nil {
-		st.port.Close()
-		return err
+		// A '?' means the firmware rejected the command (e.g. STUFC on
+		// non-stand-alone devices); surface it but keep going — refusing
+		// to open over a single tuning command would regress devices
+		// that work today.
+		if !hasOK(lines) {
+			st.bus.Emit(gocan.Event{Type: gocan.EventTypeWarning, Details: fmt.Sprintf("init %q answered %q", cmd, lines)})
+		}
 	}
 	return nil
 }
@@ -195,7 +215,11 @@ func (st *Scantool) Close() error {
 		return nil
 	}
 	time.Sleep(25 * time.Millisecond)
-	st.port.Write([]byte("ATZ\r")) // best-effort reset
+	// Full reset, not ATWS: reusing a warm-started device showed CAN-level
+	// misbehavior on STN1130 v5.10.1 (unACKed ECU frames retransmitted in
+	// bursts, stale replies leaking into the next STPX window). ATZ reboots
+	// to power-up defaults at 115.2 kbps; the next Open hunts it there.
+	st.port.Write([]byte("ATWS\r"))
 	time.Sleep(10 * time.Millisecond)
 	st.port.ResetInputBuffer()
 	st.port.ResetOutputBuffer()
@@ -229,8 +253,7 @@ func (st *Scantool) Send(ctx context.Context, f gocan.Frame) error {
 	if st.cfg.Debug {
 		st.bus.Emit(gocan.Event{Type: gocan.EventTypeDebug, Details: "<o> " + cmd.String()})
 	}
-	resp, err := st.sendCommand(ctx, cmd.String(), wait)
-	if err != nil {
+	if err := st.sendCommand(ctx, cmd.String(), wait); err != nil {
 		// The port is our only link to the device; a failed exchange with no
 		// shutdown in progress means it is gone.
 		if ctx.Err() == nil && st.bus.Err() == nil {
@@ -238,7 +261,6 @@ func (st *Scantool) Send(ctx context.Context, f gocan.Frame) error {
 		}
 		return err
 	}
-	st.handleResponse(resp)
 	return nil
 }
 
@@ -247,121 +269,247 @@ func (st *Scantool) Send(ctx context.Context, f gocan.Frame) error {
 func (st *Scantool) SetFilter(filters []uint32) error {
 	st.filter, st.mask = canFilter(filters)
 	for _, cmd := range []string{"STPC", st.mask, st.filter, "STPO"} {
-		if _, err := st.sendCommand(context.Background(), cmd, 0); err != nil {
+		if err := st.sendCommand(context.Background(), cmd, 0); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (st *Scantool) handleResponse(resp string) {
-	for msg := range strings.SplitSeq(strings.TrimSuffix(resp, "\r\r"), "\r") {
-		if msg == "" {
-			continue
+// handleLine processes one completed response line and resets the buffer.
+func (st *Scantool) handleLine() {
+	msg := string(st.line)
+	st.line = st.line[:0]
+	if msg == "" {
+		return
+	}
+	if st.cfg.Debug {
+		st.bus.Emit(gocan.Event{Type: gocan.EventTypeDebug, Details: "<i> " + msg})
+	}
+	switch msg {
+	case "CAN ERROR":
+		st.bus.Emit(gocan.Event{Type: gocan.EventTypeError, Details: "CAN ERROR"})
+	case "STOPPED":
+		st.bus.Emit(gocan.Event{Type: gocan.EventTypeInfo, Details: "STOPPED"})
+	case "?":
+		st.bus.Emit(gocan.Event{Type: gocan.EventTypeWarning, Details: "UNKNOWN COMMAND"})
+	case "NO DATA", "OK":
+	default:
+		f, err := decodeFrame(msg)
+		if err != nil {
+			st.bus.Emit(gocan.Event{Type: gocan.EventTypeError, Details: fmt.Sprintf("failed to decode frame %q: %v", msg, err)})
+			return
 		}
-		if st.cfg.Debug {
-			st.bus.Emit(gocan.Event{Type: gocan.EventTypeDebug, Details: "<i> " + msg})
-		}
-		switch msg {
-		case "CAN ERROR":
-			st.bus.Emit(gocan.Event{Type: gocan.EventTypeError, Details: "CAN ERROR"})
-		case "STOPPED":
-			st.bus.Emit(gocan.Event{Type: gocan.EventTypeInfo, Details: "STOPPED"})
-		case "?":
-			st.bus.Emit(gocan.Event{Type: gocan.EventTypeWarning, Details: "UNKNOWN COMMAND"})
-		case "NO DATA", "OK":
-		default:
-			f, err := decodeFrame(msg)
-			if err != nil {
-				st.bus.Emit(gocan.Event{Type: gocan.EventTypeError, Details: fmt.Sprintf("failed to decode frame %q: %v", msg, err)})
-				continue
-			}
-			st.bus.Deliver(f)
-		}
+		st.bus.Deliver(f)
 	}
 }
 
-// sendCommand writes cmd and reads the full response up to the '>' prompt.
-// wait is the on-wire reply wait (STPX t:) the prompt may lag behind; zero
-// for commands that answer immediately.
-func (st *Scantool) sendCommand(ctx context.Context, cmd string, wait time.Duration) (string, error) {
+// sendCommand writes cmd, then parses and delivers response lines as they
+// arrive, up to the '>' prompt — frames received during a long STPX window
+// reach the bus in real time, and the caller may cancel ctx once it has
+// what it needs. wait is the on-wire reply wait (STPX t:) the prompt may
+// lag behind; zero for commands that answer immediately. On cancellation
+// mid-window the STN is interrupted so the next command starts clean.
+func (st *Scantool) sendCommand(ctx context.Context, cmd string, wait time.Duration) error {
+	st.port.ResetInputBuffer() // discard stale bytes from an interrupted window
 	if _, err := st.port.Write([]byte(cmd + "\r")); err != nil {
-		return "", fmt.Errorf("failed to send command: %w", err)
+		return fmt.Errorf("failed to send command: %w", err)
 	}
 	deadline := time.Now().Add(wait + time.Second)
 	st.line = st.line[:0]
 	var readBuf [64]byte
 	for {
 		if err := context.Cause(ctx); err != nil && ctx.Err() != nil {
-			return "", err
+			st.interrupt()
+			return err
 		}
 		if time.Now().After(deadline) {
-			return "", errors.New("timeout waiting for '>' prompt")
+			return errors.New("timeout waiting for '>' prompt")
 		}
 		n, err := st.port.Read(readBuf[:])
 		if err != nil {
-			return "", fmt.Errorf("read from port: %w", err)
+			return fmt.Errorf("read from port: %w", err)
 		}
 		for _, b := range readBuf[:n] {
-			if b == '>' {
-				return string(st.line), nil
+			switch b {
+			case '>':
+				st.handleLine()
+				return nil
+			case '\r':
+				st.handleLine()
+			default:
+				st.line = append(st.line, b)
 			}
-			st.line = append(st.line, b)
 		}
 	}
 }
 
-// trySpeed pokes the adapter at baud `from` and asks it to move to `to` with
-// STBR, confirming by reading the STN identification string.
+// interrupt halts an in-progress STPX reception: any character stops it
+// (the STN discards the character and answers STOPPED). Drain to the
+// prompt so the next command starts clean. In the rare race where the
+// window already closed, the bare CR repeats the last command; the next
+// sendCommand's ResetInputBuffer clears whatever that produces.
+func (st *Scantool) interrupt() {
+	if _, err := st.port.Write([]byte{'\r'}); err != nil {
+		return
+	}
+	deadline := time.Now().Add(300 * time.Millisecond)
+	var readBuf [64]byte
+	for time.Now().Before(deadline) {
+		n, err := st.port.Read(readBuf[:])
+		if err != nil {
+			return
+		}
+		if bytes.IndexByte(readBuf[:n], '>') >= 0 {
+			return
+		}
+	}
+}
+
+// trySpeed probes the adapter at baud `from` and, if alive, walks the
+// documented STBR handshake to move it to `to`: widen the handshake window
+// with STBRT, send STBR and read its reply at the old baud ('?' = rate not
+// within 3%), switch the host UART, read the STI banner the device prints
+// at the new baud, and answer with a CR it must see before the STBRT window
+// closes — otherwise it reverts to `from`, so any failure past STBR leaves
+// the device at a known rate and the hunt can simply retry.
 func (st *Scantool) trySpeed(from, to uint) error {
 	if err := st.port.SetBaud(int(from)); err != nil {
 		return err
 	}
-	if _, err := st.port.Write([]byte{'\r', '\r', '\r'}); err != nil {
-		return err
+	if !st.probe() {
+		return fmt.Errorf("no adapter at %d bps", from)
 	}
-	time.Sleep(20 * time.Millisecond)
-
-	if _, err := st.port.Write([]byte("STBR" + strconv.Itoa(int(to)) + "\r")); err != nil {
-		return err
-	}
-	time.Sleep(10 * time.Millisecond)
-
-	if err := st.port.ResetInputBuffer(); err != nil {
-		return err
-	}
-	if err := st.port.SetBaud(int(to)); err != nil {
-		return err
-	}
-
-	readBuf := make([]byte, 64)
-	line := make([]byte, 0, 128)
-	for range 10 {
-		n, err := st.port.Read(readBuf)
+	if from == to {
+		// Already at the target; confirm it is an STN and grab the banner.
+		lines, err := st.exec("STI", 200*time.Millisecond)
 		if err != nil {
 			return err
 		}
-		if n == 0 {
-			time.Sleep(4 * time.Millisecond)
-			continue
+		i := slices.IndexFunc(lines, func(s string) bool { return bytes.Contains([]byte(s), []byte("STN")) })
+		if i < 0 {
+			return fmt.Errorf("device at %d bps is not an STN: %q", from, lines)
 		}
-		for _, b := range readBuf[:n] {
-			if b == '\r' {
-				if len(line) == 0 {
-					continue
-				}
-				if bytes.Contains(line, []byte("STN")) {
-					st.bus.Emit(gocan.Event{Type: gocan.EventTypeInfo, Details: string(line)})
-					_, err := st.port.Write([]byte{'\r'})
-					return err
-				}
-				line = line[:0]
-				continue
-			}
-			line = append(line, b)
+		st.bus.Emit(gocan.Event{Type: gocan.EventTypeInfo, Details: lines[i]})
+		return nil
+	}
+
+	// 250 ms handshake window: enough for the host to switch and answer,
+	// without the 1 s/connect penalty on firmware that delays the STI
+	// banner by the full STBRT value.
+	if lines, err := st.exec("STBRT250", 200*time.Millisecond); err != nil || !hasOK(lines) {
+		return fmt.Errorf("STBRT at %d bps: %q %v", from, lines, err)
+	}
+
+	// STBR answers at the old baud before switching: OK, or '?' when the
+	// rate cannot be generated. No prompt follows the OK — the next output
+	// is the STI banner at the new baud. Only an explicit '?' aborts; a
+	// missed OK (marginal UARTs mangle lines) falls through to the banner
+	// hunt, which is the check that matters.
+	st.port.ResetInputBuffer()
+	if _, err := st.port.Write([]byte("STBR" + strconv.Itoa(int(to)) + "\r")); err != nil {
+		return err
+	}
+	reply, err := st.readLine(200*time.Millisecond, func(line string) bool { return line == "OK" || line == "?" })
+	if err == nil && reply == "?" {
+		return fmt.Errorf("adapter cannot generate %d bps", to)
+	}
+
+	if err := st.port.SetBaud(int(to)); err != nil {
+		return err
+	}
+	// The banner is printed ~75 ms after the switch; the generous deadline
+	// covers firmware that scales the delay with STBRT.
+	banner, err := st.readLine(1500*time.Millisecond, func(line string) bool { return bytes.Contains([]byte(line), []byte("STN")) })
+	if err != nil {
+		return fmt.Errorf("no STI banner at %d bps: %w", to, err)
+	}
+	// Confirm with a CR (it must land within the STBRT window or the device
+	// reverts to the old rate), then prove the new rate actually works with
+	// a probe rather than trusting one more fragile status line. If the
+	// device did revert, the probe fails and the hunt simply retries.
+	if _, err := st.port.Write([]byte{'\r'}); err != nil {
+		return err
+	}
+	if !st.probe() {
+		return fmt.Errorf("baudrate switch to %d bps not confirmed", to)
+	}
+	st.bus.Emit(gocan.Event{Type: gocan.EventTypeInfo, Details: banner})
+	return nil
+}
+
+// probe checks for a live device at the current host baud by turning echo
+// off. ATE0 rather than a bare CR: an empty line repeats the last stored
+// command, which could retransmit a stale STPX frame onto the CAN bus. Two
+// tries — the first may land on a dirty device line buffer and answer '?'.
+func (st *Scantool) probe() bool {
+	for range 2 {
+		if lines, err := st.exec("ATE0", 100*time.Millisecond); err == nil && hasOK(lines) {
+			return true
 		}
 	}
-	return fmt.Errorf("failed to change adapter baudrate from %d to %d bps", from, to)
+	return false
+}
+
+// exec writes a control command and collects its response lines up to the
+// '>' prompt. Unlike sendCommand it verifies instead of delivering: used
+// for the probe, the baud handshake and the init sequence.
+func (st *Scantool) exec(cmd string, timeout time.Duration) ([]string, error) {
+	st.port.ResetInputBuffer()
+	if _, err := st.port.Write([]byte(cmd + "\r")); err != nil {
+		return nil, err
+	}
+	return st.readToPrompt(timeout)
+}
+
+// readToPrompt reads response lines until the '>' prompt or the deadline.
+func (st *Scantool) readToPrompt(timeout time.Duration) ([]string, error) {
+	var lines []string
+	_, err := st.scanLines(timeout, func(line string, prompt bool) bool {
+		if line != "" {
+			lines = append(lines, line)
+		}
+		return prompt
+	})
+	return lines, err
+}
+
+// readLine reads until a line matches, without requiring a prompt.
+func (st *Scantool) readLine(timeout time.Duration, match func(string) bool) (string, error) {
+	return st.scanLines(timeout, func(line string, _ bool) bool { return match(line) })
+}
+
+// scanLines feeds completed lines (and prompt sightings, with an empty
+// line) to done until it returns true or the deadline passes. The port
+// read timeout is short, so the loop polls at that granularity.
+func (st *Scantool) scanLines(timeout time.Duration, done func(line string, prompt bool) bool) (string, error) {
+	deadline := time.Now().Add(timeout)
+	var line []byte
+	var readBuf [64]byte
+	for time.Now().Before(deadline) {
+		n, err := st.port.Read(readBuf[:])
+		if err != nil {
+			return "", err
+		}
+		for _, b := range readBuf[:n] {
+			switch b {
+			case '>', '\r', '\n':
+				s := string(line)
+				line = line[:0]
+				if done(s, b == '>') {
+					return s, nil
+				}
+			default:
+				line = append(line, b)
+			}
+		}
+	}
+	return "", errors.New("timeout")
+}
+
+// hasOK reports whether one of the response lines is exactly "OK".
+func hasOK(lines []string) bool {
+	return slices.Contains(lines, "OK")
 }
 
 // decodeFrame parses a response line "iiiDDDD.." (3 hex id + hex data).

@@ -203,6 +203,10 @@ func (ca *Combi) Send(ctx context.Context, f gocan.Frame) error {
 		return err
 	}
 
+	if ca.cfg.Debug {
+		ca.emit(gocan.EventTypeDebug, fmt.Sprintf("sent frame: %s", f.String()))
+	}
+
 	select {
 	case <-ca.txAck:
 		return nil
@@ -492,6 +496,9 @@ func (ca *Combi) deliverFrame(data []byte) {
 		Remote:   data[14] == 1,
 	}
 	copy(f.Data[:], data[4:12])
+	if ca.cfg.Debug {
+		ca.emit(gocan.EventTypeDebug, fmt.Sprintf("recv frame: %s", f.String()))
+	}
 	ca.bus.Deliver(f)
 }
 

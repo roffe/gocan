@@ -1,8 +1,9 @@
 package gmlan
 
 type DTC struct {
-	Code   string
-	Status byte
+	Code        string
+	FailureType byte // DTCFailureTypeByte, e.g. the "02" in "B0165 02"
+	Status      byte
 }
 
 // How to read DTC codes

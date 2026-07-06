@@ -26,6 +26,18 @@ func CheckErr(frame gocan.Frame) error {
 	return nil
 }
 
+// isBusyReply reports whether frame is a busyRepeatRequest reply to the
+// given service: a negative response with code $21, or the bare {01 60}
+// frame T8s send while busy. For service $20 itself {01 60} is the positive
+// response, never busy.
+func isBusyReply(service byte, frame gocan.Frame) bool {
+	if frame.Data[1] == 0x7F && frame.Data[2] == service && frame.Data[3] == 0x21 {
+		return true
+	}
+	return service != RETURN_TO_NORMAL_MODE &&
+		bytes.Equal(frame.Data[:], []byte{0x01, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00})
+}
+
 func TranslateServiceCode(p byte) string {
 	switch p {
 	case 0x04:
