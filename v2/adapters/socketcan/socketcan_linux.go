@@ -34,12 +34,13 @@ func scanDevices() []gocan.AdapterInfo {
 }
 
 type SocketCAN struct {
-	cfg  gocan.Config
-	bus  *gocan.Bus
-	dev  *candevice.Device
-	conn net.Conn
-	tx   *socketcan.Transmitter
-	rx   *socketcan.Receiver
+	cfg     gocan.Config
+	bus     *gocan.Bus
+	dev     *candevice.Device
+	virtual bool
+	conn    net.Conn
+	tx      *socketcan.Transmitter
+	rx      *socketcan.Receiver
 }
 
 func New(cfg gocan.Config) (gocan.Adapter, error) {
@@ -53,11 +54,16 @@ func (a *SocketCAN) Open(ctx context.Context, bus *gocan.Bus) error {
 	if err != nil {
 		return err
 	}
-	if err := a.dev.SetBitrate(uint32(a.cfg.CANRate * 1000)); err != nil {
-		return err
-	}
-	if err := a.dev.SetUp(); err != nil {
-		return err
+	// vcan interfaces have no bittiming and are shared between processes;
+	// leave their device state alone.
+	a.virtual = strings.HasPrefix(a.cfg.Port, "vcan")
+	if !a.virtual {
+		if err := a.dev.SetBitrate(uint32(a.cfg.CANRate * 1000)); err != nil {
+			return err
+		}
+		if err := a.dev.SetUp(); err != nil {
+			return err
+		}
 	}
 
 	filters := make([]socketcan.IDFilter, len(a.cfg.CANFilter))
@@ -81,7 +87,7 @@ func (a *SocketCAN) Close() error {
 	if a.conn != nil {
 		a.conn.Close() // unblocks the read loop
 	}
-	if a.dev != nil {
+	if a.dev != nil && !a.virtual {
 		return a.dev.SetDown()
 	}
 	return nil

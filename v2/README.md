@@ -110,6 +110,22 @@ them at runtime.
 `gocan.Adapters()` / `gocan.AdapterNames()` list what is registered, with
 descriptions and capabilities for building UIs.
 
+## Scripting (CANLang)
+
+[canlang](canlang/) embeds Lua so request/response flows can be scripted
+against a bus without recompiling the host — see its
+[README](canlang/README.md) for the script API. Like the adapters, it is a
+separate package: the core stays dependency-free unless you import it.
+
+```lua
+for f in bus:frames(0x1A0) do
+	print("rpm " .. f:u16(1))
+end
+```
+
+Run scripts standalone with [cmd/canlang](cmd/canlang/main.go), or embed
+with `canlang.Run(ctx, bus, "script.lua")`.
+
 ## Writing an adapter
 
 Implement three methods and register a constructor from your own package.
