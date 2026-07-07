@@ -331,8 +331,8 @@ func GetAdapters() (adapters []string, err error) {
 //
 // Returns the number of adapters found and the serial number of the first adapter.
 func GetFirstAdapter() (int, string, error) {
-	data := make([]byte, 10)
-	r1, _, _ := procGetFirstAdapter.Call(uintptr(unsafe.Pointer(&data[0])), 10)
+	data := make([]byte, 32) // spec: "32 bytes is a good choice"
+	r1, _, _ := procGetFirstAdapter.Call(uintptr(unsafe.Pointer(&data[0])), uintptr(len(data)))
 	return int(r1), cStringtoString(data), NewError(int32(r1))
 }
 
@@ -340,8 +340,8 @@ func GetFirstAdapter() (int, string, error) {
 //
 // Returns the serial number of the next adapter.
 func GetNextAdapter() (string, error) {
-	data := make([]byte, 10)
-	r1, _, _ := procGetNextAdapter.Call(uintptr(unsafe.Pointer(&data[0])), 10)
+	data := make([]byte, 32) // spec: "32 bytes is a good choice"
+	r1, _, _ := procGetNextAdapter.Call(uintptr(unsafe.Pointer(&data[0])), uintptr(len(data)))
 	return cStringtoString(data), NewError(int32(r1))
 }
 
