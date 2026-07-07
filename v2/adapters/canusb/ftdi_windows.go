@@ -14,20 +14,25 @@ import (
 // "d2xx CANUSB <serial>". Opt-in with the "ftdi" build tag (needs the D2XX
 // driver on Windows / libftdi on Linux).
 func init() {
+	gocan.RegisterScanner(scanD2XXDevices)
+}
+
+func scanD2XXDevices() []gocan.AdapterInfo {
 	if err := ftdi.Init(); err != nil {
-		return
+		return nil
 	}
 	devs, err := ftdi.GetDeviceList()
 	if err != nil {
-		return
+		return nil
 	}
+	var out []gocan.AdapterInfo
 	for _, dev := range devs {
 		if dev.Description != "CANUSB" {
 			continue
 		}
 		name := "d2xx CANUSB " + dev.SerialNumber
 		index, serialNo := dev.Index, dev.SerialNumber
-		gocan.Register(gocan.AdapterInfo{
+		out = append(out, gocan.AdapterInfo{
 			Name:         name,
 			Description:  "Lawicell CANUSB over d2xx",
 			Capabilities: gocan.Capabilities{HSCAN: true, SWCAN: true},
@@ -44,6 +49,7 @@ func init() {
 			},
 		})
 	}
+	return out
 }
 
 // d2xxPort adapts an FTDI D2XX device to the serialPort interface.

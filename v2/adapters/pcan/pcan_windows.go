@@ -14,19 +14,24 @@ import (
 )
 
 func init() {
+	gocan.RegisterScanner(scanDevices)
+}
+
+func scanDevices() []gocan.AdapterInfo {
 	if err := pcan.Init(); err != nil {
 		log.Println("PCANBasic driver not loaded:", err)
-		return
+		return nil
 	}
 	channels, err := pcan.GetAttachedChannelsCount()
 	if err != nil {
 		log.Println(err)
-		return
+		return nil
 	}
+	var out []gocan.AdapterInfo
 	for i, channel := range channels {
 		name := fmt.Sprintf("PCAN #%d %s", i, cString(channel.DeviceName[:]))
 		handle := channel.ChannelHandle
-		gocan.Register(gocan.AdapterInfo{
+		out = append(out, gocan.AdapterInfo{
 			Name:         name,
 			Description:  "PEAK-System CAN adapter for Windows",
 			Capabilities: gocan.Capabilities{HSCAN: true},
@@ -35,6 +40,7 @@ func init() {
 			},
 		})
 	}
+	return out
 }
 
 type PCAN struct {

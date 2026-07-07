@@ -14,13 +14,18 @@ import (
 // "d2xx <model>". Opt-in with the "ftdi" build tag (needs the D2XX driver
 // on Windows / libftdi on Linux).
 func init() {
+	gocan.RegisterScanner(scanD2XXDevices)
+}
+
+func scanD2XXDevices() []gocan.AdapterInfo {
 	if err := ftdi.Init(); err != nil {
-		return
+		return nil
 	}
 	devs, err := ftdi.GetDeviceList()
 	if err != nil {
-		return
+		return nil
 	}
+	var out []gocan.AdapterInfo
 	for _, dev := range devs {
 		switch dev.Description {
 		case OBDLinkSX, OBDLinkEX, STN1170, STN2120:
@@ -30,7 +35,7 @@ func init() {
 		baseName := dev.Description
 		name := "d2xx " + baseName
 		index, serialNo := dev.Index, dev.SerialNumber
-		gocan.Register(gocan.AdapterInfo{
+		out = append(out, gocan.AdapterInfo{
 			Name:         name,
 			Description:  "ftdi d2xx " + baseName,
 			Capabilities: gocan.Capabilities{HSCAN: true, KLine: true},
@@ -49,6 +54,7 @@ func init() {
 			},
 		})
 	}
+	return out
 }
 
 // d2xxPort adapts an FTDI D2XX device to the port interface.

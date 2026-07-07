@@ -62,8 +62,10 @@ func (a AdapterInfo) String() string {
 }
 
 var (
-	adapterMu  sync.Mutex
-	adapterMap = make(map[string]AdapterInfo)
+	adapterMu    sync.Mutex
+	adapterMap   = make(map[string]AdapterInfo)
+	scanners     []func() []AdapterInfo
+	scannedNames = make(map[string]bool)
 )
 
 // Register adds an adapter to the registry, typically from an init function.
@@ -76,6 +78,51 @@ func Register(info AdapterInfo) error {
 	}
 	adapterMap[info.Name] = info
 	return nil
+}
+
+// RegisterScanner adds a function that enumerates currently attached
+// devices, and runs it once immediately. Adapters whose registry entries
+// depend on what hardware is plugged in should register a scanner from
+// their init function instead of calling Register directly, so Rescan can
+// pick up devices plugged in after startup.
+func RegisterScanner(scan func() []AdapterInfo) {
+	adapterMu.Lock()
+	scanners = append(scanners, scan)
+	adapterMu.Unlock()
+	runScanner(scan)
+}
+
+func runScanner(scan func() []AdapterInfo) {
+	infos := scan()
+	adapterMu.Lock()
+	defer adapterMu.Unlock()
+	for _, info := range infos {
+		if _, taken := adapterMap[info.Name]; taken && !scannedNames[info.Name] {
+			continue // never shadow a Register-ed adapter
+		}
+		adapterMap[info.Name] = info
+		scannedNames[info.Name] = true
+	}
+}
+
+// Rescan re-runs every registered device scanner and replaces their
+// previous registry entries, picking up devices plugged in (or removed)
+// since startup or the last rescan. Adapters added with Register are
+// untouched, as are Adapter instances already opened on a Bus. It returns
+// the updated registry like Adapters.
+func Rescan() []AdapterInfo {
+	adapterMu.Lock()
+	for name := range scannedNames {
+		delete(adapterMap, name)
+	}
+	clear(scannedNames)
+	scans := make([]func() []AdapterInfo, len(scanners))
+	copy(scans, scanners)
+	adapterMu.Unlock()
+	for _, scan := range scans {
+		runScanner(scan)
+	}
+	return Adapters()
 }
 
 // NewAdapter constructs the named adapter from the registry with cfg,

@@ -16,11 +16,16 @@ import (
 )
 
 func init() {
+	gocan.RegisterScanner(scanDevices)
+}
+
+func scanDevices() []gocan.AdapterInfo {
 	prefix, dlls := passthru.FindDLLs()
+	var out []gocan.AdapterInfo
 	for i, dll := range dlls {
 		name := fmt.Sprintf("%sJ2534 #%d %s", prefix, i, dll.Name)
 		dllPath := dll.FunctionLibrary
-		gocan.Register(gocan.AdapterInfo{
+		out = append(out, gocan.AdapterInfo{
 			Name:        name,
 			Description: "J2534 Interface",
 			Capabilities: gocan.Capabilities{
@@ -34,6 +39,7 @@ func init() {
 			},
 		})
 	}
+	return out
 }
 
 type J2534 struct {

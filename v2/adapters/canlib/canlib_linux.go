@@ -19,13 +19,21 @@ const (
 )
 
 func init() {
+	gocan.RegisterScanner(scanDevices)
+}
+
+func scanDevices() []gocan.AdapterInfo {
 	if err := canlib.Init(); err != nil {
-		return // Kvaser driver not installed
+		return nil // Kvaser driver not installed
 	}
+	// re-running canInitializeLibrary refreshes CANlib's channel list so
+	// devices plugged in after startup show up on rescan
+	canlib.InitializeLibrary()
 	channels, err := canlib.GetNumberOfChannels()
 	if err != nil {
-		return
+		return nil
 	}
+	var out []gocan.AdapterInfo
 	for channel := range channels {
 		devDescr, err := canlib.GetChannelDataString(channel, canlib.CHANNELDATA_DEVDESCR_ASCII)
 		if err != nil {
@@ -35,7 +43,7 @@ func init() {
 			continue
 		}
 		ch := channel
-		gocan.Register(gocan.AdapterInfo{
+		out = append(out, gocan.AdapterInfo{
 			Name:         fmt.Sprintf("CANlib #%d %v", channel, devDescr),
 			Description:  "Canlib driver for Kvaser devices",
 			Capabilities: gocan.Capabilities{HSCAN: true},
@@ -44,6 +52,7 @@ func init() {
 			},
 		})
 	}
+	return out
 }
 
 type CANlib struct {

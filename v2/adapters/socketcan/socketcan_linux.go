@@ -14,8 +14,13 @@ import (
 )
 
 func init() {
+	gocan.RegisterScanner(scanDevices)
+}
+
+func scanDevices() []gocan.AdapterInfo {
+	var out []gocan.AdapterInfo
 	for _, dev := range findDevices() {
-		gocan.Register(gocan.AdapterInfo{
+		out = append(out, gocan.AdapterInfo{
 			Name:         "SocketCAN " + dev,
 			Description:  "Linux Driver",
 			Capabilities: gocan.Capabilities{HSCAN: true, SWCAN: true},
@@ -25,6 +30,7 @@ func init() {
 			},
 		})
 	}
+	return out
 }
 
 type SocketCAN struct {
