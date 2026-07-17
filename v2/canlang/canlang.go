@@ -12,6 +12,7 @@
 //	sleep(ms)
 //	bit    32-bit bitwise ops (Lua 5.1 has no operators): band, bor, bxor,
 //	       bnot, lshift, rshift, extract, btest
+//	arg    command-line args: arg[0]=script name, arg[1..n]=caller args
 //
 // Frames are read-only userdata: f:id(), f:len(), f:u8(off), f:u16(off)
 // (big-endian), f:bytes() (1-based table), f:hex(), tostring(f). Byte
@@ -36,24 +37,26 @@ import (
 )
 
 // Run executes the Lua script at path against bus, blocking until the script
-// returns, fails, or ctx is cancelled.
-func Run(ctx context.Context, bus *gocan.Bus, path string) error {
+// returns, fails, or ctx is cancelled. args are exposed to the script as the
+// standard Lua arg table (arg[0]=script name, arg[1..n]=args).
+func Run(ctx context.Context, bus *gocan.Bus, path string, args ...string) error {
 	src, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
-	return RunSource(ctx, bus, filepath.Base(path), string(src))
+	return RunSource(ctx, bus, filepath.Base(path), string(src), args...)
 }
 
 // RunSource is Run for an in-memory script. name appears in Lua error
-// messages and stack traces.
-func RunSource(ctx context.Context, bus *gocan.Bus, name, source string) error {
+// messages and stack traces, and as arg[0].
+func RunSource(ctx context.Context, bus *gocan.Bus, name, source string, args ...string) error {
 	L := lua.NewState()
 	defer L.Close()
 	L.SetContext(ctx) // aborts the VM when ctx is cancelled
 
 	registerFrameType(L)
 	registerBitLib(L)
+	setArgTable(L, name, args)
 
 	sb := &scriptBus{ctx: ctx, bus: bus}
 	ud := L.NewUserData()
@@ -83,6 +86,17 @@ func RunSource(ctx context.Context, bus *gocan.Bus, name, source string) error {
 	}
 	L.Push(fn)
 	return L.PCall(0, lua.MultRet, nil)
+}
+
+// setArgTable populates the standard Lua arg global: arg[0] is the script
+// name, arg[1..n] the caller's args. Scripts read them as arg[1], arg[2], ...
+func setArgTable(L *lua.LState, name string, args []string) {
+	t := L.NewTable()
+	t.RawSetInt(0, lua.LString(name))
+	for i, a := range args {
+		t.RawSetInt(i+1, lua.LString(a))
+	}
+	L.SetGlobal("arg", t)
 }
 
 type scriptBus struct {

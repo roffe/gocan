@@ -111,6 +111,20 @@ for f in bus:frames(0x1A0) do
 end
 ```
 
+## Arguments
+
+Values passed after the script name reach it as the standard Lua `arg`
+table: `arg[0]` is the script name, `arg[1]`, `arg[2]`, … the caller's
+arguments. Use `or` for a default.
+
+```sh
+canlang -adapter "CANUSB VCP" -port /dev/ttyUSB2 t7immo.lua 237OZG103863289
+```
+
+```lua
+local hardwareNr = arg[1] or "237OZG103863289"
+```
+
 ## Bits
 
 Lua 5.1 has no bitwise operators (`&` and `>>` won't parse), so CANLang

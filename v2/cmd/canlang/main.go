@@ -31,8 +31,8 @@ func main() {
 		}
 		return
 	}
-	if flag.NArg() != 1 {
-		log.Fatal("usage: canlang [flags] script.lua")
+	if flag.NArg() < 1 {
+		log.Fatal("usage: canlang [flags] script.lua [args...]")
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -44,7 +44,7 @@ func main() {
 	}
 	defer bus.Close()
 
-	if err := canlang.Run(ctx, bus, flag.Arg(0)); err != nil {
+	if err := canlang.Run(ctx, bus, flag.Arg(0), flag.Args()[1:]...); err != nil {
 		log.Fatal(err)
 	}
 }

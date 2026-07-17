@@ -83,6 +83,25 @@ func TestBitLib(t *testing.T) {
 	}
 }
 
+// TestArgTable checks caller args reach the script as the Lua arg table.
+func TestArgTable(t *testing.T) {
+	bus, err := gocan.Open(t.Context(), "loopback", gocan.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bus.Close()
+
+	err = RunSource(t.Context(), bus, "immo.lua", `
+		assert(arg[0] == "immo.lua", tostring(arg[0]))
+		assert(arg[1] == "237OZG103863289", tostring(arg[1]))
+		assert(arg[2] == nil)
+		assert((arg[3] or "fallback") == "fallback")
+	`, "237OZG103863289")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TestRecvTimeout checks the nil,"timeout" convention.
 func TestRecvTimeout(t *testing.T) {
 	bus, err := gocan.Open(t.Context(), "loopback", gocan.Config{})
