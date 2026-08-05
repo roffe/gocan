@@ -8,14 +8,23 @@ Linux maintainer wanted! Please contact me at gocan@roffe.nu if you want to help
 
 ## Installation
 
-	go get github.com/roffe/gocan@latest
+The current API is v2:
+
+	go get github.com/roffe/gocan/v2@latest
 
 ```go
-import "github.com/roffe/gocan"
+import gocan "github.com/roffe/gocan/v2"
 ```
 
-Some adapter backends need vendor libraries and are only compiled in when you
-build with their tag (`go build -tags "combi,j2534"`):
+The root package `github.com/roffe/gocan` is the legacy v1 API. For existing
+v1 code, see [v2/MIGRATION.md](v2/MIGRATION.md).
+
+Adapters register themselves on import. Native adapters live under
+`github.com/roffe/gocan/v2/adapters/...`; import the ones you need, or use
+`adapters/all` in applications that list adapters dynamically.
+
+Some adapter backends still need vendor libraries and are only compiled in when
+you build with their tag (`go build -tags "canlib,j2534"`):
 
 | Build tag | Enables                        | Requires                    |
 |-----------|--------------------------------|-----------------------------|
@@ -31,145 +40,122 @@ SocketCAN on Linux are always available without tags.
 
 ## Quick start
 
-Adapters are looked up by name from a registry. `gocan.ListAdapterNames()`
-returns everything compiled into your binary; names include e.g. `"ELM327"`,
-`"CombiAdapterNew"`, `"txbridge wifi"` and on Linux one `"SocketCAN <dev>"`
-entry per interface found.
+The simplest working example uses the built-in loopback adapter. This mirrors
+the tested example in [v2/example_test.go](v2/example_test.go).
 
 ```go
 package main
 
 import (
 	"context"
-	"log"
-	"time"
+	"fmt"
 
-	"github.com/roffe/gocan"
+	gocan "github.com/roffe/gocan/v2"
 )
 
 func main() {
 	ctx := context.Background()
 
-	c, err := gocan.New(ctx, "ELM327", &gocan.AdapterConfig{
-		Port:         "COM3",   // or /dev/ttyUSB0
-		PortBaudrate: 115200,   // serial adapters only
-		CANRate:      500,      // CAN bit rate in kbit/s
-		CANFilter:    []uint32{0x7E8}, // receive only these IDs (empty = everything)
-	})
+	bus, err := gocan.Open(ctx, "loopback", gocan.Config{})
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
-	defer c.Close()
+	defer bus.Close()
 
-	// Fire-and-forget send: queues the frame to the adapter
-	if err := c.Send(0x7DF, []byte{0x02, 0x01, 0x0C, 0, 0, 0, 0, 0}, gocan.Outgoing); err != nil {
-		log.Fatal(err)
-	}
-
-	// Wait for a single frame with one of the given IDs
-	resp, err := c.Recv(ctx, 500*time.Millisecond, 0x7E8)
+	reply, err := bus.Request(ctx, gocan.NewFrame(0x123, []byte("hello")), 0x123)
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
-	log.Printf("id %03X data %X", resp.Identifier, resp.Data)
+	fmt.Printf("0x%03X %s\n", reply.ID, reply.Bytes())
 }
 ```
 
-If you already have an `Adapter` instance (e.g. from `gocan.NewAdapter`) use
-`gocan.NewWithOpts`, which also takes options such as `WithEventFunc` /
-`WithLogger`:
+For real hardware, import the adapter package you want and open it by its
+registered name:
 
 ```go
-dev, _ := gocan.NewAdapter("ELM327", cfg)
-c, err := gocan.NewWithOpts(ctx, dev, gocan.WithEventFunc(func(e gocan.Event) {
-	log.Println(e.String())
-}))
+import (
+	gocan "github.com/roffe/gocan/v2"
+	_ "github.com/roffe/gocan/v2/adapters/canusb"
+)
+
+bus, err := gocan.Open(ctx, "CANUSB VCP", gocan.Config{
+	Port:    "/dev/ttyUSB0",
+	CANRate: 500,
+})
 ```
+
+`gocan.Adapters()` and `gocan.AdapterNames()` return everything registered in
+your binary.
 
 ## Receiving frames
 
-For a stream of frames instead of a one-shot `Recv`, create a subscription
-filtered on zero or more CAN IDs (no IDs = all traffic):
+Use `Recv` for one frame, `Subscribe` for a channel, or `Frames` for an
+iterator-style loop. Timeouts are handled with `context.WithTimeout`.
 
 ```go
-sub := c.Subscribe(ctx, 0x238, 0x258)
-defer sub.Close()
-for frame := range sub.Chan() {
-	log.Printf("%03X %X", frame.Identifier, frame.Data)
+frame, err := bus.Recv(ctx, 0x258)
+ch := bus.Subscribe(ctx, 0x238, 0x258)
+for frame := range bus.Frames(ctx, 0x1A0, 0x280) {
+	fmt.Printf("%03X % X\n", frame.ID, frame.Bytes())
 }
-```
-
-`SubscribeFunc` runs a callback per frame instead, and `SubscribeChan` feeds a
-channel you own:
-
-```go
-sub := c.SubscribeFunc(ctx, func(f *gocan.CANFrame) {
-	log.Printf("%03X %X", f.Identifier, f.Data)
-}, 0x238)
-defer sub.Close()
 ```
 
 ## Request / response
 
-`SendAndWait` sends a frame and blocks until a frame with one of the given
-IDs arrives (or the timeout/context fires) — the everyday primitive for
-ECU protocols:
+`Request` sends a frame and waits for a reply with one of the given CAN IDs.
+For buffered adapters, multi-frame reply expectations are stamped on the
+context with `gocan.WithExpectedResponses`.
 
 ```go
-frame := gocan.NewFrame(0x005, []byte{0xC9, 0, 0, 0, 0, 0, 0, 0}, gocan.ResponseRequired)
-resp, err := c.SendAndWait(ctx, frame, 1*time.Second, 0x00C)
+rctx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+defer cancel()
+
+reply, err := bus.Request(rctx, gocan.NewFrame(0x240, data), 0x258, 0x266)
 ```
 
-### Frame types
-
-Every frame carries a `CANFrameType` that tells the adapter how to treat it:
-
-* `gocan.Outgoing` — fire and forget.
-* `gocan.ResponseRequired` — tells buffered adapters (ELM/STN family) to wait
-  for one response frame; use `ResponseRequiredWithResponses(n)` when a
-  request yields several.
-* `gocan.Incoming` — frames received from the bus.
-
-### Synchronous sends
-
-`Send` / `SendFrame` only queue a frame into the adapter's send buffer. When
-you need to know the frame has actually been written to the hardware (e.g. to
-pace frames against a slow ECU without guessing at sleeps), use `SendSync`:
-
-```go
-err := c.SendSync(ctx, frame, 100*time.Millisecond)
-```
-
-It blocks until the adapter confirms the write, the context is cancelled or
-the timeout fires. Adapters that confirm write-completion report it via
-`SupportsSync()`; on adapters that don't, `SendSync` degrades to a plain
-`SendFrame`.
+`Send` returns when the adapter has written the frame, so there is no separate
+`SendSync` API in v2.
 
 ## Errors and lifecycle
 
-The client owns the adapter: `c.Close()` shuts both down. If the adapter dies
-on its own (unplugged USB, fatal driver error), the client's context is
-cancelled — `c.Done()` / `c.Err()` / `c.Wait(ctx)` let you observe that:
+The bus owns the adapter: `bus.Close()` shuts both down. If the adapter dies on
+its own (unplugged USB, fatal driver error), the bus context is cancelled.
+Use `bus.Done()`, `bus.Err()` and `bus.Wait(ctx)` to observe that lifecycle.
 
 ```go
 go func() {
-	<-c.Done()
-	log.Println("bus gone:", c.Err())
+	<-bus.Done()
+	fmt.Println("bus gone:", bus.Err())
 }()
 ```
 
 Non-fatal adapter noise (status messages, recoverable errors) is delivered as
-`Event`s via `WithEventFunc`/`WithEventChan` options or `c.OnEvent(fn)` at any
-time.
+`Event`s via `gocan.WithEventFunc`, `gocan.WithLogger`, or `bus.OnEvent(...)`.
 
 ## Writing your own adapter
 
-Implement the `gocan.Adapter` interface (embed `gocan.BaseAdapter` for the
-channel plumbing) and register it with `gocan.RegisterAdapter` from an
-`init()`. If your send path can confirm that a frame has been written to the
-hardware, construct with `NewSyncBaseAdapter` and call `frame.markSent()` on
-every exit path of the send routine — that enables `SendSync` for your
-adapter. `adapter_template.go` is a minimal starting point.
+Implement the `gocan.Adapter` interface and register it from an `init()`.
+Native v2 adapters live under [v2/adapters](v2/adapters), and
+[v2/loopback.go](v2/loopback.go) is the minimal reference implementation.
+
+```go
+type Adapter interface {
+	Open(ctx context.Context, bus *Bus) error
+	Send(ctx context.Context, f Frame) error
+	Close() error
+}
+```
+
+Incoming traffic is pushed back into the bus with `bus.Deliver(frame)`.
+Recoverable problems are emitted with `bus.Emit(...)`, and fatal adapter
+failures terminate the bus with `bus.Fatal(err)`.
+
+## Legacy v1
+
+The repository still contains the v1 API at `github.com/roffe/gocan`, but new
+development should target `github.com/roffe/gocan/v2`. If you are upgrading an
+existing client, start with [v2/MIGRATION.md](v2/MIGRATION.md).
 
 ## Showcase
 
