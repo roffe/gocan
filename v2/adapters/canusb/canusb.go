@@ -18,9 +18,11 @@
 // Replies: CR (OK) / BELL 0x07 (error) for setup commands, z/Z for transmit
 // acks, and unsolicited t.../T... lines for received frames.
 //
-// The device wants one command in flight at a time (manual §1.4/1.5): Send
-// takes a one-slot semaphore that the reply parser releases on z/Z/F/BELL.
-// The periodic F status poll doubles as a recovery valve for a lost ack.
+// Transmit is credit-gated: Send takes a slot from a semaphore that the reply
+// parser releases on z/Z/F/BELL, so at most defaultTxCredits commands are ever
+// outstanding (see the constant for what the manual allows and why the depth
+// matters). Writes are serialized, and the device drains its USB FIFO in order,
+// so frame order is preserved regardless of the window.
 package canusb
 
 import (
@@ -39,6 +41,28 @@ import (
 const (
 	cr   = 0x0D // command terminator / OK
 	bell = 0x07 // error reply
+)
+
+// Transmit flow control: how many commands may be outstanding before Send
+// blocks for the device's z/Z ack.
+//
+// The manual gives two different depths and the smaller one binds. §1.2: the
+// CAN transmit FIFO "can handle 8 frames". §1.5: "the CANUSB has also USB
+// FIFO's built in the hardware, so it can only handle one or two command at a
+// time, meaning before sending the next command to it, you must wait for an
+// answer". So the USB command parser, not the CAN queue, is the limit — 2 is
+// the documented ceiling and 8 the hard one.
+//
+// The window only matters for bulk transfers, where it matters a lot: a
+// Trionic 7 flash is ~75k frames and every one of them is round-trip bound, so
+// each 0.1 ms of round trip costs ~7 s of flash time. One credit serialises all
+// 75k round trips; two overlaps the write of the next frame with the ack of the
+// previous. Extra["txcredits"] tunes it for a specific unit — the manual's
+// "one or two" is vague enough that the right value is a property of the
+// hardware, not of this code.
+const (
+	defaultTxCredits = 2
+	maxTxCredits     = 8 // CAN transmit FIFO depth, manual §1.2
 )
 
 func init() {
@@ -71,7 +95,7 @@ type CANUSB struct {
 	canRate    string // S/s command for the configured bit-rate
 	code, mask string // M acceptance-code / m acceptance-mask commands
 
-	sendSem chan struct{} // one outstanding command at a time
+	sendSem chan struct{} // outstanding-command credits, released by the z/Z/F/BELL reply
 	writeMu sync.Mutex    // serializes port writes (Send vs status poll vs SetFilter)
 	line    []byte        // reply parser accumulator
 }
@@ -84,14 +108,32 @@ func New(cfg gocan.Config) (gocan.Adapter, error) {
 	if cfg.PortBaudrate == 0 {
 		cfg.PortBaudrate = 3_000_000
 	}
+	credits, err := txCredits(cfg)
+	if err != nil {
+		return nil, err
+	}
 	code, mask := acceptanceFilters(cfg.CANFilter)
 	return &CANUSB{
 		cfg:     cfg,
 		canRate: rate,
 		code:    code,
 		mask:    mask,
-		sendSem: make(chan struct{}, 1),
+		sendSem: make(chan struct{}, credits),
 	}, nil
+}
+
+// txCredits reads the transmit window from Extra["txcredits"], defaulting to
+// defaultTxCredits.
+func txCredits(cfg gocan.Config) (int, error) {
+	v, ok := cfg.Extra["txcredits"]
+	if !ok || v == "" {
+		return defaultTxCredits, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 || n > maxTxCredits {
+		return 0, fmt.Errorf("txcredits must be 1-%d (CAN transmit FIFO depth), got %q", maxTxCredits, v)
+	}
+	return n, nil
 }
 
 func (cu *CANUSB) Open(ctx context.Context, bus *gocan.Bus) error {
@@ -157,8 +199,9 @@ func (cu *CANUSB) Close() error {
 	return nil
 }
 
-// Send encodes and writes one frame, gated on the device ack of the previous
-// command. The Bus serializes callers.
+// Send encodes and writes one frame, blocking while the transmit window is
+// full. It returns once the frame is written, not once the device acks it —
+// the ack releases the credit for a later Send. The Bus serializes callers.
 func (cu *CANUSB) Send(ctx context.Context, f gocan.Frame) error {
 	select {
 	case cu.sendSem <- struct{}{}:

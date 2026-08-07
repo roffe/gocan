@@ -165,24 +165,66 @@ func TestCANUSBSendReceive(t *testing.T) {
 	}
 }
 
+// TestCANUSBSendGatedOnAck pins the transmit window: exactly defaultTxCredits
+// frames go out unacked, the next one blocks, and an ack lets one more through.
+// Overshooting the window is what the manual warns overflows the unit's USB
+// command FIFO, so the bound has to hold, not just the gating.
 func TestCANUSBSendGatedOnAck(t *testing.T) {
 	fp := newFakePort(false) // no auto-ack
 	bus := openCANUSB(t, fp)
 
-	if err := bus.Send(context.Background(), gocan.NewFrame(0x123, nil)); err != nil {
-		t.Fatal(err)
+	for i := range defaultTxCredits {
+		if err := bus.Send(context.Background(), gocan.NewFrame(uint32(0x123+i), nil)); err != nil {
+			t.Fatalf("send %d of %d within the window: %v", i+1, defaultTxCredits, err)
+		}
 	}
-	// Second send must block until the device acks the first.
+	// One past the window must block until the device acks.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()
-	if err := bus.Send(ctx, gocan.NewFrame(0x124, nil)); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("want DeadlineExceeded while unacked, got %v", err)
+	if err := bus.Send(ctx, gocan.NewFrame(0x200, nil)); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("want DeadlineExceeded with %d unacked, got %v", defaultTxCredits, err)
 	}
 	fp.feed("z\r")
 	ctx2, cancel2 := context.WithTimeout(context.Background(), time.Second)
 	defer cancel2()
-	if err := bus.Send(ctx2, gocan.NewFrame(0x124, nil)); err != nil {
+	if err := bus.Send(ctx2, gocan.NewFrame(0x200, nil)); err != nil {
 		t.Fatalf("send after ack: %v", err)
+	}
+	// and only one: the window is still full.
+	ctx3, cancel3 := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel3()
+	if err := bus.Send(ctx3, gocan.NewFrame(0x201, nil)); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("one ack must free exactly one credit, got %v", err)
+	}
+}
+
+func TestCANUSBTxCredits(t *testing.T) {
+	for _, tt := range []struct {
+		extra string
+		want  int
+		bad   bool
+	}{
+		{extra: "", want: defaultTxCredits},
+		{extra: "1", want: 1},
+		{extra: "8", want: 8},
+		{extra: "0", bad: true},
+		{extra: "9", bad: true},
+		{extra: "two", bad: true},
+	} {
+		cfg := gocan.Config{}
+		if tt.extra != "" {
+			cfg.Extra = map[string]string{"txcredits": tt.extra}
+		}
+		got, err := txCredits(cfg)
+		if tt.bad {
+			if err == nil {
+				t.Errorf("txcredits=%q: want error, got %d", tt.extra, got)
+			}
+			continue
+		}
+		if err != nil || got != tt.want {
+			t.Errorf("txcredits=%q: got %d, %v; want %d", tt.extra, got, err, tt.want)
+		}
 	}
 }
 
