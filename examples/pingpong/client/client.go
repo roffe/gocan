@@ -24,7 +24,8 @@ func main() {
 	sigChan := make(chan os.Signal, 2)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
-	cl, err := gocan.New(ctx, "CANlib #0 Kvaser Leaf Light v2", &gocan.AdapterConfig{
+	cl, err := gocan.New(ctx, "CANUSB VCP", &gocan.AdapterConfig{
+		Port:    "/dev/ttyUSB1",
 		CANRate: 500,
 	})
 	if err != nil {

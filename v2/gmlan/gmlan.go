@@ -104,19 +104,42 @@ func newWindow(parent context.Context) (context.Context, context.CancelFunc) {
 // recvIDs, bounded by timeout. A busyRepeatRequest reply is retried up to
 // busyRetries times.
 func (cl *Client) request(ctx context.Context, payload []byte, timeout time.Duration) (gocan.Frame, error) {
+	resp, x, err := cl.requestMulti(ctx, payload, timeout, 1)
+	x.close()
+	return resp, err
+}
+
+// requestMulti is request for callers that must keep reading on the same
+// subscription — the consecutive frames of a multi-frame response. The caller
+// must close the returned exchange, which close accepts even when it is nil.
+func (cl *Client) requestMulti(ctx context.Context, payload []byte, timeout time.Duration, expectedResponses int) (gocan.Frame, *exchange, error) {
 	for attempt := 0; ; attempt++ {
-		rctx, cancel := context.WithTimeout(ctx, timeout)
-		resp, err := cl.c.Request(rctx, gocan.NewFrame(cl.canID, payload), cl.recvID...)
-		cancel()
+		resp, x, err := cl.attempt(ctx, payload, timeout, expectedResponses)
 		if err != nil || !isBusyReply(payload[1], resp) || attempt >= busyRetries {
-			return resp, err
+			return resp, x, err
 		}
+		x.close()
 		select {
 		case <-time.After(busyRetryDelay):
 		case <-ctx.Done():
-			return resp, ctx.Err()
+			return resp, nil, ctx.Err()
 		}
 	}
+}
+
+// attempt is one send-and-wait cycle with the receive window opened before
+// the request goes out.
+func (cl *Client) attempt(ctx context.Context, payload []byte, timeout time.Duration, expectedResponses int) (gocan.Frame, *exchange, error) {
+	rctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	// The exchange hangs off ctx, not rctx: it outlives this call whenever
+	// the response turns out to be the first frame of a multi-frame reply.
+	x := cl.begin(ctx, payload, timeout)
+	if err := cl.send(rctx, payload, timeout, expectedResponses); err != nil {
+		return gocan.Frame{}, x, err
+	}
+	resp, err := x.response(rctx)
+	return resp, x, err
 }
 
 // recv waits for a single reply on the recvIDs, bounded by timeout.
@@ -233,9 +256,8 @@ func (cl *Client) ReadDataByIdentifier(ctx context.Context, pid byte) ([]byte, e
 }
 
 func (cl *Client) ReadDataByIdentifierFrame(ctx context.Context, frame gocan.Frame) ([]byte, error) {
-	rctx, cancel := context.WithTimeout(ctx, cl.defaultTimeout)
-	defer cancel()
-	resp, err := cl.c.Request(rctx, frame, cl.recvID...)
+	resp, x, err := cl.requestMulti(ctx, frame.Bytes(), cl.defaultTimeout, 1)
+	defer x.close()
 	if err != nil {
 		return nil, fmt.Errorf("ReadDataByIdentifier[1]: %w", err)
 	}
@@ -243,11 +265,8 @@ func (cl *Client) ReadDataByIdentifierFrame(ctx context.Context, frame gocan.Fra
 		return nil, fmt.Errorf("ReadDataByIdentifier[2]: %w", err)
 	}
 	d := resp.Bytes()
-	if len(d) == 8 && bytes.Equal(d, []byte{0x01, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}) {
+	if len(d) >= 2 && d[0] == 0x01 && d[1] == 0x60 {
 		return nil, fmt.Errorf("ReadDataByIdentifier[3]: busy, try again")
-	}
-	if len(d) >= 4 && bytes.HasPrefix(d, []byte{0x02, 0x1A, 0x18, 0x00}) {
-		return nil, fmt.Errorf("ReadDataByIdentifier[4]: busy, try again")
 	}
 	// Single-frame positive response (len, 0x5A, DID, data...)
 	if len(d) >= 3 && d[1] == 0x5A {
@@ -270,57 +289,29 @@ func (cl *Client) ReadDataByIdentifierFrame(ctx context.Context, frame gocan.Fra
 		left := max(0, total-w)
 		// How many consecutive frames we expect (7 data bytes per CF)
 		framesToReceive := (left + 6) / 7
-		sctx, cancel := context.WithCancel(ctx)
-		defer cancel()
-		dataChan := cl.c.Subscribe(sctx, cl.recvID...)
 		// Send Flow Control: Continue to send (CTS), no block size, no separation time
-		fcCtx := gocan.WithExpectedResponses(ctx, framesToReceive)
-		if err := cl.c.Send(fcCtx, gocan.NewFrame(cl.canID, []byte{0x30, 0x00, 0x00})); err != nil {
+		if err := cl.send(ctx, []byte{0x30, 0x00, 0x00}, cl.defaultTimeout, framesToReceive); err != nil {
 			return nil, fmt.Errorf("ReadDataByIdentifier[7]: %w", err)
 		}
 		// Expect consecutive frames starting at 0x21 .. 0x2F, then wrap to 0x20, etc.
 		seq := byte(0x21)
-		// Reusable timer (less GC churn than time.After in a loop)
-		timer := time.NewTimer(cl.defaultTimeout)
-		defer timer.Stop()
-		for framesToReceive > 0 {
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
+		for ; framesToReceive > 0; framesToReceive-- {
+			response, err := x.consecutive(ctx, seq)
+			if err != nil {
+				return nil, fmt.Errorf("ReadDataByIdentifier[8]: %w", err)
 			}
-			timer.Reset(cl.defaultTimeout)
-			select {
-			case response, ok := <-dataChan:
-				if !ok {
-					return nil, errors.New("ReadDataByIdentifier[8]: subscription closed")
+			fd := response.Bytes()
+			if fd[0] != seq { // a negative response aborting the transfer
+				if err := CheckErr(response); err != nil {
+					return nil, fmt.Errorf("ReadDataByIdentifier[9]: %w", err)
 				}
-				fd := response.Bytes()
-				if len(fd) < 2 {
-					return nil, fmt.Errorf("ReadDataByIdentifier[8]: short consecutive frame")
-				}
-				// If not a CF (0x2n), check for error frame
-				if (fd[0] & 0x20) != 0x20 {
-					if err := CheckErr(response); err != nil {
-						return nil, fmt.Errorf("ReadDataByIdentifier[9]: %w", err)
-					}
-				}
-				if fd[0] != seq {
-					return nil, fmt.Errorf("ReadDataByIdentifier[10]: frame sequence out of order, expected 0x%X got 0x%X", seq, fd[0])
-				}
-				n := copy(buf[w:], fd[1:]) // copy up to 7 bytes
-				w += n
-				left -= n
-				if left < 0 {
-					left = 0
-				}
-				// Wrap sequence number without branches: 0x21..0x2F -> 0x20 -> 0x21...
-				seq = 0x20 | ((seq + 1) & 0x0F)
-				framesToReceive--
-			case <-timer.C:
-				return nil, fmt.Errorf("ReadDataByIdentifier[11]: timeout waiting for multi-frame response")
+				return nil, fmt.Errorf("ReadDataByIdentifier[10]: transfer aborted by [% 02X]", fd)
 			}
+			n := copy(buf[w:], fd[1:]) // copy up to 7 bytes
+			w += n
+			left = max(0, left-n)
+			// Wrap sequence number without branches: 0x21..0x2F -> 0x20 -> 0x21...
+			seq = 0x20 | ((seq + 1) & 0x0F)
 		}
 		return buf, nil
 	}
@@ -356,7 +347,8 @@ service
 */
 
 func (cl *Client) ReadMemoryByAddress(ctx context.Context, address, length uint32) ([]byte, error) {
-	resp, err := cl.request(ctx, []byte{0x06, READ_MEMORY_BY_ADDRESS, byte(address >> 16), byte(address >> 8), byte(address), byte(length >> 8), byte(length)}, cl.defaultTimeout)
+	resp, x, err := cl.requestMulti(ctx, []byte{0x06, READ_MEMORY_BY_ADDRESS, byte(address >> 16), byte(address >> 8), byte(address), byte(length >> 8), byte(length)}, cl.defaultTimeout, 1)
+	defer x.close()
 	if err != nil {
 		return nil, fmt.Errorf("ReadMemoryByAddress[1]: %w", err)
 	}
@@ -392,59 +384,31 @@ func (cl *Client) ReadMemoryByAddress(ctx context.Context, address, length uint3
 
 		framesToReceive := (left + 6) / 7 // ceil(left/7)
 
-		// Subscribe before FC to avoid missing CFs
-		sctx, cancel := context.WithCancel(ctx)
-		defer cancel()
-		dataChan := cl.c.Subscribe(sctx, cl.recvID...)
-
 		// FC: CTS, BS=0, STmin=0
-		fcCtx := gocan.WithExpectedResponses(ctx, framesToReceive)
-		if err := cl.c.Send(fcCtx, gocan.NewFrame(cl.canID, []byte{0x30, 0x00, 0x00})); err != nil {
+		if err := cl.send(ctx, []byte{0x30, 0x00, 0x00}, cl.defaultTimeout, framesToReceive); err != nil {
 			return nil, fmt.Errorf("ReadMemoryByAddress[4]: %w", err)
 		}
 
 		seq := byte(0x21)
-		timer := time.NewTimer(cl.defaultTimeout)
-		defer timer.Stop()
-		for framesToReceive > 0 {
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
+		for ; framesToReceive > 0; framesToReceive-- {
+			r, err := x.consecutive(ctx, seq)
+			if err != nil {
+				return nil, fmt.Errorf("ReadMemoryByAddress[5]: %w", err)
 			}
-			timer.Reset(cl.defaultTimeout)
-
-			select {
-			case r, ok := <-dataChan:
-				if !ok {
-					return nil, errors.New("ReadMemoryByAddress[5]: subscription closed")
+			fd := r.Bytes()
+			if fd[0] != seq { // a negative response aborting the transfer
+				if err := CheckErr(r); err != nil {
+					return nil, fmt.Errorf("ReadMemoryByAddress[6]: %w", err)
 				}
-				fd := r.Bytes()
-				if len(fd) < 2 {
-					return nil, errors.New("ReadMemoryByAddress[5]: short consecutive frame")
-				}
-				// if not CF (0x2n), validate as error frame
-				if (fd[0] & 0x20) != 0x20 {
-					if err := CheckErr(r); err != nil {
-						return nil, err
-					}
-				}
-				if fd[0] != seq {
-					return nil, fmt.Errorf("ReadMemoryByAddress[6]: frame sequence out of order, expected 0x%X got 0x%X", seq, fd[0])
-				}
-
-				n := copy(buf[w:], fd[1:]) // up to 7 bytes
-				w += n
-				left = max(0, left-n)
-
-				// wrap 0x21..0x2F -> 0x20 -> 0x21...
-				seq = 0x20 | ((seq + 1) & 0x0F)
-				framesToReceive--
-
-			case <-timer.C:
-				return nil, errors.New("ReadMemoryByAddress[7]: timeout waiting for response")
+				return nil, fmt.Errorf("ReadMemoryByAddress[7]: transfer aborted by [% 02X]", fd)
 			}
+
+			n := copy(buf[w:], fd[1:]) // up to 7 bytes
+			w += n
+			left = max(0, left-n)
+
+			// wrap 0x21..0x2F -> 0x20 -> 0x21...
+			seq = 0x20 | ((seq + 1) & 0x0F)
 		}
 		return buf, nil
 	}
