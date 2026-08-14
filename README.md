@@ -2,8 +2,10 @@
 
 A CAN bus library for Go with pluggable hardware adapters.
 
-v2 is a redesign of [GoCAN](https://github.com/roffe/gocan) with a smaller,
-more idiomatic API. Migrating from v1? See [MIGRATION.md](MIGRATION.md).
+v2 is a redesign with a smaller, more idiomatic API, and is what this
+repository now contains. Migrating from v1? See [MIGRATION.md](MIGRATION.md).
+The v1 source is frozen at tag
+[v1.4.8](https://github.com/roffe/gocan/tree/v1.4.8).
 
 ```
 go get github.com/roffe/gocan/v2
@@ -96,16 +98,36 @@ select loops. A clean `Close` reports `nil` from `Err`.
 
 ## Adapters
 
-Adapters register themselves when their package is imported. Native v2
-adapters:
+Adapters register themselves when their package is imported, from
+`github.com/roffe/gocan/v2/adapters/<pkg>`:
 
-| Name         | Import                                     | Description                               |
-|--------------|--------------------------------------------|-------------------------------------------|
-| `CANUSB VCP` | `github.com/roffe/gocan/v2/adapters/canusb` | Lawicel CANUSB over FTDI virtual COM port |
-| `loopback`   | built into the core                         | Virtual echo adapter for tests            |
+| Package        | Registers as                                     | Build tag        |
+|----------------|--------------------------------------------------|------------------|
+| `canusb`       | `CANUSB VCP`                                     | —                |
+| `combi`        | `CombiAdapter`                                    | — (cgo, libusb)  |
+| `just4trionic` | `Just4Trionic`                                    | —                |
+| `slcan`        | `SLCan`                                           | —                |
+| `elm327`       | `ELM327`                                          | —                |
+| `scantool`     | `OBDLink SX`, `OBDLink EX`, `STN1170`, `STN2120`  | —                |
+| `obdx`         | `OBDX Pro Wifi`                                   | —                |
+| `txbridge`     | `txbridge wifi`                                   | —                |
+| `yaca`         | `YACA`                                            | —                |
+| `drewtech`     | `Drewtech Mongoose`                               | — (linux)        |
+| `socketcan`    | `SocketCAN <dev>`, one per interface              | — (linux)        |
+| `canlib`       | `CANlib #N <device>`, one per Kvaser channel      | `canlib`         |
+| `j2534`        | one per installed J2534 DLL                       | `j2534` (windows)|
+| `pcan`         | one per PEAK channel                              | `pcan` (windows) |
+| `rcan`         | `rCAN`                                            | `rcan`           |
+| —              | `loopback`, built into the core                   | —                |
 
-`adapters/all` blank-imports every native adapter, for GUI apps that list
-them at runtime.
+Adapters needing a vendor SDK are behind build tags, so a default build
+links none of them. `canusb` and `scantool` additionally register
+direct-FTDI variants on Windows under the `ftdi` tag (and `canusb` a DLL
+variant under `canusb`).
+
+`adapters/all` blank-imports the adapters that build everywhere, for GUI apps
+that list them at runtime; `combi`, `rcan`, `yaca` and `elm327` are excluded
+and must be imported directly.
 
 `gocan.Adapters()` / `gocan.AdapterNames()` list what is registered, with
 descriptions and capabilities for building UIs.

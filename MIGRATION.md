@@ -11,8 +11,10 @@ import "github.com/roffe/gocan"
 import gocan "github.com/roffe/gocan/v2"
 ```
 
-Until v2 is tagged, `v2/go.mod` carries a `replace github.com/roffe/gocan =>
-../` for local development; drop it once v1 is tagged and pushed.
+v1 no longer lives in this repository — v2 now occupies the repo root and the
+v1 source is frozen at tag `v1.4.8`. Existing `github.com/roffe/gocan`
+imports keep resolving against that tag, but there will be no further v1
+releases.
 
 ## Package layout
 
@@ -28,9 +30,10 @@ like `database/sql` drivers:
 | `github.com/roffe/gocan/v2/adapters/all` | blank-imports every native adapter             |
 
 Import the adapters you use (or `adapters/all` for a GUI listing everything)
-and open them by registry name as before. Every v1 adapter has a native v2
-port; opt-in adapters that need vendor SDKs keep their v1 build tags
-(`canlib`, `ftdi`, `j2534`, `pcan`, `rcan`).
+and open them by registry name as before. Every v1 hardware adapter has a
+native v2 port (only the gRPC client adapter was dropped); opt-in adapters
+that need vendor SDKs keep their v1 build tags (`canlib`, `canusb`, `ftdi`,
+`j2534`, `pcan`, `rcan`). The README has the full table.
 
 ## API mapping
 
@@ -245,7 +248,9 @@ fake port without hardware.
   your own if you need custom buffering.
 - `gocan.TimeoutError`, `ErrResponseChannelClosed`: context errors and
   closed channels replace them.
-- The v1 CLI and gRPC gateway server: still v1-only. The protocol-layer
-  packages (`pkg/serialcommand`, `pkg/dvi`, SDK bindings, `gmlan`) and the
-  gRPC `proto` client types were copied into `v2/pkg/...`, `v2/gmlan` and
-  `v2/proto`.
+- The v1 CLI and the gRPC gateway server (`proto`, the `adapter_client`
+  transport): dropped entirely. They exist only at tag `v1.4.8`.
+- Everything worth keeping came across unprefixed: the protocol-layer
+  packages (`pkg/serialcommand`, `pkg/dvi`, the vendor SDK bindings under
+  `pkg/`) and `gmlan` sit at their v1 paths again, now under the `/v2`
+  module.
