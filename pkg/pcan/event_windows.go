@@ -5,7 +5,7 @@ import (
 	"syscall"
 	"unsafe"
 
-	"github.com/roffe/gocan/pkg/w32"
+	"github.com/roffe/gocan/v2/pkg/w32"
 )
 
 // ----- PCAN receive event glue -----

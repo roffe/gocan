@@ -5,30 +5,31 @@ import (
 	"log/slog"
 )
 
+// EventType orders event severities from least to most severe.
 type EventType int
 
 const (
-	EventTypeError EventType = iota
-	EventTypeWarning
+	EventTypeDebug EventType = iota
 	EventTypeInfo
-	EventTypeDebug
+	EventTypeWarning
+	EventTypeError
 	// EventTypeFatal signals an unrecoverable adapter failure. It is always
-	// the last event delivered before the client terminates.
+	// the last event delivered before the bus terminates.
 	EventTypeFatal
 )
 
 func (et EventType) String() string {
 	switch et {
-	case EventTypeFatal:
-		return "FATAL"
-	case EventTypeError:
-		return "ERROR"
-	case EventTypeWarning:
-		return "WARN"
-	case EventTypeInfo:
-		return "INFO"
 	case EventTypeDebug:
 		return "DEBUG"
+	case EventTypeInfo:
+		return "INFO"
+	case EventTypeWarning:
+		return "WARN"
+	case EventTypeError:
+		return "ERROR"
+	case EventTypeFatal:
+		return "FATAL"
 	default:
 		return "UNKNOWN"
 	}
@@ -49,22 +50,18 @@ func (et EventType) Level() slog.Level {
 	}
 }
 
+// Event is an out-of-band notification from an adapter: connection progress,
+// recoverable errors, or the final fatal failure.
 type Event struct {
 	Type    EventType
 	Details string
-	// Err holds the underlying error for EventTypeError and EventTypeFatal
-	// events. It may be nil for events raised from a plain message.
+	// Err holds the underlying error for error and fatal events. It may be
+	// nil for events raised from a plain message.
 	Err error
 }
 
-// Returns a formatted string representation of the event.
 func (e Event) String() string {
-	return fmt.Sprintf("[%s] %s", e.Type.String(), e.Details)
-}
-
-// Returns the raw details of the event.
-func (e Event) Raw() string {
-	return e.Details
+	return fmt.Sprintf("[%s] %s", e.Type, e.Details)
 }
 
 // IsFatal reports whether the event signals an unrecoverable adapter failure.

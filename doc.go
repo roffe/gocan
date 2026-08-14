@@ -1,32 +1,28 @@
-// Package gocan is a CAN bus client library with interchangeable hardware
-// adapter backends: ELM327/STN serial dongles, SocketCAN, J2534 passthru
-// devices, Kvaser, PCAN, CombiAdapter and more.
+// Package gocan v2 is a CAN bus library with pluggable hardware adapters.
 //
-// A Client is created with New (adapter looked up by registry name, see
-// ListAdapterNames) or NewWithOpts (adapter constructed by the caller):
+// Compared to v1 the API is smaller and more idiomatic:
 //
-//	c, err := gocan.New(ctx, "ELM327", &gocan.AdapterConfig{Port: "COM3", CANRate: 500})
+//   - Frame is a plain value (no pointers, no hidden per-send state).
+//   - Contexts are the only timeout/cancellation mechanism.
+//   - Adapters implement three methods (Open, Send, Close) and push traffic
+//     back through the Bus instead of exposing four channels.
+//   - Subscriptions are channels or range-over-func iterators whose lifetime
+//     is the context they were created with.
 //
-// Frames are sent with Send, SendFrame, SendAndWait (request/response) and
-// SendSync (blocks until the frame reaches the hardware). Frames are received
-// one-shot with Recv or streamed with Subscribe, SubscribeFunc and
-// SubscribeChan, filtered on CAN identifiers.
+// Quick start:
 //
-// # Frame ownership
+//	bus, err := gocan.Open(ctx, "loopback", gocan.Config{})
+//	if err != nil { ... }
+//	defer bus.Close()
 //
-// Outgoing frames are single-use: send methods attach per-send state to the
-// frame, so build a fresh frame for every send. Frames received from the bus
-// are shared by every matching subscriber and must be treated as read-only,
-// including the Data slice.
+//	reply, err := bus.Request(ctx, gocan.NewFrame(0x240, data), 0x258)
 //
-// # Lifecycle
+//	for frame := range bus.Frames(ctx, 0x1A0) {
+//		fmt.Println(frame)
+//	}
 //
-// The Client owns its adapter. Close shuts both down. If the adapter fails
-// fatally the client's context is cancelled: Done, Err and Wait report the
-// failure, and every registered event listener receives a final
-// EventTypeFatal event. Recoverable adapter noise is delivered as Events via
-// the WithEventFunc, WithEventChan and WithLogger options or OnEvent.
+// This core package is pure stdlib. Hardware adapters live in subpackages
+// under adapters/ and register themselves on import.
 //
-// Some backends require build tags (combi, j2534, canlib, canusb, pcan,
-// ftdi); see the README for the full matrix and supported hardware.
+// Migrating from v1? See MIGRATION.md for a complete v1-to-v2 mapping.
 package gocan

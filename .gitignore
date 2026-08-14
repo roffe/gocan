@@ -13,3 +13,5 @@ dump/*
 bin
 bin/*
 canlog.log
+_tmp
+_tmp/*
