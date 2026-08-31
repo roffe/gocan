@@ -58,6 +58,8 @@ type J2534 struct {
 	mu            sync.Mutex
 
 	filters []uint32
+
+	closed chan struct{} // closed when readLoop has exited
 }
 
 func New(cfg gocan.Config) (gocan.Adapter, error) {
@@ -117,8 +119,17 @@ func (ma *J2534) Open(ctx context.Context, bus *gocan.Bus) error {
 	}
 
 	if err := ma.h.PassThruConnect(ma.deviceID, ma.protocol, ma.flags, baudRate, &ma.channelID); err != nil {
+		ma.h.PassThruClose(ma.deviceID)
 		ma.h.Close()
 		return fmt.Errorf("PassThruConnect: %w", err)
+	}
+
+	// Best-effort teardown for failures after connect; without it the DLL
+	// keeps the device open and the next open fails with ERR_DEVICE_IN_USE.
+	teardown := func() {
+		ma.h.PassThruDisconnect(ma.channelID)
+		ma.h.PassThruClose(ma.deviceID)
+		ma.h.Close()
 	}
 
 	if ma.tech2passThru {
@@ -136,41 +147,50 @@ func (ma *J2534) Open(ctx context.Context, bus *gocan.Bus) error {
 			if st, err2 := ma.h.PassThruGetLastError(); err2 == nil && st != "" {
 				ma.emit(gocan.EventTypeError, st)
 			}
-			ma.h.Close()
+			teardown()
 			return fmt.Errorf("PassThruIoctl set SWCAN: %w", err)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 
 	if err := ma.h.PassThruIoctl(ma.channelID, passthru.CLEAR_RX_BUFFER, nil, nil); err != nil {
-		ma.h.Close()
+		teardown()
 		return fmt.Errorf("PassThruIoctl clear rx buffer: %w", err)
 	}
 
 	if len(ma.filters) > 0 {
 		if err := ma.setupFilters(); err != nil {
+			teardown()
 			return err
 		}
 	} else {
 		ma.allowAll()
 	}
 
+	ma.closed = make(chan struct{})
 	go ma.readLoop(ctx)
 	return nil
 }
 
 func (ma *J2534) Close() error {
-	time.Sleep(200 * time.Millisecond) // let in-flight frames drain
-	if err := ma.h.PassThruIoctl(ma.channelID, passthru.CLEAR_MSG_FILTERS, nil, nil); err != nil {
-		return err
+	// Wait for readLoop to exit before tearing the DLL down: a read still
+	// in flight when Release runs is a use-after-free. The bus cancels ctx
+	// before calling Close, so this normally returns within one 50ms read.
+	// ponytail: 1s escape hatch in case a vendor DLL blocks past its timeout.
+	if ma.closed != nil {
+		select {
+		case <-ma.closed:
+		case <-time.After(time.Second):
+		}
 	}
-	if err := ma.h.PassThruDisconnect(ma.channelID); err != nil {
-		return err
-	}
-	if err := ma.h.PassThruClose(ma.deviceID); err != nil {
-		return err
-	}
-	return ma.h.Close()
+	// Best-effort: run every teardown step even if one fails (e.g. cable
+	// already unplugged), or the device stays open in the DLL.
+	return errors.Join(
+		ma.h.PassThruIoctl(ma.channelID, passthru.CLEAR_MSG_FILTERS, nil, nil),
+		ma.h.PassThruDisconnect(ma.channelID),
+		ma.h.PassThruClose(ma.deviceID),
+		ma.h.Close(),
+	)
 }
 
 func (ma *J2534) Send(ctx context.Context, f gocan.Frame) error {
@@ -206,6 +226,10 @@ func (ma *J2534) Send(ctx context.Context, f gocan.Frame) error {
 
 // SetFilter replaces the installed PASS filters at runtime.
 func (ma *J2534) SetFilter(filters []uint32) error {
+	if ma.tech2passThru {
+		ma.mu.Lock()
+		defer ma.mu.Unlock()
+	}
 	if err := ma.h.PassThruClearMsgFilters(ma.channelID); err != nil {
 		return err
 	}
@@ -248,13 +272,17 @@ func (ma *J2534) setupFilters() error {
 	if ma.cfg.UseExtendedID {
 		txflags = passthru.CAN_29BIT_ID
 	}
+	idMask := uint32(0x7FF)
+	if ma.cfg.UseExtendedID {
+		idMask = 0x1FFFFFFF
+	}
 	maskMsg := &passthru.PassThruMsg{
 		ProtocolID:     ma.protocol,
 		DataSize:       4,
 		ExtraDataIndex: 4,
-		Data:           [passthru.MSG_DATA_SIZE]byte{0x00, 0x00, 0xff, 0xff},
 		TxFlags:        txflags,
 	}
+	binary.BigEndian.PutUint32(maskMsg.Data[:], idMask)
 	for i, filter := range ma.filters {
 		filterID := uint32(i)
 		patternMsg := &passthru.PassThruMsg{
@@ -272,12 +300,20 @@ func (ma *J2534) setupFilters() error {
 }
 
 func (ma *J2534) readLoop(ctx context.Context) {
+	defer close(ma.closed)
 	for ctx.Err() == nil {
 		msg, err := ma.readMsg()
 		if err != nil {
-			if ctx.Err() == nil {
-				ma.emit(gocan.EventTypeError, err.Error())
+			if ctx.Err() != nil {
+				return
 			}
+			// The DLL fails these reads instantly; without bailing out the
+			// loop spins at 100% CPU spamming errors until Close.
+			if errors.Is(err, passthru.ErrDeviceNotConnected) {
+				ma.bus.Fatal(err)
+				return
+			}
+			ma.emit(gocan.EventTypeError, err.Error())
 			continue
 		}
 		if msg == nil {

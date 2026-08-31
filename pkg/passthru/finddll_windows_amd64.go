@@ -36,8 +36,8 @@ func FindDLLs() (prefix string, dlls []J2534DLL) {
 		return
 	}
 
-	var capabilities Capabilities
 	for _, adapter := range adapters {
+		var capabilities Capabilities
 		k3, err := registry.OpenKey(registry.LOCAL_MACHINE, `SOFTWARE\PassThruSupport.04.04\`+adapter, registry.QUERY_VALUE)
 		if err != nil {
 			continue

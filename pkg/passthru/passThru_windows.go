@@ -144,9 +144,12 @@ func (j *PassThru) PassThruClose(deviceID uint32) error {
 }
 
 func (j *PassThru) PassThruOpen(deviceName string, pDeviceID *uint32) error {
-	var pName *string
+	var pName *byte
 	if deviceName != "" {
-		pName = &deviceName
+		var err error
+		if pName, err = syscall.BytePtrFromString(deviceName); err != nil {
+			return err
+		}
 	}
 	// long PassThruOpen(void* pName, unsigned long *pDeviceID);
 	ret, _, _ := j.passThruOpen.Call(
@@ -175,11 +178,14 @@ func (j *PassThru) PassThruReadMsg(channelID uint32, pMsg *PassThruMsg, timeout 
 	return pNumMsgs, nil
 }
 
-func (j *PassThru) PassThruReadMsgs(channelID uint32, pMsg []*PassThruMsg, pNumMsgs *uint32, timeout uint32) error {
+// PassThruReadMsgs reads up to *pNumMsgs messages into the contiguous array
+// starting at pMsg. The caller must provide at least *pNumMsgs messages of
+// backing storage, e.g. &msgs[0] on a []PassThruMsg.
+func (j *PassThru) PassThruReadMsgs(channelID uint32, pMsg *PassThruMsg, pNumMsgs *uint32, timeout uint32) error {
 	// long PassThruReadMsgs(unsigned long ChannelID, PassThruMsg *pMsg, unsigned long *pNumMsgs, unsigned long Timeout);
 	ret, _, _ := j.passThruReadMsgs.Call(
 		uintptr(channelID),
-		uintptr(unsafe.Pointer(&pMsg)),
+		uintptr(unsafe.Pointer(pMsg)),
 		uintptr(unsafe.Pointer(pNumMsgs)),
 		uintptr(timeout),
 	)
@@ -191,38 +197,6 @@ func (j *PassThru) PassThruReadMsgs(channelID uint32, pMsg []*PassThruMsg, pNumM
 		}
 	}
 	return nil
-}
-
-func (j *PassThru) PassThruReadMsgs2(channelID uint32, numMsgs *uint32, timeout uint32) (int, []PassThruMsg, error) {
-	// long PassThruReadMsgs(unsigned long ChannelID, PassThruMsg *pMsg, unsigned long *pNumMsgs, unsigned long Timeout);
-	rMsgs := make([]PassThruMsg, *numMsgs)
-
-	ret, _, _ := j.passThruReadMsgs.Call(
-		uintptr(channelID),
-		uintptr(unsafe.Pointer(&rMsgs)),
-		uintptr(unsafe.Pointer(numMsgs)),
-		uintptr(timeout),
-	)
-	if err := CheckError(uint32(ret)); err != nil {
-		if str, err2 := j.PassThruGetLastError(); err2 == nil {
-			return 0, nil, fmt.Errorf("%s: %w", str, err)
-		} else {
-			return 0, nil, err
-		}
-	}
-	return int(*numMsgs), rMsgs, nil
-}
-
-func (j *PassThru) PassThruWriteMsg(channelID uint32, pMsg *PassThruMsg, timeout uint32) error {
-	pNumMsgs := uint32(1)
-	// long PassThruWriteMsgs(unsigned long ChannelID, PassThruMsg *pMsg, unsigned long *pNumMsgs, unsigned long Timeout);
-	ret, _, _ := j.passThruWriteMsgs.Call(
-		uintptr(channelID),
-		uintptr(unsafe.Pointer(pMsg)),
-		uintptr(unsafe.Pointer(&pNumMsgs)),
-		uintptr(timeout),
-	)
-	return CheckError(uint32(ret))
 }
 
 func (j *PassThru) PassThruWriteMsgs(channelID uint32, pMsg *PassThruMsg, pNumMsgs *uint32, timeout uint32) error {
@@ -266,17 +240,36 @@ func (j *PassThru) PassThruReadVersion(deviceID uint32) (string, string, string,
 		return "", "", "", err
 	}
 
-	return string(bytes.Trim(pFirmwareVersion[:], "\x00")), string(bytes.Trim(pDllVersion[:], "\x00")), string(bytes.Trim(pApiVersion[:], "\x00")), nil
+	return cstr(pFirmwareVersion[:]), cstr(pDllVersion[:]), cstr(pApiVersion[:]), nil
+}
+
+// cstr returns the string up to the first NUL; the DLL need not zero the
+// rest of the buffer.
+func cstr(b []byte) string {
+	if i := bytes.IndexByte(b, 0); i >= 0 {
+		b = b[:i]
+	}
+	return string(b)
 }
 
 // long PassThruIoctl(unsigned long HandleID, unsigned long IoctlID, void *pInput, void *pOutput);
 func (j *PassThru) PassThruIoctl(handleID, ioctlID uint32, opts ...interface{}) error {
 	switch ioctlID {
 	case SET_CONFIG, GET_CONFIG:
+		list := opts[0].(*SCONFIG_LIST)
+		// Marshal to the C SCONFIG_LIST layout: { unsigned long NumOfParams;
+		// SCONFIG *ConfigPtr; } — a Go slice header is not that.
+		cList := struct {
+			NumOfParams uint32
+			ConfigPtr   *SCONFIG
+		}{NumOfParams: list.NumOfParams}
+		if len(list.Params) > 0 {
+			cList.ConfigPtr = &list.Params[0]
+		}
 		ret, _, _ := j.passThruIoctl.Call(
 			uintptr(handleID),
 			uintptr(ioctlID),
-			uintptr(unsafe.Pointer(opts[0].(*SCONFIG_LIST))),
+			uintptr(unsafe.Pointer(&cList)),
 			uintptr(0),
 		)
 		return CheckError(uint32(ret))
@@ -309,5 +302,5 @@ func (j *PassThru) PassThruGetLastError() (string, error) {
 	ret, _, _ := j.passThruGetLastError.Call(
 		uintptr(unsafe.Pointer(&pErrorDescription)),
 	)
-	return string(bytes.Trim(pErrorDescription[:], "\x00")), CheckError(uint32(ret))
+	return cstr(pErrorDescription[:]), CheckError(uint32(ret))
 }

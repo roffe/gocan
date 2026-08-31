@@ -34,13 +34,14 @@ func scanDevices() []gocan.AdapterInfo {
 }
 
 type SocketCAN struct {
-	cfg     gocan.Config
-	bus     *gocan.Bus
-	dev     *candevice.Device
-	virtual bool
-	conn    net.Conn
-	tx      *socketcan.Transmitter
-	rx      *socketcan.Receiver
+	cfg       gocan.Config
+	bus       *gocan.Bus
+	dev       *candevice.Device
+	virtual   bool
+	broughtUp bool // we took the interface up, so we take it down again
+	conn      net.Conn
+	tx        *socketcan.Transmitter
+	rx        *socketcan.Receiver
 }
 
 func New(cfg gocan.Config) (gocan.Adapter, error) {
@@ -58,10 +59,7 @@ func (a *SocketCAN) Open(ctx context.Context, bus *gocan.Bus) error {
 	// leave their device state alone.
 	a.virtual = strings.HasPrefix(a.cfg.Port, "vcan")
 	if !a.virtual {
-		if err := a.dev.SetBitrate(uint32(a.cfg.CANRate * 1000)); err != nil {
-			return err
-		}
-		if err := a.dev.SetUp(); err != nil {
+		if err := a.bringUp(); err != nil {
 			return err
 		}
 	}
@@ -83,11 +81,43 @@ func (a *SocketCAN) Open(ctx context.Context, bus *gocan.Bus) error {
 	return nil
 }
 
+// bringUp configures the interface only if it is down. An interface that is
+// already up was configured by the system (networkd, ip link, ...) and is left
+// alone: reconfiguring it needs CAP_NET_ADMIN and would disturb other users.
+func (a *SocketCAN) bringUp() error {
+	up, err := a.dev.IsUp()
+	if err != nil {
+		return err
+	}
+	if up {
+		if rate, err := a.dev.Bitrate(); err == nil && rate != uint32(a.cfg.CANRate*1000) {
+			a.bus.Emit(gocan.Event{
+				Type:    gocan.EventTypeWarning,
+				Details: fmt.Sprintf("%s is already up at %d kbit/s, requested %.0f kbit/s", a.cfg.Port, rate/1000, a.cfg.CANRate),
+			})
+		}
+		return nil
+	}
+	if err := a.dev.SetBitrate(uint32(a.cfg.CANRate * 1000)); err != nil {
+		return a.configErr(err)
+	}
+	if err := a.dev.SetUp(); err != nil {
+		return a.configErr(err)
+	}
+	a.broughtUp = true
+	return nil
+}
+
+func (a *SocketCAN) configErr(err error) error {
+	return fmt.Errorf("%s is down and could not be configured: %w (bring it up first: sudo ip link set %s up type can bitrate %.0f)",
+		a.cfg.Port, err, a.cfg.Port, a.cfg.CANRate*1000)
+}
+
 func (a *SocketCAN) Close() error {
 	if a.conn != nil {
 		a.conn.Close() // unblocks the read loop
 	}
-	if a.dev != nil && !a.virtual {
+	if a.dev != nil && a.broughtUp {
 		return a.dev.SetDown()
 	}
 	return nil
