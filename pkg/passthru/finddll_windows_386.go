@@ -7,71 +7,67 @@ import (
 )
 
 func FindDLLs() (prefix string, dlls []J2534DLL) {
-	k, err := registry.OpenKey(registry.LOCAL_MACHINE, `SOFTWARE\PassThruSupport.04.04`, registry.QUERY_VALUE|registry.WOW64_32KEY)
+	k, err := registry.OpenKey(registry.LOCAL_MACHINE, `SOFTWARE\PassThruSupport.04.04`, registry.READ|registry.WOW64_32KEY)
 	if err != nil {
 		//log.Println(err)
 		return
 	}
-	ki, err := k.Stat()
-	if err != nil {
-		//log.Println(err)
-		return
-	}
+	defer k.Close()
 
-	if err := k.Close(); err != nil {
-		//log.Println(err)
-		return
-	}
-
-	k2, err := registry.OpenKey(registry.LOCAL_MACHINE, `SOFTWARE\PassThruSupport.04.04`, registry.ENUMERATE_SUB_KEYS|registry.WOW64_32KEY)
-	if err != nil {
-		//log.Println(err)
-		return
-	}
-
-	adapters, err := k2.ReadSubKeyNames(int(ki.SubKeyCount))
+	// n <= 0 returns every subkey, so there is no separate Stat for the count.
+	adapters, err := k.ReadSubKeyNames(-1)
 	if err != nil {
 		//log.Println(err)
 		return
 	}
 
 	for _, adapter := range adapters {
-		var capabilities Capabilities
-		k3, err := registry.OpenKey(registry.LOCAL_MACHINE, `SOFTWARE\PassThruSupport.04.04\`+adapter, registry.QUERY_VALUE|registry.WOW64_32KEY)
-		if err != nil {
-			continue
-		}
-		name, _, err := k3.GetStringValue("Name")
-		if err != nil {
-			continue
-		}
-		functionLibrary, _, err := k3.GetStringValue("FunctionLibrary")
-		if err != nil {
-			continue
-		}
-		if val, _, err := k3.GetIntegerValue("CAN"); err == nil {
-			capabilities.CAN = val == 1
-		}
-		if val, _, err := k3.GetIntegerValue("CAN_PS"); err == nil {
-			capabilities.CANPS = val == 1
-		}
-		if val, _, err := k3.GetIntegerValue("ISO9141"); err == nil {
-			capabilities.ISO9141 = val == 1
-		}
-		if val, _, err := k3.GetIntegerValue("ISO15765"); err == nil {
-			capabilities.ISO15765 = val == 1
-		}
-		if val, _, err := k3.GetIntegerValue("ISO14230"); err == nil {
-			capabilities.ISO14230 = val == 1
-		}
-		if val, _, err := k3.GetIntegerValue("SW_CAN_PS"); err == nil {
-			capabilities.SWCANPS = val == 1 || strings.ToLower(name) == "tech2"
-		} else {
-			if strings.ToLower(name) == "tech2" {
-				capabilities.SWCANPS = true
+		// Scoped so each driver's key is released this iteration; FindDLLs is
+		// re-run on every device-list refresh.
+		func() {
+			k3, err := registry.OpenKey(registry.LOCAL_MACHINE, `SOFTWARE\PassThruSupport.04.04\`+adapter, registry.QUERY_VALUE|registry.WOW64_32KEY)
+			if err != nil {
+				return
 			}
-		}
-		dlls = append(dlls, J2534DLL{Name: name, FunctionLibrary: functionLibrary, Capabilities: capabilities})
+			defer k3.Close()
+
+			var capabilities Capabilities
+			name, _, err := k3.GetStringValue("Name")
+			if err != nil {
+				return
+			}
+			functionLibrary, _, err := k3.GetStringValue("FunctionLibrary")
+			if err != nil {
+				return
+			}
+			if val, _, err := k3.GetIntegerValue("CAN"); err == nil {
+				capabilities.CAN = val == 1
+			}
+			if val, _, err := k3.GetIntegerValue("CAN_PS"); err == nil {
+				capabilities.CANPS = val == 1
+			}
+			if val, _, err := k3.GetIntegerValue("ISO9141"); err == nil {
+				capabilities.ISO9141 = val == 1
+			}
+			if val, _, err := k3.GetIntegerValue("ISO15765"); err == nil {
+				capabilities.ISO15765 = val == 1
+			}
+			if val, _, err := k3.GetIntegerValue("ISO14230"); err == nil {
+				capabilities.ISO14230 = val == 1
+			}
+			if val, _, err := k3.GetIntegerValue("SW_CAN_PS"); err == nil {
+				capabilities.SWCANPS = val == 1 || strings.ToLower(name) == "tech2"
+			} else {
+				if strings.ToLower(name) == "tech2" {
+					capabilities.SWCANPS = true
+				}
+			}
+			dlls = append(dlls, J2534DLL{
+				Name:            name,
+				FunctionLibrary: functionLibrary,
+				Capabilities:    capabilities,
+			})
+		}()
 	}
 	return
 }

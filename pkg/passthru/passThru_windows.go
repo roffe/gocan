@@ -26,67 +26,52 @@ func New(dllName string) (*PassThru, error) {
 	if err != nil {
 		return nil, err
 	}
-	passThruReadVersionProc, err := dll.FindProc("PassThruReadVersion")
-	if err != nil {
-		return nil, err
+	pt := &PassThru{dll: dll}
+	for _, p := range []struct {
+		name string
+		dst  **syscall.Proc
+	}{
+		{"PassThruReadVersion", &pt.passThruReadVersionProc},
+		{"PassThruOpen", &pt.passThruOpen},
+		{"PassThruClose", &pt.passThruClose},
+		{"PassThruConnect", &pt.passThruConnect},
+		{"PassThruDisconnect", &pt.passThruDisconnect},
+		{"PassThruReadMsgs", &pt.passThruReadMsgs},
+		{"PassThruWriteMsgs", &pt.passThruWriteMsgs},
+		{"PassThruStartMsgFilter", &pt.passThruStartMsgFilter},
+		{"PassThruIoctl", &pt.passThruIoctl},
+		{"PassThruGetLastError", &pt.passThruGetLastError},
+	} {
+		proc, err := dll.FindProc(p.name)
+		if err != nil {
+			// Probing a DLL that turns out not to be J2534 would otherwise
+			// leave it mapped for the life of the process.
+			dll.Release()
+			return nil, err
+		}
+		*p.dst = proc
 	}
-
-	passThruOpen, err := dll.FindProc("PassThruOpen")
-	if err != nil {
-		return nil, err
-	}
-
-	passThruClose, err := dll.FindProc("PassThruClose")
-	if err != nil {
-		return nil, err
-	}
-
-	passThruConnect, err := dll.FindProc("PassThruConnect")
-	if err != nil {
-		return nil, err
-	}
-	passThruDisconnect, err := dll.FindProc("PassThruDisconnect")
-	if err != nil {
-		return nil, err
-	}
-	passThruReadMsgs, err := dll.FindProc("PassThruReadMsgs")
-	if err != nil {
-		return nil, err
-	}
-	passThruWriteMsgs, err := dll.FindProc("PassThruWriteMsgs")
-	if err != nil {
-		return nil, err
-	}
-	passThruStartMsgFilter, err := dll.FindProc("PassThruStartMsgFilter")
-	if err != nil {
-		return nil, err
-	}
-	passThruIoctl, err := dll.FindProc("PassThruIoctl")
-	if err != nil {
-		return nil, err
-	}
-	passThruGetLastError, err := dll.FindProc("PassThruGetLastError")
-	if err != nil {
-		return nil, err
-	}
-
-	return &PassThru{
-		dll:                     dll,
-		passThruReadVersionProc: passThruReadVersionProc,
-		passThruOpen:            passThruOpen,
-		passThruClose:           passThruClose,
-		passThruConnect:         passThruConnect,
-		passThruDisconnect:      passThruDisconnect,
-		passThruReadMsgs:        passThruReadMsgs,
-		passThruWriteMsgs:       passThruWriteMsgs,
-		passThruStartMsgFilter:  passThruStartMsgFilter,
-		passThruIoctl:           passThruIoctl,
-		passThruGetLastError:    passThruGetLastError,
-	}, nil
+	return pt, nil
 }
 
 func (j *PassThru) Close() error {
 	return j.dll.Release()
+}
+
+// checkErr maps a J2534 return code to an error, appending the DLL's own text
+// description only for ERR_FAILED. Per J2534-1 v04.04 the description is valid
+// only immediately after that code; for anything else the buffer holds
+// undefined content and some DLLs do device I/O to produce it, which is not
+// something to spend on every empty read.
+func (j *PassThru) checkErr(ret uint32) error {
+	err := CheckError(ret)
+	if err == nil || ret != ERR_FAILED {
+		return err
+	}
+	if str, err2 := j.PassThruGetLastError(); err2 == nil && str != "" {
+		return fmt.Errorf("%s: %w", str, err)
+	}
+	return err
 }
 
 // # PASSTHRUCONNECT
@@ -124,7 +109,7 @@ func (j *PassThru) PassThruConnect(deviceID, protocolID, flags, baudRate uint32,
 		uintptr(baudRate),
 		uintptr(unsafe.Pointer(pChannelID)),
 	)
-	return CheckError(uint32(ret))
+	return j.checkErr(uint32(ret))
 }
 
 func (j *PassThru) PassThruDisconnect(channelID uint32) error {
@@ -132,7 +117,7 @@ func (j *PassThru) PassThruDisconnect(channelID uint32) error {
 	ret, _, _ := j.passThruDisconnect.Call(
 		uintptr(channelID),
 	)
-	return CheckError(uint32(ret))
+	return j.checkErr(uint32(ret))
 }
 
 func (j *PassThru) PassThruClose(deviceID uint32) error {
@@ -140,7 +125,7 @@ func (j *PassThru) PassThruClose(deviceID uint32) error {
 	ret, _, _ := j.passThruClose.Call(
 		uintptr(deviceID),
 	)
-	return CheckError(uint32(ret))
+	return j.checkErr(uint32(ret))
 }
 
 func (j *PassThru) PassThruOpen(deviceName string, pDeviceID *uint32) error {
@@ -156,7 +141,7 @@ func (j *PassThru) PassThruOpen(deviceName string, pDeviceID *uint32) error {
 		uintptr(unsafe.Pointer(pName)),
 		uintptr(unsafe.Pointer(pDeviceID)),
 	)
-	return CheckError(uint32(ret))
+	return j.checkErr(uint32(ret))
 }
 
 func (j *PassThru) PassThruReadMsg(channelID uint32, pMsg *PassThruMsg, timeout uint32) (uint32, error) {
@@ -168,12 +153,8 @@ func (j *PassThru) PassThruReadMsg(channelID uint32, pMsg *PassThruMsg, timeout 
 		uintptr(unsafe.Pointer(&pNumMsgs)),
 		uintptr(timeout),
 	)
-	if err := CheckError(uint32(ret)); err != nil {
-		if str, err2 := j.PassThruGetLastError(); err2 == nil {
-			return 0, fmt.Errorf("%s: %w", str, err)
-		} else {
-			return 0, err
-		}
+	if err := j.checkErr(uint32(ret)); err != nil {
+		return 0, err
 	}
 	return pNumMsgs, nil
 }
@@ -189,14 +170,7 @@ func (j *PassThru) PassThruReadMsgs(channelID uint32, pMsg *PassThruMsg, pNumMsg
 		uintptr(unsafe.Pointer(pNumMsgs)),
 		uintptr(timeout),
 	)
-	if err := CheckError(uint32(ret)); err != nil {
-		if str, err2 := j.PassThruGetLastError(); err2 == nil {
-			return fmt.Errorf("%s: %w", str, err)
-		} else {
-			return err
-		}
-	}
-	return nil
+	return j.checkErr(uint32(ret))
 }
 
 func (j *PassThru) PassThruWriteMsgs(channelID uint32, pMsg *PassThruMsg, pNumMsgs *uint32, timeout uint32) error {
@@ -207,7 +181,7 @@ func (j *PassThru) PassThruWriteMsgs(channelID uint32, pMsg *PassThruMsg, pNumMs
 		uintptr(unsafe.Pointer(pNumMsgs)),
 		uintptr(timeout),
 	)
-	return CheckError(uint32(ret))
+	return j.checkErr(uint32(ret))
 }
 
 func (j *PassThru) PassThruStartMsgFilter(channelID, filterType uint32, pMaskMsg, pPatternMsg, pFlowControlMsg *PassThruMsg, pMsgID *uint32) error {
@@ -220,7 +194,7 @@ func (j *PassThru) PassThruStartMsgFilter(channelID, filterType uint32, pMaskMsg
 		uintptr(unsafe.Pointer(pFlowControlMsg)),
 		uintptr(unsafe.Pointer(pMsgID)),
 	)
-	return CheckError(uint32(ret))
+	return j.checkErr(uint32(ret))
 }
 
 func (j *PassThru) PassThruReadVersion(deviceID uint32) (string, string, string, error) {
@@ -236,7 +210,7 @@ func (j *PassThru) PassThruReadVersion(deviceID uint32) (string, string, string,
 		uintptr(unsafe.Pointer(&pApiVersion)),
 	)
 
-	if err := CheckError(uint32(ret)); err != nil {
+	if err := j.checkErr(uint32(ret)); err != nil {
 		return "", "", "", err
 	}
 
@@ -256,13 +230,22 @@ func cstr(b []byte) string {
 func (j *PassThru) PassThruIoctl(handleID, ioctlID uint32, opts ...interface{}) error {
 	switch ioctlID {
 	case SET_CONFIG, GET_CONFIG:
-		list := opts[0].(*SCONFIG_LIST)
+		if len(opts) == 0 {
+			return ErrInvalidParameter
+		}
+		list, ok := opts[0].(*SCONFIG_LIST)
+		if !ok || list == nil {
+			return ErrInvalidParameter
+		}
 		// Marshal to the C SCONFIG_LIST layout: { unsigned long NumOfParams;
-		// SCONFIG *ConfigPtr; } — a Go slice header is not that.
+		// SCONFIG *ConfigPtr; } — a Go slice header is not that. The count
+		// comes from the slice rather than list.NumOfParams: the DLL walks
+		// exactly that many entries and GET_CONFIG writes to them, so an
+		// overlarge value would read and write past the Go slice.
 		cList := struct {
 			NumOfParams uint32
 			ConfigPtr   *SCONFIG
-		}{NumOfParams: list.NumOfParams}
+		}{NumOfParams: uint32(len(list.Params))}
 		if len(list.Params) > 0 {
 			cList.ConfigPtr = &list.Params[0]
 		}
@@ -272,7 +255,7 @@ func (j *PassThru) PassThruIoctl(handleID, ioctlID uint32, opts ...interface{}) 
 			uintptr(unsafe.Pointer(&cList)),
 			uintptr(0),
 		)
-		return CheckError(uint32(ret))
+		return j.checkErr(uint32(ret))
 	case CLEAR_MSG_FILTERS, CLEAR_RX_BUFFER, CLEAR_TX_BUFFER:
 		ret, _, _ := j.passThruIoctl.Call(
 			uintptr(handleID),
@@ -280,18 +263,26 @@ func (j *PassThru) PassThruIoctl(handleID, ioctlID uint32, opts ...interface{}) 
 			uintptr(0),
 			uintptr(0),
 		)
-		return CheckError(uint32(ret))
+		return j.checkErr(uint32(ret))
 	case FAST_INIT:
 		if len(opts) != 2 {
+			return ErrInvalidParameter
+		}
+		in, ok := opts[0].(*PassThruMsg)
+		if !ok {
+			return ErrInvalidParameter
+		}
+		out, ok := opts[1].(*PassThruMsg)
+		if !ok {
 			return ErrInvalidParameter
 		}
 		ret, _, _ := j.passThruIoctl.Call(
 			uintptr(handleID),
 			uintptr(ioctlID),
-			uintptr(unsafe.Pointer(opts[0].(*PassThruMsg))),
-			uintptr(unsafe.Pointer(opts[1].(*PassThruMsg))),
+			uintptr(unsafe.Pointer(in)),
+			uintptr(unsafe.Pointer(out)),
 		)
-		return CheckError(uint32(ret))
+		return j.checkErr(uint32(ret))
 	}
 	return ErrNotSupported
 }

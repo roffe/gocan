@@ -7,8 +7,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
-	"sync"
 	"time"
 
 	gocan "github.com/roffe/gocan/v2"
@@ -42,6 +42,20 @@ func scanDevices() []gocan.AdapterInfo {
 	return out
 }
 
+const (
+	// Read timeout, milliseconds. Every DLL call is serialized onto one
+	// thread, so this also bounds how long a pending Send waits behind a read.
+	readTimeout = 10
+	// A DLL that fails reads instantly (cable pulled, channel invalidated)
+	// would otherwise spin the worker at 100% CPU spamming events. Bail out
+	// rather than trying to enumerate every return code that means "dead".
+	maxReadErrors = 20
+	// How long the worker keeps serving calls after the bus context dies
+	// before tearing the DLL down itself. Bus.Fatal cancels the context
+	// without calling Close, so without this the locked OS thread would leak.
+	closeGrace = 3 * time.Second
+)
+
 type J2534 struct {
 	cfg gocan.Config
 	bus *gocan.Bus
@@ -53,13 +67,16 @@ type J2534 struct {
 	flags     uint32
 	protocol  uint32
 
-	// Tech2_32.dll is not thread-safe: serialize reads against writes.
 	tech2passThru bool
-	mu            sync.Mutex
 
-	filters []uint32
+	calls chan func()   // DLL work, run on the worker's locked OS thread
+	done  chan struct{} // closed once the worker has exited
 
-	closed chan struct{} // closed when readLoop has exited
+	// Worker-thread only, no synchronization needed.
+	filters  []uint32
+	rx       passthru.PassThruMsg // reused; PassThruMsg is 4KB
+	torn     bool                 // DLL released, nothing may call into it
+	closeErr error
 }
 
 func New(cfg gocan.Config) (gocan.Adapter, error) {
@@ -67,21 +84,16 @@ func New(cfg gocan.Config) (gocan.Adapter, error) {
 		cfg:     cfg,
 		flags:   passthru.CAN_ID_BOTH | passthru.CAN_29BIT_ID,
 		filters: cfg.CANFilter,
+		calls:   make(chan func()),
+		done:    make(chan struct{}),
 	}, nil
 }
 
 func (ma *J2534) Open(ctx context.Context, bus *gocan.Bus) error {
 	ma.bus = bus
-	var err error
-	ma.h, err = passthru.New(ma.cfg.Port)
-	if err != nil {
-		return err
-	}
+	ma.tech2passThru = strings.HasSuffix(ma.cfg.Port, "Tech2_32.dll")
 
-	if strings.HasSuffix(ma.cfg.Port, "Tech2_32.dll") {
-		ma.tech2passThru = true
-	}
-
+	// Resolved before the worker starts so an unusable rate costs no DLL work.
 	var swcan bool
 	var baudRate uint32
 	switch ma.cfg.CANRate {
@@ -102,15 +114,90 @@ func (ma *J2534) Open(ctx context.Context, bus *gocan.Bus) error {
 		baudRate = 615384
 		ma.protocol = passthru.CAN
 	default:
-		ma.h.Close()
+		close(ma.done)
 		return errors.New("invalid CAN rate")
 	}
 
-	if err := ma.h.PassThruOpen("", &ma.deviceID); err != nil {
-		if str, err2 := ma.h.PassThruGetLastError(); err2 == nil && str != "" {
-			ma.emit(gocan.EventTypeInfo, "PassThruOpen: "+str)
+	errc := make(chan error, 1)
+	go ma.run(ctx, baudRate, swcan, errc)
+	return <-errc
+}
+
+// run owns the single OS thread every call into the DLL is made from, loading
+// it included. J2534 DLLs are written for single-threaded use — several keep
+// the device handle, the PassThruGetLastError text or a COM apartment in
+// thread-local storage — and a goroutine would otherwise hop threads between
+// calls. Serializing here also covers what the Tech2_32.dll mutex used to.
+func (ma *J2534) run(ctx context.Context, baudRate uint32, swcan bool, errc chan<- error) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	defer close(ma.done)
+
+	if err := ma.open(baudRate, swcan); err != nil {
+		errc <- err
+		return
+	}
+	errc <- nil
+
+	errCount := 0
+	for {
+		// Queued work (Send, SetFilter, teardown) goes first; polling the bus
+		// is what this thread does with the time left over.
+		select {
+		case fn := <-ma.calls:
+			fn()
+			if ma.torn {
+				return
+			}
+			continue
+		default:
 		}
+
+		if ctx.Err() != nil {
+			// Stop touching the bus, but stay available for Close's teardown.
+			select {
+			case fn := <-ma.calls:
+				fn()
+			case <-time.After(closeGrace):
+				ma.teardown()
+			}
+			if ma.torn {
+				return
+			}
+			continue
+		}
+
+		if err := ma.pump(); err != nil {
+			if ctx.Err() != nil {
+				continue
+			}
+			errCount++
+			if errors.Is(err, passthru.ErrDeviceNotConnected) || errCount >= maxReadErrors {
+				ma.teardown()
+				ma.bus.Fatal(fmt.Errorf("read failed %d time(s) in a row: %w", errCount, err))
+				return
+			}
+			ma.emit(gocan.EventTypeError, err.Error())
+			continue
+		}
+		errCount = 0
+	}
+}
+
+// open runs on the worker thread. Every failure path releases what it already
+// acquired and marks the adapter torn down, so run exits without polling;
+// without it the DLL keeps the device and the next open fails with
+// ERR_DEVICE_IN_USE.
+func (ma *J2534) open(baudRate uint32, swcan bool) error {
+	var err error
+	if ma.h, err = passthru.New(ma.cfg.Port); err != nil {
+		ma.torn = true
+		return err
+	}
+
+	if err := ma.h.PassThruOpen("", &ma.deviceID); err != nil {
 		ma.h.Close()
+		ma.torn = true
 		return fmt.Errorf("PassThruOpen: %w", err)
 	}
 
@@ -121,15 +208,8 @@ func (ma *J2534) Open(ctx context.Context, bus *gocan.Bus) error {
 	if err := ma.h.PassThruConnect(ma.deviceID, ma.protocol, ma.flags, baudRate, &ma.channelID); err != nil {
 		ma.h.PassThruClose(ma.deviceID)
 		ma.h.Close()
+		ma.torn = true
 		return fmt.Errorf("PassThruConnect: %w", err)
-	}
-
-	// Best-effort teardown for failures after connect; without it the DLL
-	// keeps the device open and the next open fails with ERR_DEVICE_IN_USE.
-	teardown := func() {
-		ma.h.PassThruDisconnect(ma.channelID)
-		ma.h.PassThruClose(ma.deviceID)
-		ma.h.Close()
 	}
 
 	if ma.tech2passThru {
@@ -138,59 +218,118 @@ func (ma *J2534) Open(ctx context.Context, bus *gocan.Bus) error {
 
 	if swcan {
 		opts := &passthru.SCONFIG_LIST{
-			NumOfParams: 1,
 			Params: []passthru.SCONFIG{
 				{Parameter: passthru.J1962_PINS, Value: 0x0100},
 			},
 		}
 		if err := ma.h.PassThruIoctl(ma.channelID, passthru.SET_CONFIG, opts, nil); err != nil {
-			if st, err2 := ma.h.PassThruGetLastError(); err2 == nil && st != "" {
-				ma.emit(gocan.EventTypeError, st)
-			}
-			teardown()
+			ma.teardown()
 			return fmt.Errorf("PassThruIoctl set SWCAN: %w", err)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 
 	if err := ma.h.PassThruIoctl(ma.channelID, passthru.CLEAR_RX_BUFFER, nil, nil); err != nil {
-		teardown()
+		ma.teardown()
 		return fmt.Errorf("PassThruIoctl clear rx buffer: %w", err)
 	}
 
 	if len(ma.filters) > 0 {
 		if err := ma.setupFilters(); err != nil {
-			teardown()
+			ma.teardown()
 			return err
 		}
 	} else {
 		ma.allowAll()
 	}
-
-	ma.closed = make(chan struct{})
-	go ma.readLoop(ctx)
 	return nil
 }
 
-func (ma *J2534) Close() error {
-	// Wait for readLoop to exit before tearing the DLL down: a read still
-	// in flight when Release runs is a use-after-free. The bus cancels ctx
-	// before calling Close, so this normally returns within one 50ms read.
-	// ponytail: 1s escape hatch in case a vendor DLL blocks past its timeout.
-	if ma.closed != nil {
-		select {
-		case <-ma.closed:
-		case <-time.After(time.Second):
+// pump does one read and delivers what it got. It returns an error only for
+// conditions that say something about the health of the channel.
+func (ma *J2534) pump() error {
+	ma.rx.ProtocolID = ma.protocol
+	n, err := ma.h.PassThruReadMsg(ma.channelID, &ma.rx, readTimeout)
+	if err != nil {
+		// The spec lists both for an empty read and DLLs disagree on which
+		// they return: Tactrix/DrewTech/MDI answer ERR_TIMEOUT once the
+		// window expires. Treating that as an error spams one event per poll
+		// on an idle bus.
+		if errors.Is(err, passthru.ErrBufferEmpty) || errors.Is(err, passthru.ErrTimeout) {
+			return nil
 		}
+		return err
 	}
-	// Best-effort: run every teardown step even if one fails (e.g. cable
-	// already unplugged), or the device stays open in the DLL.
-	return errors.Join(
+	if n == 0 {
+		return nil
+	}
+	// Loopback echoes and start-of-message indications arrive on the same
+	// channel as real traffic; delivering them duplicates frames we sent.
+	if ma.rx.RxStatus&(passthru.TX_MSG_TYPE|passthru.START_OF_MESSAGE) != 0 {
+		return nil
+	}
+	if ma.rx.DataSize < 4 || ma.rx.DataSize > 12 {
+		ma.emit(gocan.EventTypeError, fmt.Sprintf("bad message size: %d", ma.rx.DataSize))
+		return nil
+	}
+	f := gocan.Frame{
+		ID:       binary.BigEndian.Uint32(ma.rx.Data[0:4]),
+		Length:   uint8(ma.rx.DataSize - 4),
+		Extended: ma.rx.RxStatus&passthru.CAN_29BIT_ID != 0,
+	}
+	copy(f.Data[:], ma.rx.Data[4:ma.rx.DataSize])
+	ma.bus.Deliver(f)
+	return nil
+}
+
+// do runs fn on the worker's OS thread and waits for it to finish.
+func (ma *J2534) do(fn func()) error {
+	done := make(chan struct{})
+	select {
+	case ma.calls <- func() { defer close(done); fn() }:
+	case <-ma.done:
+		return gocan.ErrClosed
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ma.done:
+		return gocan.ErrClosed
+	}
+}
+
+// teardown runs on the worker thread. Best-effort: run every step even if one
+// fails (e.g. cable already unplugged), or the device stays open in the DLL.
+func (ma *J2534) teardown() {
+	if ma.torn || ma.h == nil {
+		return
+	}
+	ma.torn = true
+	ma.closeErr = errors.Join(
 		ma.h.PassThruIoctl(ma.channelID, passthru.CLEAR_MSG_FILTERS, nil, nil),
 		ma.h.PassThruDisconnect(ma.channelID),
 		ma.h.PassThruClose(ma.deviceID),
 		ma.h.Close(),
 	)
+}
+
+// Close tears the DLL down on the worker thread, so it cannot race a read
+// still in flight, and waits for that thread to exit.
+// ponytail: 1s total escape hatch in case a vendor DLL blocks past its timeout.
+func (ma *J2534) Close() error {
+	deadline := time.After(time.Second)
+	select {
+	case ma.calls <- ma.teardown:
+	case <-ma.done: // already torn down on the open, fatal or grace path
+	case <-deadline:
+		return errors.New("timed out queueing J2534 teardown")
+	}
+	select {
+	case <-ma.done:
+	case <-deadline:
+		return errors.New("timed out waiting for J2534 teardown")
+	}
+	return ma.closeErr
 }
 
 func (ma *J2534) Send(ctx context.Context, f gocan.Frame) error {
@@ -210,35 +349,33 @@ func (ma *J2534) Send(ctx context.Context, f gocan.Frame) error {
 	binary.BigEndian.PutUint32(msg.Data[:], f.ID)
 	copy(msg.Data[4:], f.Bytes())
 
-	if ma.tech2passThru {
-		ma.mu.Lock()
-		defer ma.mu.Unlock()
+	var err error
+	if derr := ma.do(func() {
+		numMsg := uint32(1)
+		err = ma.h.PassThruWriteMsgs(ma.channelID, msg, &numMsg, 25)
+	}); derr != nil {
+		return derr
 	}
-	numMsg := uint32(1)
-	if err := ma.h.PassThruWriteMsgs(ma.channelID, msg, &numMsg, 25); err != nil {
-		if errStr, err2 := ma.h.PassThruGetLastError(); err2 == nil {
-			return fmt.Errorf("%w: %s", err, errStr)
-		}
-		return err
-	}
-	return nil
+	return err
 }
 
 // SetFilter replaces the installed PASS filters at runtime.
 func (ma *J2534) SetFilter(filters []uint32) error {
-	if ma.tech2passThru {
-		ma.mu.Lock()
-		defer ma.mu.Unlock()
+	var err error
+	if derr := ma.do(func() {
+		if err = ma.h.PassThruClearMsgFilters(ma.channelID); err != nil {
+			return
+		}
+		ma.filters = filters
+		if len(filters) > 0 {
+			err = ma.setupFilters()
+			return
+		}
+		ma.allowAll()
+	}); derr != nil {
+		return derr
 	}
-	if err := ma.h.PassThruClearMsgFilters(ma.channelID); err != nil {
-		return err
-	}
-	ma.filters = filters
-	if len(filters) > 0 {
-		return ma.setupFilters()
-	}
-	ma.allowAll()
-	return nil
+	return err
 }
 
 func (ma *J2534) allowAll() {
@@ -283,8 +420,8 @@ func (ma *J2534) setupFilters() error {
 		TxFlags:        txflags,
 	}
 	binary.BigEndian.PutUint32(maskMsg.Data[:], idMask)
-	for i, filter := range ma.filters {
-		filterID := uint32(i)
+	for _, filter := range ma.filters {
+		var filterID uint32
 		patternMsg := &passthru.PassThruMsg{
 			ProtocolID:     ma.protocol,
 			DataSize:       4,
@@ -297,63 +434,6 @@ func (ma *J2534) setupFilters() error {
 		}
 	}
 	return nil
-}
-
-func (ma *J2534) readLoop(ctx context.Context) {
-	defer close(ma.closed)
-	for ctx.Err() == nil {
-		msg, err := ma.readMsg()
-		if err != nil {
-			if ctx.Err() != nil {
-				return
-			}
-			// The DLL fails these reads instantly; without bailing out the
-			// loop spins at 100% CPU spamming errors until Close.
-			if errors.Is(err, passthru.ErrDeviceNotConnected) {
-				ma.bus.Fatal(err)
-				return
-			}
-			ma.emit(gocan.EventTypeError, err.Error())
-			continue
-		}
-		if msg == nil {
-			continue
-		}
-		if msg.DataSize < 4 || msg.DataSize > 12 {
-			ma.emit(gocan.EventTypeError, fmt.Sprintf("bad message size: %d", msg.DataSize))
-			continue
-		}
-		f := gocan.Frame{
-			ID:       binary.BigEndian.Uint32(msg.Data[0:4]),
-			Length:   uint8(msg.DataSize - 4),
-			Extended: msg.RxStatus&passthru.CAN_29BIT_ID != 0,
-		}
-		copy(f.Data[:], msg.Data[4:msg.DataSize])
-		ma.bus.Deliver(f)
-	}
-}
-
-func (ma *J2534) readMsg() (*passthru.PassThruMsg, error) {
-	if ma.tech2passThru {
-		ma.mu.Lock()
-		defer ma.mu.Unlock()
-	}
-	msg := new(passthru.PassThruMsg)
-	msg.ProtocolID = ma.protocol
-	n, err := ma.h.PassThruReadMsg(ma.channelID, msg, 50)
-	if err != nil {
-		if errors.Is(err, passthru.ErrBufferEmpty) {
-			return nil, nil
-		}
-		if errors.Is(err, passthru.ErrDeviceNotConnected) {
-			return nil, fmt.Errorf("device not connected: %w", err)
-		}
-		return nil, fmt.Errorf("read error: %w", err)
-	}
-	if n == 0 {
-		return nil, nil
-	}
-	return msg, nil
 }
 
 func (ma *J2534) emit(t gocan.EventType, details string) {
