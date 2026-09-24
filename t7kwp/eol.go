@@ -2,6 +2,7 @@ package t7kwp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -15,6 +16,10 @@ const eolPollInterval = 250 * time.Millisecond
 // 250 ms polls so a slow or retried erase is waited out rather than written over.
 const eraseSettleAttempts = 240
 
+// eraseRestarts bounds how often EraseFlash starts over from EOLProgrammingStart
+// when the ECU refuses the erase with conditionsNotCorrect.
+const eraseRestarts = 3
+
 // EraseFlash runs the EOL erase: startRoutine EOLProgrammingStart (0x52), then
 // EOLEraseFlash (0x53) — a chip-wide erase that takes ~20 s — then polls
 // testerPresent until the ECU answers again. tick, when non-nil, is called once
@@ -25,10 +30,22 @@ func (t *Client) EraseFlash(ctx context.Context, tick func()) error {
 	if tick == nil {
 		tick = func() {}
 	}
-	if err := t.pollRoutine(ctx, RLI_EOL_START, 30, tick); err != nil {
-		return fmt.Errorf("EraseFlash: start EOL programming: %w", err)
+	var err error
+	for range eraseRestarts {
+		if err = t.pollRoutine(ctx, RLI_EOL_START, 30, tick); err != nil {
+			return fmt.Errorf("EraseFlash: start EOL programming: %w", err)
+		}
+		// conditionsNotCorrect: the ECU dropped its EOL state machine between
+		// 0x52 and 0x53. An ECU left in EOL mode by a failed flash (still running
+		// from RAM) does this when the failure hit before the erase finished: 0x52
+		// re-arms it at EXPECT_ERASE, but the stale 2 s EOLEndTimer from that run
+		// flips it straight to EOL_READY and 0x53 aborts. The aborted 0x53
+		// refreshed the timer, so starting over from 0x52 right away gets through.
+		if err = t.pollRoutine(ctx, RLI_ERASE, 200, tick); !errors.Is(err, ErrConditionsNotCorrectOrRequestSequenceError) {
+			break
+		}
 	}
-	if err := t.pollRoutine(ctx, RLI_ERASE, 200, tick); err != nil {
+	if err != nil {
 		return fmt.Errorf("EraseFlash: erase flash: %w", err)
 	}
 
@@ -39,7 +56,6 @@ func (t *Client) EraseFlash(ctx context.Context, tick func()) error {
 	// this loop only catches an ECU that has gone silent altogether.
 	// (Measured erase time varies with the flash device: ~4 s on some ECUs, ~20 s
 	// on others, so elapsed time is not a usable completion signal either.)
-	var err error
 	for range eraseSettleAttempts {
 		tick()
 		select {
@@ -55,12 +71,15 @@ func (t *Client) EraseFlash(ctx context.Context, tick func()) error {
 }
 
 // pollRoutine retries startRoutine until the ECU answers positively.
+// conditionsNotCorrect is returned at once: in EOL it means the ECU aborted its
+// state machine, and repeating the request can't bring it back.
 func (t *Client) pollRoutine(ctx context.Context, id byte, attempts int, tick func()) error {
 	var err error
 	for range attempts {
 		tick()
-		if err = t.StartRoutineByIdentifier(ctx, id); err == nil {
-			return nil
+		err = t.StartRoutineByIdentifier(ctx, id)
+		if err == nil || errors.Is(err, ErrConditionsNotCorrectOrRequestSequenceError) {
+			return err
 		}
 		select {
 		case <-ctx.Done():

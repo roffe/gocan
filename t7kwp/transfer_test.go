@@ -2,7 +2,10 @@ package t7kwp
 
 import (
 	"bytes"
+	"context"
 	"testing"
+
+	"github.com/roffe/gocan/v2"
 )
 
 // payloadBytes is how many of a frame's 8 bytes the ECU actually consumes: it
@@ -119,5 +122,55 @@ func TestRequestDownloadFraming(t *testing.T) {
 	// only the last frame is answered, on the response id
 	if msgs[0].rr || !msgs[1].rr {
 		t.Errorf("reply expectation: got %v/%v, want false/true", msgs[0].rr, msgs[1].rr)
+	}
+}
+
+// busyOnceECU answers the first transferData with busyRepeatRequest, the way a
+// T7 does while it is still programming the previous block, and records the
+// SID of every request it receives.
+type busyOnceECU struct {
+	bus  *gocan.Bus
+	sids []byte
+}
+
+func (e *busyOnceECU) Open(_ context.Context, b *gocan.Bus) error { e.bus = b; return nil }
+func (e *busyOnceECU) Close() error                               { return nil }
+
+func (e *busyOnceECU) Send(_ context.Context, f gocan.Frame) error {
+	if f.ID != REQ_MSG_ID {
+		return nil // acks
+	}
+	if f.Data[0]&0x40 != 0 { // first frame carries the SID
+		e.sids = append(e.sids, f.Data[3])
+	}
+	if f.Data[0]&0x3F != 0 {
+		return nil // answered on the last frame, whose counter is 0
+	}
+	sid := e.sids[len(e.sids)-1]
+	if len(e.sids) == 1 {
+		e.bus.Deliver(frame(3, 0x7F, sid, BUSY_REPEAT_REQUEST))
+		return nil
+	}
+	e.bus.Deliver(frame(1, sid|0x40))
+	return nil
+}
+
+// A busy transferData must be resent as-is. Re-anchoring with requestDownload
+// makes the ECU read the download address out of the refused block's data.
+func TestTransferDataBlockResendsOnBusy(t *testing.T) {
+	ecu := &busyOnceECU{}
+	bus, err := gocan.OpenAdapter(t.Context(), ecu)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bus.Close()
+	c := New(bus)
+	c.SetResponseID(0x258)
+
+	if err := c.TransferDataBlock(t.Context(), []byte{0x39, 0x38, 0x39, 0x36}); err != nil {
+		t.Fatalf("TransferDataBlock: %v", err)
+	}
+	if !bytes.Equal(ecu.sids, []byte{TRANSFER_DATA, TRANSFER_DATA}) {
+		t.Fatalf("requests % 02X, want the transferData sent twice", ecu.sids)
 	}
 }

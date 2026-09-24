@@ -1,6 +1,10 @@
 package passthru
 
-import "fmt"
+import (
+	"bytes"
+	"fmt"
+	"unsafe"
+)
 
 const (
 	MSG_DATA_SIZE = 4128
@@ -327,6 +331,10 @@ type PassThruMsg struct {
 	Data [MSG_DATA_SIZE]byte
 }
 
+// PassThruMsg must match the C struct byte for byte: six 32-bit fields
+// followed by the data array, no padding. This fails to compile otherwise.
+var _ [24 + MSG_DATA_SIZE]byte = [unsafe.Sizeof(PassThruMsg{})]byte{}
+
 type Capabilities struct {
 	CAN      bool
 	CANPS    bool
@@ -352,4 +360,75 @@ func (m *PassThruMsg) DataBytes() []byte {
 
 func (m *PassThruMsg) String() string {
 	return fmt.Sprintf("ProtocolID: %d RxStatus: %02X TxFlags: %02X Timestamp: %d DataSize: %d ExtraDataIndex: %d Data: %X", m.ProtocolID, m.RxStatus, m.TxFlags, m.Timestamp, m.DataSize, m.ExtraDataIndex, m.DataBytes())
+}
+
+// checkErr maps a J2534 return code to an error, appending the library's own
+// text description only for ERR_FAILED. Per J2534-1 v04.04 the description is
+// valid only immediately after that code; for anything else the buffer holds
+// undefined content and some libraries do device I/O to produce it, which is
+// not something to spend on every empty read.
+func (j *PassThru) checkErr(ret uint32) error {
+	err := CheckError(ret)
+	if err == nil || ret != ERR_FAILED {
+		return err
+	}
+	if str, err2 := j.PassThruGetLastError(); err2 == nil && str != "" {
+		return fmt.Errorf("%s: %w", str, err)
+	}
+	return err
+}
+
+// cstr returns the string up to the first NUL; the library need not zero the
+// rest of the buffer.
+func cstr(b []byte) string {
+	if i := bytes.IndexByte(b, 0); i >= 0 {
+		b = b[:i]
+	}
+	return string(b)
+}
+
+// PassThruIoctl marshals the Go-side arguments of the supported IOCTLs into
+// what the library expects and calls it.
+//
+// long PassThruIoctl(unsigned long HandleID, unsigned long IoctlID, void *pInput, void *pOutput);
+func (j *PassThru) PassThruIoctl(handleID, ioctlID uint32, opts ...interface{}) error {
+	switch ioctlID {
+	case SET_CONFIG, GET_CONFIG:
+		if len(opts) == 0 {
+			return ErrInvalidParameter
+		}
+		list, ok := opts[0].(*SCONFIG_LIST)
+		if !ok || list == nil {
+			return ErrInvalidParameter
+		}
+		// Marshal to the C SCONFIG_LIST layout: { unsigned long NumOfParams;
+		// SCONFIG *ConfigPtr; } — a Go slice header is not that. The count
+		// comes from the slice rather than list.NumOfParams: the library
+		// walks exactly that many entries and GET_CONFIG writes to them, so
+		// an overlarge value would read and write past the Go slice.
+		cList := struct {
+			NumOfParams uint32
+			ConfigPtr   *SCONFIG
+		}{NumOfParams: uint32(len(list.Params))}
+		if len(list.Params) > 0 {
+			cList.ConfigPtr = &list.Params[0]
+		}
+		return j.checkErr(j.ioctl(handleID, ioctlID, unsafe.Pointer(&cList), nil))
+	case CLEAR_MSG_FILTERS, CLEAR_RX_BUFFER, CLEAR_TX_BUFFER:
+		return j.checkErr(j.ioctl(handleID, ioctlID, nil, nil))
+	case FAST_INIT:
+		if len(opts) != 2 {
+			return ErrInvalidParameter
+		}
+		in, ok := opts[0].(*PassThruMsg)
+		if !ok {
+			return ErrInvalidParameter
+		}
+		out, ok := opts[1].(*PassThruMsg)
+		if !ok {
+			return ErrInvalidParameter
+		}
+		return j.checkErr(j.ioctl(handleID, ioctlID, unsafe.Pointer(in), unsafe.Pointer(out)))
+	}
+	return ErrNotSupported
 }

@@ -1,8 +1,6 @@
 package passthru
 
 import (
-	"bytes"
-	"fmt"
 	"syscall"
 	"unsafe"
 )
@@ -56,22 +54,6 @@ func New(dllName string) (*PassThru, error) {
 
 func (j *PassThru) Close() error {
 	return j.dll.Release()
-}
-
-// checkErr maps a J2534 return code to an error, appending the DLL's own text
-// description only for ERR_FAILED. Per J2534-1 v04.04 the description is valid
-// only immediately after that code; for anything else the buffer holds
-// undefined content and some DLLs do device I/O to produce it, which is not
-// something to spend on every empty read.
-func (j *PassThru) checkErr(ret uint32) error {
-	err := CheckError(ret)
-	if err == nil || ret != ERR_FAILED {
-		return err
-	}
-	if str, err2 := j.PassThruGetLastError(); err2 == nil && str != "" {
-		return fmt.Errorf("%s: %w", str, err)
-	}
-	return err
 }
 
 // # PASSTHRUCONNECT
@@ -217,74 +199,15 @@ func (j *PassThru) PassThruReadVersion(deviceID uint32) (string, string, string,
 	return cstr(pFirmwareVersion[:]), cstr(pDllVersion[:]), cstr(pApiVersion[:]), nil
 }
 
-// cstr returns the string up to the first NUL; the DLL need not zero the
-// rest of the buffer.
-func cstr(b []byte) string {
-	if i := bytes.IndexByte(b, 0); i >= 0 {
-		b = b[:i]
-	}
-	return string(b)
-}
-
 // long PassThruIoctl(unsigned long HandleID, unsigned long IoctlID, void *pInput, void *pOutput);
-func (j *PassThru) PassThruIoctl(handleID, ioctlID uint32, opts ...interface{}) error {
-	switch ioctlID {
-	case SET_CONFIG, GET_CONFIG:
-		if len(opts) == 0 {
-			return ErrInvalidParameter
-		}
-		list, ok := opts[0].(*SCONFIG_LIST)
-		if !ok || list == nil {
-			return ErrInvalidParameter
-		}
-		// Marshal to the C SCONFIG_LIST layout: { unsigned long NumOfParams;
-		// SCONFIG *ConfigPtr; } — a Go slice header is not that. The count
-		// comes from the slice rather than list.NumOfParams: the DLL walks
-		// exactly that many entries and GET_CONFIG writes to them, so an
-		// overlarge value would read and write past the Go slice.
-		cList := struct {
-			NumOfParams uint32
-			ConfigPtr   *SCONFIG
-		}{NumOfParams: uint32(len(list.Params))}
-		if len(list.Params) > 0 {
-			cList.ConfigPtr = &list.Params[0]
-		}
-		ret, _, _ := j.passThruIoctl.Call(
-			uintptr(handleID),
-			uintptr(ioctlID),
-			uintptr(unsafe.Pointer(&cList)),
-			uintptr(0),
-		)
-		return j.checkErr(uint32(ret))
-	case CLEAR_MSG_FILTERS, CLEAR_RX_BUFFER, CLEAR_TX_BUFFER:
-		ret, _, _ := j.passThruIoctl.Call(
-			uintptr(handleID),
-			uintptr(ioctlID),
-			uintptr(0),
-			uintptr(0),
-		)
-		return j.checkErr(uint32(ret))
-	case FAST_INIT:
-		if len(opts) != 2 {
-			return ErrInvalidParameter
-		}
-		in, ok := opts[0].(*PassThruMsg)
-		if !ok {
-			return ErrInvalidParameter
-		}
-		out, ok := opts[1].(*PassThruMsg)
-		if !ok {
-			return ErrInvalidParameter
-		}
-		ret, _, _ := j.passThruIoctl.Call(
-			uintptr(handleID),
-			uintptr(ioctlID),
-			uintptr(unsafe.Pointer(in)),
-			uintptr(unsafe.Pointer(out)),
-		)
-		return j.checkErr(uint32(ret))
-	}
-	return ErrNotSupported
+func (j *PassThru) ioctl(handleID, ioctlID uint32, input, output unsafe.Pointer) uint32 {
+	ret, _, _ := j.passThruIoctl.Call(
+		uintptr(handleID),
+		uintptr(ioctlID),
+		uintptr(input),
+		uintptr(output),
+	)
+	return uint32(ret)
 }
 
 // long PassThruGetLastError(char *pErrorDescription);

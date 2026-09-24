@@ -348,7 +348,8 @@ const (
 // XEolprg.c's `eol.u8_command == PROGRAM` branches expect the tester to do
 // exactly that. requestDownload and requestTransferExit are the two that hit it,
 // because both immediately follow a transferData whose block is still being
-// programmed. Both are idempotent, so resending is safe.
+// programmed. Both are idempotent, so resending is safe. transferData hits it
+// too — see TransferDataBlock.
 func retryOnBusy(ctx context.Context, do func() error) error {
 	var err error
 	for range busyRetries {
@@ -415,12 +416,23 @@ func transferDataFrames(data []byte) [][8]byte {
 // single KWP message split across frames, and only the last frame is answered
 // (0x76 on the response id). Blocks are limited to 254 bytes by the one-byte
 // KWP length; the flash path uses 128 to match TrionicCANLib.
+//
+// busyRepeatRequest is answered by resending the identical block, never by
+// re-anchoring with requestDownload. A busy ECU keeps the refused block in its
+// programming buffer and points its receive buffer at a trash buffer, then
+// programs the kept copy when the resend arrives. A requestDownload sent
+// instead is read from that kept buffer: the block's first data bytes become
+// the download address. That aborted EOL on a real flash, when a short tail
+// block (2 frames) caught the ECU still programming the 128-byte block before it.
 func (t *Client) TransferDataBlock(ctx context.Context, data []byte) error {
 	if len(data) == 0 || len(data) > 254 {
 		return fmt.Errorf("TransferDataBlock: block must be 1-254 bytes, got %d", len(data))
 	}
-
 	frames := transferDataFrames(data)
+	return retryOnBusy(ctx, func() error { return t.transferDataBlock(ctx, frames) })
+}
+
+func (t *Client) transferDataBlock(ctx context.Context, frames [][8]byte) error {
 	var resp gocan.Frame
 	for i, buf := range frames {
 		select {

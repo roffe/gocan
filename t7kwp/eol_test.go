@@ -122,3 +122,66 @@ func TestRoutineResponseErr(t *testing.T) {
 		})
 	}
 }
+
+// staleEOLECU models a T7 left in EOL mode (running from RAM) by a flash that
+// failed before its erase finished: the 2 s EOLEndTimer from that run has
+// expired, so re-arming EOL with 0x52 is immediately undone (EOL_READY) until an
+// EOLCommCntrl call refreshes the timer. Only routine starts and testerPresent
+// are modelled; tester acks on 0x266 are ignored.
+type staleEOLECU struct {
+	bus        *gocan.Bus
+	eolSession bool // diagnos.session_type == EOL_SESSION
+	ready      bool // eol.u8_cntrl == EOL_READY
+	timerFresh bool
+	erased     bool
+}
+
+func (e *staleEOLECU) Open(_ context.Context, b *gocan.Bus) error { e.bus = b; return nil }
+func (e *staleEOLECU) Close() error                               { return nil }
+
+func (e *staleEOLECU) Send(_ context.Context, f gocan.Frame) error {
+	if f.ID != REQ_MSG_ID {
+		return nil
+	}
+	nrc := func(code byte) { e.bus.Deliver(frame(3, 0x7F, f.Data[3], code)) }
+	switch {
+	case f.Data[3] == TESTER_PRESENT:
+		e.bus.Deliver(frame(1, TESTER_PRESENT|0x40))
+	case f.Data[3] != START_ROUTINE_BY_IDENTIFIER:
+	case !e.eolSession && f.Data[4] == RLI_EOL_START:
+		// normal switch: busy, StartEOLProgramming in RAM resets to EXPECT_ERASE,
+		// then the background loop flips it to EOL_READY if the timer is stale
+		e.eolSession, e.ready = true, !e.timerFresh
+		nrc(BUSY_REPEAT_REQUEST)
+	case !e.eolSession:
+		nrc(SUBFUNCTION_NOT_SUPPORTED_OR_INVALID_FORMAT)
+	case f.Data[4] == RLI_EOL_START: // EOLCommCntrl: refresh timer, always positive
+		e.timerFresh = true
+		e.bus.Deliver(frame(2, START_ROUTINE_BY_IDENTIFIER|0x40, RLI_EOL_START))
+	case f.Data[4] == RLI_ERASE && e.ready: // abort, back to the normal switch
+		e.timerFresh, e.eolSession = true, false
+		nrc(CONDITIONS_NOT_CORRECT_OR_REQUEST_SEQUENCE_ERROR)
+	case f.Data[4] == RLI_ERASE:
+		e.erased = true
+		e.bus.Deliver(frame(2, START_ROUTINE_BY_IDENTIFIER|0x40, RLI_ERASE))
+	}
+	return nil
+}
+
+func TestEraseFlashRestartsStaleEOL(t *testing.T) {
+	ecu := &staleEOLECU{}
+	bus, err := gocan.OpenAdapter(t.Context(), ecu)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bus.Close()
+	c := New(bus)
+	c.SetResponseID(0x258)
+
+	if err := c.EraseFlash(t.Context(), nil); err != nil {
+		t.Fatalf("EraseFlash: %v", err)
+	}
+	if !ecu.erased {
+		t.Fatal("erase never started")
+	}
+}

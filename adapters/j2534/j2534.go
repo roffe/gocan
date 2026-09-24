@@ -1,4 +1,4 @@
-//go:build j2534
+//go:build j2534 && (windows || linux)
 
 package j2534
 
@@ -43,9 +43,15 @@ func scanDevices() []gocan.AdapterInfo {
 }
 
 const (
-	// Read timeout, milliseconds. Every DLL call is serialized onto one
-	// thread, so this also bounds how long a pending Send waits behind a read.
-	readTimeout = 10
+	// Reads never block (timeout 0); an idle worker waits this long for queued
+	// work before polling again. A blocking read held every Send behind it:
+	// with a 10 ms read timeout a T7, which sends the next response frame only
+	// after our 0x266 ACK, paid ~10 ms per frame and logged at ~16 Hz.
+	// Measured on a MongoosePro + T7 (4-frame read): 10 ms blocking 50 ms,
+	// 1 ms poll 9.1 ms, 100 µs poll 6.6 ms at ~1-5% of a core.
+	// ponytail: fixed poll, up to 10k empty reads/s; back off when idle if a
+	// vendor DLL turns out to do device I/O per read.
+	pollInterval = 100 * time.Microsecond
 	// A DLL that fails reads instantly (cable pulled, channel invalidated)
 	// would otherwise spin the worker at 100% CPU spamming events. Bail out
 	// rather than trying to enumerate every return code that means "dead".
@@ -167,7 +173,8 @@ func (ma *J2534) run(ctx context.Context, baudRate uint32, swcan bool, errc chan
 			continue
 		}
 
-		if err := ma.pump(); err != nil {
+		got, err := ma.pump()
+		if err != nil {
 			if ctx.Err() != nil {
 				continue
 			}
@@ -181,6 +188,17 @@ func (ma *J2534) run(ctx context.Context, baudRate uint32, swcan bool, errc chan
 			continue
 		}
 		errCount = 0
+		if got {
+			continue // drain before idling
+		}
+		select {
+		case fn := <-ma.calls:
+			fn()
+			if ma.torn {
+				return
+			}
+		case <-time.After(pollInterval):
+		}
 	}
 }
 
@@ -245,32 +263,33 @@ func (ma *J2534) open(baudRate uint32, swcan bool) error {
 	return nil
 }
 
-// pump does one read and delivers what it got. It returns an error only for
-// conditions that say something about the health of the channel.
-func (ma *J2534) pump() error {
+// pump does one non-blocking read and delivers what it got. got reports
+// whether the DLL returned a message at all (so the caller keeps draining); err
+// is only for conditions that say something about the health of the channel.
+func (ma *J2534) pump() (got bool, err error) {
 	ma.rx.ProtocolID = ma.protocol
-	n, err := ma.h.PassThruReadMsg(ma.channelID, &ma.rx, readTimeout)
+	n, err := ma.h.PassThruReadMsg(ma.channelID, &ma.rx, 0)
 	if err != nil {
 		// The spec lists both for an empty read and DLLs disagree on which
 		// they return: Tactrix/DrewTech/MDI answer ERR_TIMEOUT once the
 		// window expires. Treating that as an error spams one event per poll
 		// on an idle bus.
 		if errors.Is(err, passthru.ErrBufferEmpty) || errors.Is(err, passthru.ErrTimeout) {
-			return nil
+			return false, nil
 		}
-		return err
+		return false, err
 	}
 	if n == 0 {
-		return nil
+		return false, nil
 	}
 	// Loopback echoes and start-of-message indications arrive on the same
 	// channel as real traffic; delivering them duplicates frames we sent.
 	if ma.rx.RxStatus&(passthru.TX_MSG_TYPE|passthru.START_OF_MESSAGE) != 0 {
-		return nil
+		return true, nil
 	}
 	if ma.rx.DataSize < 4 || ma.rx.DataSize > 12 {
 		ma.emit(gocan.EventTypeError, fmt.Sprintf("bad message size: %d", ma.rx.DataSize))
-		return nil
+		return true, nil
 	}
 	f := gocan.Frame{
 		ID:       binary.BigEndian.Uint32(ma.rx.Data[0:4]),
@@ -279,7 +298,7 @@ func (ma *J2534) pump() error {
 	}
 	copy(f.Data[:], ma.rx.Data[4:ma.rx.DataSize])
 	ma.bus.Deliver(f)
-	return nil
+	return true, nil
 }
 
 // do runs fn on the worker's OS thread and waits for it to finish.
@@ -352,7 +371,15 @@ func (ma *J2534) Send(ctx context.Context, f gocan.Frame) error {
 	var err error
 	if derr := ma.do(func() {
 		numMsg := uint32(1)
-		err = ma.h.PassThruWriteMsgs(ma.channelID, msg, &numMsg, 25)
+		if err = ma.h.PassThruWriteMsgs(ma.channelID, msg, &numMsg, 25); err == nil {
+			return
+		}
+		// A bare ERR_TIMEOUT hides why the device could not transmit; the
+		// library's text usually carries the device code. checkErr only fetches
+		// it for ERR_FAILED, and it is thread-local, so ask here.
+		if s, lerr := ma.h.PassThruGetLastError(); lerr == nil && s != "" {
+			err = fmt.Errorf("%s: %w", s, err)
+		}
 	}); derr != nil {
 		return derr
 	}
