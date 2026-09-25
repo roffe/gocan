@@ -5,9 +5,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -1080,14 +1080,27 @@ type DTC struct {
 	Status byte
 }
 
+// ReadDTCByStatus reads stored DTCs (service 0x18). It is a plain read, so a
+// timed-out exchange is simply requested again: the ECU drops an unacked reply
+// after 400 ms (T1_TIMEOUT, Vios.77 VBUS.H), and a fresh request resets its
+// transmit state anyway. One lost or late frame no longer fails the read.
 func (t *Client) ReadDTCByStatus(ctx context.Context, status byte) ([]DTC, error) {
+	var err error
+	for range 3 {
+		var dtcs []DTC
+		if dtcs, err = t.readDTCByStatus(ctx, status); !errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
+			return dtcs, err
+		}
+	}
+	return nil, err
+}
+
+func (t *Client) readDTCByStatus(ctx context.Context, status byte) ([]DTC, error) {
 	const (
 		posRespReadDTCByStatus = 0x58 // KWP2000 positive response SID for "Read DTC by status"
-		noDTCLength            = 0x02
 		bytesPerDTC            = 3
 	)
 
-	// Initial request: 0xA1 sub-function, length 0x02 (SID + status)
 	resp, err := t.request(ctx, REQ_MSG_ID, []byte{0x40, 0xA1, 0x02, READ_DTC_BY_STATUS, status}, DefaultTimeout, t.responseID)
 	if err != nil {
 		return nil, fmt.Errorf("ReadDTCByStatus[0]: %w", err)
@@ -1098,76 +1111,24 @@ func (t *Client) ReadDTCByStatus(ctx context.Context, status byte) ([]DTC, error
 	if resp.Length < 5 {
 		return nil, fmt.Errorf("ReadDTCByStatus[1]: short first response: % X", resp.Bytes())
 	}
-
-	// No DTCs: 02 58 00
-	if resp.Data[2] == noDTCLength && resp.Data[3] == posRespReadDTCByStatus && resp.Data[4] == 0x00 {
-		return nil, nil
-	}
-
 	if resp.Data[3] != posRespReadDTCByStatus {
 		return nil, fmt.Errorf("ReadDTCByStatus[2]: unexpected SID 0x%02X (data % X)", resp.Data[3], resp.Data)
 	}
-
 	numDTCs := int(resp.Data[4])
 
-	// Collect raw DTC bytes (3 bytes per DTC: 2 bytes code, 1 byte status)
-	dtcData := make([]byte, 0, numDTCs*bytesPerDTC)
-
-	// First frame payload starts at byte 5
-	dtcData = append(dtcData, resp.Bytes()[5:]...)
-
-	row := resp.Data[0]
-
-	// Saab T7 paging:
-	//   e.g. 4 DTCs → first frame row=0xC2, then 0x81, final 0x80.
-	// We send confirmations while row >= 0x81; 0x80 is the last frame.
-	for row > 0x80 {
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-
-		// 0x3F = "block transfer confirmation"
-		// row &^ 0x40 clears the "first block" bit.
-		resp, err = t.request(ctx, RESP_CHUNK_CONF_ID, []byte{0x40, 0xA1, 0x3F, row &^ 0x40}, DefaultTimeout, t.responseID)
-		if err != nil {
-			return nil, fmt.Errorf("ReadDTCByStatus[3]: %w", err)
-		}
-		if err := checkErr(resp); err != nil {
-			return nil, err
-		}
-
-		if resp.Length < 3 {
-			return nil, fmt.Errorf("ReadDTCByStatus[4]: short chunk response: % X", resp.Bytes())
-		}
-
-		// Chunk payload starts at Data[2]
-		dtcData = append(dtcData, resp.Bytes()[2:]...)
-		row = resp.Data[0]
+	// Payload after the count byte: 3 bytes per DTC (code hi, code lo, status).
+	data, err := t.recvChunked(ctx, resp, 5, true)
+	if err != nil {
+		return nil, fmt.Errorf("ReadDTCByStatus[3]: %w", err)
+	}
+	if len(data) < numDTCs*bytesPerDTC {
+		return nil, fmt.Errorf("ReadDTCByStatus[4]: not enough DTC data: have %d bytes for %d DTCs", len(data), numDTCs)
 	}
 
-	// At this point row should be 0x80 (final frame) and we have all bytes.
-	if len(dtcData) < numDTCs*bytesPerDTC {
-		return nil, fmt.Errorf("ReadDTCByStatus[5]: not enough DTC data: have %d bytes for %d DTCs",
-			len(dtcData), numDTCs)
+	var dtcs []DTC
+	for d := range slices.Chunk(data[:numDTCs*bytesPerDTC], bytesPerDTC) {
+		dtcs = append(dtcs, DTC{Code: fmt.Sprintf("P%02X%02X", d[0], d[1]), Status: d[2]})
 	}
-
-	dtcs := make([]DTC, 0, numDTCs)
-	r := bytes.NewReader(dtcData)
-
-	for range numDTCs {
-		var dtcBytes [bytesPerDTC]byte
-		if _, err := io.ReadFull(r, dtcBytes[:]); err != nil {
-			return nil, fmt.Errorf("ReadDTCByStatus[6]: %w", err)
-		}
-
-		// First two bytes = SAE DTC code, third = status
-		code := (uint16(dtcBytes[0]) << 8) | uint16(dtcBytes[1])
-		dtcs = append(dtcs, DTC{
-			Code:   fmt.Sprintf("P%04X", code),
-			Status: dtcBytes[2],
-		})
-	}
-
 	return dtcs, nil
 }
 

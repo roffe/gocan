@@ -235,6 +235,13 @@ func (b *Bus) Subscribe(ctx context.Context, identifiers ...uint32) <-chan Frame
 	return b.newSub(ctx, 64, identifiers).ch
 }
 
+// SubscribeN is Subscribe with a caller-sized buffer, for streams that arrive
+// faster than a 64-frame buffer survives a scheduling hiccup (e.g. a bulk dump
+// at full bus load). Sized for the whole transfer, it never drops.
+func (b *Bus) SubscribeN(ctx context.Context, buffer int, identifiers ...uint32) <-chan Frame {
+	return b.newSub(ctx, max(buffer, 1), identifiers).ch
+}
+
 // Frames returns an iterator over frames carrying one of the given
 // identifiers. It ends when ctx is cancelled, the bus terminates, or the
 // loop breaks.

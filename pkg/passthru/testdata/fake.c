@@ -29,7 +29,9 @@ uint32_t PassThruReadMsgs(uint32_t ch, PASSTHRU_MSG *msg, uint32_t *n, uint32_t 
 	*n = 1; return 0;
 }
 uint32_t PassThruWriteMsgs(uint32_t ch, PASSTHRU_MSG *msg, uint32_t *n, uint32_t timeout) {
-	if (ch != 9 || *n != 1 || timeout != 25) return 0x02;
+	if (ch != 9 || *n != 1 || (timeout != 0 && timeout != 25)) return 0x02;
+	static int full = 2; /* a full queue refuses the first non-blocking writes, like a MongoosePro */
+	if (timeout == 0 && full) { full--; *n = 0; return 0x09; }
 	if (msg->ProtocolID != 5 || msg->DataSize != 5 || msg->ExtraDataIndex != 5 || msg->TxFlags != 0x100) return 0x0A;
 	if (msg->Data[2] != 0x02 || msg->Data[3] != 0x58 || msg->Data[4] != 0x42) return 0x0A;
 	return 0;

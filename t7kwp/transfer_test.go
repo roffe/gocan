@@ -3,6 +3,7 @@ package t7kwp
 import (
 	"bytes"
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/roffe/gocan/v2"
@@ -172,5 +173,46 @@ func TestTransferDataBlockResendsOnBusy(t *testing.T) {
 	}
 	if !bytes.Equal(ecu.sids, []byte{TRANSFER_DATA, TRANSFER_DATA}) {
 		t.Fatalf("requests % 02X, want the transferData sent twice", ecu.sids)
+	}
+}
+
+// dropAckECU answers readDTCByStatus with a two-frame reply, but ignores the
+// first ack of the first attempt, as if it or the next frame was lost.
+type dropAckECU struct {
+	bus      *gocan.Bus
+	requests int
+}
+
+func (e *dropAckECU) Open(_ context.Context, b *gocan.Bus) error { e.bus = b; return nil }
+func (e *dropAckECU) Close() error                               { return nil }
+
+func (e *dropAckECU) Send(_ context.Context, f gocan.Frame) error {
+	switch {
+	case f.ID == REQ_MSG_ID && f.Data[3] == READ_DTC_BY_STATUS:
+		e.requests++
+		e.bus.Deliver(gocan.NewFrame(0x258, []byte{0xC1, 0xA1, 11, 0x58, 3, 0x01, 0x05, 0x60}))
+	case f.ID == RESP_CHUNK_CONF_ID && f.Data[3] == 0x81 && e.requests > 1:
+		e.bus.Deliver(gocan.NewFrame(0x258, []byte{0x80, 0xA1, 0x04, 0x20, 0x21, 0x13, 0x35, 0x42}))
+	}
+	return nil
+}
+
+func TestReadDTCByStatusRetriesLostChunk(t *testing.T) {
+	ecu := &dropAckECU{}
+	bus, err := gocan.OpenAdapter(t.Context(), ecu)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bus.Close()
+	c := New(bus)
+	c.SetResponseID(0x258)
+
+	dtcs, err := c.ReadDTCByStatus(t.Context(), 0x02)
+	if err != nil {
+		t.Fatalf("ReadDTCByStatus: %v", err)
+	}
+	want := []DTC{{"P0105", 0x60}, {"P0420", 0x21}, {"P1335", 0x42}}
+	if !slices.Equal(dtcs, want) || ecu.requests != 2 {
+		t.Fatalf("got %v after %d requests, want %v after 2", dtcs, ecu.requests, want)
 	}
 }

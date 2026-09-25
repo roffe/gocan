@@ -1,27 +1,95 @@
 package canlib
 
-/*
-#cgo LDFLAGS: -lcanlib
-#include <stdlib.h>
-#include <string.h>
-#include <canlib.h>
-*/
-import "C"
-
 import (
 	"fmt"
 	"sync"
 	"unsafe"
+
+	"github.com/ebitengine/purego"
 )
 
+// libcanlib is loaded through purego, so no cgo or Kvaser headers are
+// needed at build time. C long / unsigned long map to Go int / uint, which
+// match their width on every Linux ABI Go supports.
 var (
 	InitErr  error
 	initOnce sync.Once
+
+	canInitializeLibrary   func()
+	canUnloadLibrary       func() int32
+	canGetNumberOfChannels func(n *int32) int32
+	canGetChannelData      func(channel, item int32, buf unsafe.Pointer, size uintptr) int32
+	canGetErrorText        func(status int32, buf *byte, size uint32) int32
+	canOpenChannel         func(channel, flags int32) int32
+	canGetVersion          func() uint16
+	canAccept              func(h Handle, envelope int, flag uint32) int32
+	canClose               func(h Handle) int32
+	canBusOn               func(h Handle) int32
+	canBusOff              func(h Handle) int32
+	canFlushReceiveQueue   func(h Handle) int32
+	canFlushTransmitQueue  func(h Handle) int32
+	canObjBufAllocate      func(h Handle, typ int32) int32
+	canObjBufWrite         func(h Handle, idx, id int32, msg unsafe.Pointer, dlc, flags uint32) int32
+	canResetBus            func(h Handle) int32
+	canSetAcceptanceFilter func(h Handle, code, mask uint32, extended int32) int32
+	canSetBusParams        func(h Handle, freq int, tseg1, tseg2, sjw, noSamp, syncmode uint32) int32
+	canSetBusParamsC200    func(h Handle, btr0, btr1 uint8) int32
+	canSetBusOutputControl func(h Handle, drivertype uint32) int32
+	canReadErrorCounters   func(h Handle, tx, rx, overrun *uint32) int32
+	canRead                func(h Handle, id *int, msg unsafe.Pointer, dlc, flags *uint32, ts *uint) int32
+	canReadWait            func(h Handle, id *int, msg unsafe.Pointer, dlc, flags *uint32, ts *uint, timeout uint) int32
+	canWrite               func(h Handle, id int, msg unsafe.Pointer, dlc, flags uint32) int32
+	canWriteSync           func(h Handle, timeout uint) int32
+	canWriteWait           func(h Handle, id int, msg unsafe.Pointer, dlc, flags uint32, timeout uint) int32
 )
 
 func Init() error {
 	initOnce.Do(func() {
-		C.canInitializeLibrary()
+		lib, err := purego.Dlopen("libcanlib.so.1", purego.RTLD_NOW|purego.RTLD_GLOBAL)
+		if err != nil {
+			InitErr = err
+			return
+		}
+		for _, s := range []struct {
+			name string
+			fptr any
+		}{
+			{"canInitializeLibrary", &canInitializeLibrary},
+			{"canUnloadLibrary", &canUnloadLibrary},
+			{"canGetNumberOfChannels", &canGetNumberOfChannels},
+			{"canGetChannelData", &canGetChannelData},
+			{"canGetErrorText", &canGetErrorText},
+			{"canOpenChannel", &canOpenChannel},
+			{"canGetVersion", &canGetVersion},
+			{"canAccept", &canAccept},
+			{"canClose", &canClose},
+			{"canBusOn", &canBusOn},
+			{"canBusOff", &canBusOff},
+			{"canFlushReceiveQueue", &canFlushReceiveQueue},
+			{"canFlushTransmitQueue", &canFlushTransmitQueue},
+			{"canObjBufAllocate", &canObjBufAllocate},
+			{"canObjBufWrite", &canObjBufWrite},
+			{"canResetBus", &canResetBus},
+			{"canSetAcceptanceFilter", &canSetAcceptanceFilter},
+			{"canSetBusParams", &canSetBusParams},
+			{"canSetBusParamsC200", &canSetBusParamsC200},
+			{"canSetBusOutputControl", &canSetBusOutputControl},
+			{"canReadErrorCounters", &canReadErrorCounters},
+			{"canRead", &canRead},
+			{"canReadWait", &canReadWait},
+			{"canWrite", &canWrite},
+			{"canWriteSync", &canWriteSync},
+			{"canWriteWait", &canWriteWait},
+		} {
+			sym, err := purego.Dlsym(lib, s.name)
+			if err != nil {
+				InitErr = fmt.Errorf("failed to find procedure %s: %w", s.name, err)
+				purego.Dlclose(lib)
+				return
+			}
+			purego.RegisterFunc(s.fptr, sym)
+		}
+		canInitializeLibrary()
 	})
 	return InitErr
 }
@@ -38,18 +106,18 @@ type CANMessage struct {
 }
 
 func InitializeLibrary() error {
-	C.canInitializeLibrary()
+	canInitializeLibrary()
 	return nil
 }
 
 func UnloadLibrary() error {
-	return checkErr(C.canUnloadLibrary())
+	return NewError(canUnloadLibrary())
 }
 
 func GetNumberOfChannels() (int, error) {
-	var n C.int
-	r := C.canGetNumberOfChannels(&n)
-	return int(n), NewError(int32(r))
+	var n int32
+	r := canGetNumberOfChannels(&n)
+	return int(n), NewError(r)
 }
 
 type ChannelData int32
@@ -111,8 +179,8 @@ func GetChannelDataString(channel int, item ChannelData) (string, error) {
 
 func GetChannelDataBytes(channel int, item ChannelData) ([]byte, error) {
 	data := make([]byte, 256)
-	r := C.canGetChannelData(C.int(channel), C.int(item), unsafe.Pointer(&data[0]), C.size_t(len(data)))
-	return data, NewError(int32(r))
+	r := canGetChannelData(int32(channel), int32(item), unsafe.Pointer(&data[0]), uintptr(len(data)))
+	return data, NewError(r)
 }
 
 type OpenFlag int32
@@ -131,13 +199,13 @@ const (
 )
 
 func OpenChannel(channel int, flags OpenFlag) (Handle, error) {
-	r := C.canOpenChannel(C.int(channel), C.int(flags))
-	return Handle(r), NewError(int32(r))
+	r := canOpenChannel(int32(channel), int32(flags))
+	return Handle(r), NewError(r)
 }
 
 func GetVersion() string {
-	r := C.canGetVersion()
-	return fmt.Sprintf("%d.%d", uint(r)>>8, uint(r)&0xFF)
+	r := canGetVersion()
+	return fmt.Sprintf("%d.%d", r>>8, r&0xFF)
 }
 
 type AcceptFlag uint32
@@ -153,32 +221,32 @@ const (
 )
 
 func (h Handle) Accept(envelope int, flag AcceptFlag) error {
-	return checkErr(C.canAccept(C.CanHandle(h), C.long(envelope), C.uint(flag)))
+	return NewError(canAccept(h, envelope, uint32(flag)))
 }
 
 func (h Handle) Close() error {
-	return checkErr(C.canClose(C.CanHandle(h)))
+	return NewError(canClose(h))
 }
 
 func (h Handle) BusOn() error {
-	return checkErr(C.canBusOn(C.CanHandle(h)))
+	return NewError(canBusOn(h))
 }
 
 func (h Handle) BusOff() error {
-	return checkErr(C.canBusOff(C.CanHandle(h)))
+	return NewError(canBusOff(h))
 }
 
 func (h Handle) FlushReceiveQueue() error {
-	return checkErr(C.canFlushReceiveQueue(C.CanHandle(h)))
+	return NewError(canFlushReceiveQueue(h))
 }
 
 func (h Handle) FlushTransmitQueue() error {
-	return checkErr(C.canFlushTransmitQueue(C.CanHandle(h)))
+	return NewError(canFlushTransmitQueue(h))
 }
 
 func (h Handle) ObjBufAllocate(typ int) (int, error) {
-	r := C.canObjBufAllocate(C.CanHandle(h), C.int(typ))
-	return int(r), NewError(int32(r))
+	r := canObjBufAllocate(h, int32(typ))
+	return int(r), NewError(r)
 }
 
 type MsgFlag uint32
@@ -207,14 +275,11 @@ const (
 )
 
 func (h Handle) ObjBufWrite(idx, id int, message []byte, flags MsgFlag) error {
-	if len(message) == 0 {
-		return checkErr(C.canObjBufWrite(C.CanHandle(h), C.int(idx), C.int(id), nil, 0, C.uint(flags)))
-	}
-	return checkErr(C.canObjBufWrite(C.CanHandle(h), C.int(idx), C.int(id), unsafe.Pointer(&message[0]), C.uint(len(message)), C.uint(flags)))
+	return NewError(canObjBufWrite(h, int32(idx), int32(id), dataPtr(message), uint32(len(message)), uint32(flags)))
 }
 
 func (h Handle) ResetBus() error {
-	return checkErr(C.canResetBus(C.CanHandle(h)))
+	return NewError(canResetBus(h))
 }
 
 type BusParamsFreq int32
@@ -232,11 +297,11 @@ const (
 )
 
 func (h Handle) SetAcceptanceFilter(code, mask uint, extended bool) error {
-	var ext C.int
+	var ext int32
 	if extended {
 		ext = 1
 	}
-	return checkErr(C.canSetAcceptanceFilter(C.CanHandle(h), C.uint(code), C.uint(mask), ext))
+	return NewError(canSetAcceptanceFilter(h, uint32(code), uint32(mask), ext))
 }
 
 // SetBitrate sets a custom bit rate. Linux canlib does not export
@@ -245,15 +310,15 @@ func (h Handle) SetAcceptanceFilter(code, mask uint, extended bool) error {
 // non-standard rates that require precise timing, call SetBusParams
 // directly with the desired tseg1/tseg2/sjw/noSamp values.
 func (h Handle) SetBitrate(bitrate int) error {
-	return checkErr(C.canSetBusParams(C.CanHandle(h), C.long(bitrate), 4, 3, 1, 1, 0))
+	return NewError(canSetBusParams(h, bitrate, 4, 3, 1, 1, 0))
 }
 
 func (h Handle) SetBusParams(freq BusParamsFreq, tseg1, tseg2, sjw, noSamp, syncmode uint32) error {
-	return checkErr(C.canSetBusParams(C.CanHandle(h), C.long(freq), C.uint(tseg1), C.uint(tseg2), C.uint(sjw), C.uint(noSamp), C.uint(syncmode)))
+	return NewError(canSetBusParams(h, int(freq), tseg1, tseg2, sjw, noSamp, syncmode))
 }
 
 func (h Handle) SetBusParamsC200(btr0, btr1 uint8) error {
-	return checkErr(C.canSetBusParamsC200(C.CanHandle(h), C.uchar(btr0), C.uchar(btr1)))
+	return NewError(canSetBusParamsC200(h, btr0, btr1))
 }
 
 type DriverType uint32
@@ -266,92 +331,76 @@ const (
 )
 
 func SetBusOutputControl(h Handle, drivertype DriverType) error {
-	return checkErr(C.canSetBusOutputControl(C.CanHandle(h), C.uint(drivertype)))
+	return NewError(canSetBusOutputControl(h, uint32(drivertype)))
 }
 
 func (h Handle) ReadErrorCounters() (uint32, uint32, uint32, error) {
-	var tx, rx, overrun C.uint
-	r := C.canReadErrorCounters(C.CanHandle(h), &tx, &rx, &overrun)
-	return uint32(tx), uint32(rx), uint32(overrun), NewError(int32(r))
+	var tx, rx, overrun uint32
+	r := canReadErrorCounters(h, &tx, &rx, &overrun)
+	return tx, rx, overrun, NewError(r)
 }
 
 func (h Handle) Read() (*CANMessage, error) {
 	var (
-		id    C.long
-		dlc   C.uint
-		flags C.uint
-		ts    C.ulong
-		data  [64]C.uchar
+		id         int
+		dlc, flags uint32
+		ts         uint
+		data       [64]byte
 	)
-	r := C.canRead(C.CanHandle(h), &id, unsafe.Pointer(&data[0]), &dlc, &flags, &ts)
-	if err := NewError(int32(r)); err != nil {
+	if err := NewError(canRead(h, &id, unsafe.Pointer(&data[0]), &dlc, &flags, &ts)); err != nil {
 		return nil, err
 	}
-	out := make([]byte, dlc)
-	for i := 0; i < int(dlc); i++ {
-		out[i] = byte(data[i])
-	}
-	return &CANMessage{
-		Identifier: uint32(id),
-		Data:       out,
-		DLC:        uint32(dlc),
-		Flags:      uint32(flags),
-		Timestamp:  uint32(ts),
-	}, nil
+	return newMessage(id, data[:], dlc, flags, ts), nil
 }
 
 func (h Handle) ReadWait(timeout uint32) (*CANMessage, error) {
 	var (
-		id    C.long
-		dlc   C.uint
-		flags C.uint
-		ts    C.ulong
-		data  [64]C.uchar
+		id         int
+		dlc, flags uint32
+		ts         uint
+		data       [64]byte
 	)
-	r := C.canReadWait(C.CanHandle(h), &id, unsafe.Pointer(&data[0]), &dlc, &flags, &ts, C.ulong(timeout))
-	if err := NewError(int32(r)); err != nil {
+	if err := NewError(canReadWait(h, &id, unsafe.Pointer(&data[0]), &dlc, &flags, &ts, uint(timeout))); err != nil {
 		return nil, err
 	}
-	out := make([]byte, dlc)
-	for i := 0; i < int(dlc); i++ {
-		out[i] = byte(data[i])
-	}
+	return newMessage(id, data[:], dlc, flags, ts), nil
+}
+
+func newMessage(id int, data []byte, dlc, flags uint32, ts uint) *CANMessage {
 	return &CANMessage{
 		Identifier: uint32(id),
-		Data:       out,
-		DLC:        uint32(dlc),
-		Flags:      uint32(flags),
+		Data:       append([]byte(nil), data[:min(dlc, uint32(len(data)))]...),
+		DLC:        dlc,
+		Flags:      flags,
 		Timestamp:  uint32(ts),
-	}, nil
+	}
 }
 
 func (h Handle) Write(identifier uint32, data []byte, flags MsgFlag) error {
-	if len(data) == 0 {
-		return checkErr(C.canWrite(C.CanHandle(h), C.long(identifier), nil, 0, C.uint(flags)))
-	}
-	return checkErr(C.canWrite(C.CanHandle(h), C.long(identifier), unsafe.Pointer(&data[0]), C.uint(len(data)), C.uint(flags)))
+	return NewError(canWrite(h, int(identifier), dataPtr(data), uint32(len(data)), uint32(flags)))
 }
 
 func (h Handle) WriteSync(timeoutMS uint32) error {
-	return checkErr(C.canWriteSync(C.CanHandle(h), C.ulong(timeoutMS)))
+	return NewError(canWriteSync(h, uint(timeoutMS)))
 }
 
 func (h Handle) WriteWait(identifier uint32, data []byte, flags MsgFlag, timeoutMS uint32) error {
+	return NewError(canWriteWait(h, int(identifier), dataPtr(data), uint32(len(data)), uint32(flags), uint(timeoutMS)))
+}
+
+// dataPtr returns nil for an empty frame instead of panicking on &data[0].
+// Go memory is fine to hand over: canlib copies the frame before returning.
+func dataPtr(data []byte) unsafe.Pointer {
 	if len(data) == 0 {
-		return checkErr(C.canWriteWait(C.CanHandle(h), C.long(identifier), nil, 0, C.uint(flags), C.ulong(timeoutMS)))
+		return nil
 	}
-	cb, pooled := getCBuf(len(data))
-	dst := unsafe.Slice((*byte)(cb.ptr), len(data))
-	copy(dst, data)
-	err := checkErr(C.canWriteWait(C.CanHandle(h), C.long(identifier), cb.ptr, C.uint(len(data)), C.uint(flags), C.ulong(timeoutMS)))
-	putCBuf(cb, pooled)
-	return err
+	return unsafe.Pointer(&data[0])
 }
 
 func GetErrorText(status int) (string, error) {
 	buf := make([]byte, 64)
-	r := C.canGetErrorText(C.canStatus(status), (*C.char)(unsafe.Pointer(&buf[0])), C.uint(len(buf)))
-	if int32(r) < int32(ERR_OK) {
+	r := canGetErrorText(int32(status), &buf[0], uint32(len(buf)))
+	if r < int32(ERR_OK) {
 		return "", fmt.Errorf("unable to get description for error code %v (%v)", status, int32(r))
 	}
 	return cBytetoString(buf), nil
@@ -364,8 +413,4 @@ func cBytetoString(data []byte) string {
 		}
 	}
 	return string(data)
-}
-
-func checkErr(r C.canStatus) error {
-	return NewError(int32(r))
 }

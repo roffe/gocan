@@ -370,8 +370,26 @@ func (ma *J2534) Send(ctx context.Context, f gocan.Frame) error {
 
 	var err error
 	if derr := ma.do(func() {
-		numMsg := uint32(1)
-		if err = ma.h.PassThruWriteMsgs(ma.channelID, msg, &numMsg, 25); err == nil {
+		// Timeout 0 queues the frame in the device and returns; a non-zero
+		// timeout blocks until it is on the wire, a USB round trip per frame
+		// (T7 flash on a MongoosePro: 32 s). A full queue refuses the frame
+		// with 0 queued: ERR_BUFFER_FULL per spec, ERR_TIMEOUT from the
+		// MongoosePro ("only sent 0 of 1", device code 0x103) when a T7 fast
+		// download bursts 1024 frames. Keep reading while it drains so replies
+		// aren't held up, and retry.
+		deadline := time.Now().Add(time.Second)
+		for {
+			numMsg := uint32(1)
+			err = ma.h.PassThruWriteMsgs(ma.channelID, msg, &numMsg, 0)
+			full := numMsg == 0 && (errors.Is(err, passthru.ErrBufferFull) || errors.Is(err, passthru.ErrTimeout))
+			if !full || ctx.Err() != nil || time.Now().After(deadline) {
+				break
+			}
+			if got, _ := ma.pump(); !got {
+				time.Sleep(pollInterval)
+			}
+		}
+		if err == nil {
 			return
 		}
 		// A bare ERR_TIMEOUT hides why the device could not transmit; the

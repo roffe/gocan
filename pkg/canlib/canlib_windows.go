@@ -439,8 +439,17 @@ func (hnd Handle) ReadWait(timeout uint32) (*CANMessage, error) {
 
 // This function sends a CAN message.
 // The call returns immediately after queuing the message to the driver so the message has not necessarily been transmitted.
+// The frame is staged in C memory, like WriteWait, and an empty frame no
+// longer panics on &data[0].
 func (hnd Handle) Write(identifier uint32, data []byte, flags MsgFlag) error {
-	return checkErr(procWrite.Call(uintptr(hnd), uintptr(identifier), uintptr(unsafe.Pointer(&data[0])), uintptr(len(data)), uintptr(flags)))
+	if len(data) == 0 {
+		return checkErr(procWrite.Call(uintptr(hnd), uintptr(identifier), 0, 0, uintptr(flags)))
+	}
+	cb, pooled := getCBuf(len(data))
+	copy(unsafe.Slice((*byte)(cb.ptr), len(data)), data)
+	err := checkErr(procWrite.Call(uintptr(hnd), uintptr(identifier), uintptr(cb.ptr), uintptr(len(data)), uintptr(flags)))
+	putCBuf(cb, pooled)
+	return err
 }
 
 // Waits until all CAN messages for the specified handle are sent, or the timeout period expires.

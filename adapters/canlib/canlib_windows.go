@@ -16,6 +16,7 @@ import (
 const (
 	defaultReadTimeoutMs  = 20
 	defaultWriteTimeoutMs = defaultReadTimeoutMs
+	txDrainTimeoutMs      = 1000
 )
 
 func init() {
@@ -110,10 +111,18 @@ func (k *CANlib) Close() error {
 	return nil
 }
 
-// Send writes one frame; WriteWait blocks until the frame is on the bus (or
-// the write timeout hits), which is the v2 write confirmation.
+// Send queues the frame in the driver (canWrite) and returns, like
+// TrionicCANLib does. WriteWait confirmed every frame on the wire, costing a
+// USB round trip each: a T7 flash took ~60 s instead of ~25 s. A full driver
+// queue is drained once and the write retried.
 func (k *CANlib) Send(ctx context.Context, f gocan.Frame) error {
-	if err := k.writeHandle.WriteWait(f.ID, f.Bytes(), canlib.MSG_STD, k.timeoutWrite); err != nil {
+	err := k.writeHandle.Write(f.ID, f.Bytes(), canlib.MSG_STD)
+	if errors.Is(err, canlib.ErrTxBufOfl) {
+		if err = k.writeHandle.WriteSync(txDrainTimeoutMs); err == nil {
+			err = k.writeHandle.Write(f.ID, f.Bytes(), canlib.MSG_STD)
+		}
+	}
+	if err != nil {
 		return fmt.Errorf("Send: %w", err)
 	}
 	return nil
