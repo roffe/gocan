@@ -2,6 +2,8 @@ package txbridge
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"net"
 	"testing"
 	"time"
@@ -12,7 +14,7 @@ import (
 
 // dongleFrame builds the dongle->host encoding of a received CAN frame:
 // framed 't' command with payload [idHi, idLo, data...] (no DLC byte).
-func dongleFrame(t *testing.T, id uint16, data []byte) []byte {
+func dongleFrame(t testing.TB, id uint16, data []byte) []byte {
 	t.Helper()
 	cmd := &serialcommand.SerialCommand{
 		Command: 't',
@@ -122,5 +124,94 @@ func TestByteAtATime(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("frame never delivered")
+	}
+}
+
+// recPort records the last Write; Send never reads.
+type recPort struct{ wrote []byte }
+
+func (p *recPort) Read([]byte) (int, error) { return 0, io.EOF }
+func (p *recPort) Close() error             { return nil }
+func (p *recPort) Write(b []byte) (int, error) {
+	p.wrote = append(p.wrote[:0], b...)
+	return len(b), nil
+}
+
+// chanPort hands one queued chunk to each Read, so a benchmark can pace the
+// read loop.
+type chanPort struct{ rx chan []byte }
+
+func (p chanPort) Read(b []byte) (int, error) {
+	c, ok := <-p.rx
+	if !ok {
+		return 0, io.EOF
+	}
+	return copy(b, c), nil
+}
+func (p chanPort) Write(b []byte) (int, error) { return len(b), nil }
+func (p chanPort) Close() error                { close(p.rx); return nil }
+
+// TestTxbridgeSend pins the framed 't' encoding and that Send and the
+// receive path (read loop -> Deliver -> subscriber) do not allocate per frame.
+func TestTxbridgeSend(t *testing.T) {
+	p := &recPort{}
+	tx := &Txbridge{port: p}
+	ctx := context.Background()
+	for _, tt := range []struct {
+		f    gocan.Frame
+		want string
+	}{
+		{gocan.NewFrame(0x220, []byte{0x3F, 0x81, 0x00, 0x11, 0x02, 0x40}), "74090220063f81001102403b"},
+		{gocan.NewFrame(0x7FF, nil), "740307ff0006"},
+		{gocan.NewFrame(0x123, []byte{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}), "740b012308ffffffffffffffff24"},
+	} {
+		if err := tx.Send(ctx, tt.f); err != nil {
+			t.Fatal(err)
+		}
+		if got := fmt.Sprintf("%x", p.wrote); got != tt.want {
+			t.Errorf("Send(%s) wrote %s, want %s", tt.f, got, tt.want)
+		}
+	}
+	f := gocan.NewFrame(0x258, []byte{1, 2, 3, 4, 5, 6, 7, 8})
+	if n := testing.AllocsPerRun(100, func() { tx.Send(ctx, f) }); n != 0 {
+		t.Errorf("Send allocates %v times per frame, want 0", n)
+	}
+
+	cp := chanPort{rx: make(chan []byte)}
+	bus, err := gocan.OpenAdapter(ctx, &Txbridge{port: cp, subs: make(map[*commandSub]struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bus.Close()
+	sub := bus.Subscribe(ctx, 0x258)
+	frame := dongleFrame(t, 0x258, []byte{1, 2, 3, 4, 5, 6, 7, 8})
+	if n := testing.AllocsPerRun(100, func() { cp.rx <- frame; <-sub }); n != 0 {
+		t.Errorf("receive allocates %v times per frame, want 0", n)
+	}
+}
+
+func BenchmarkTxbridgeSend(b *testing.B) {
+	tx := &Txbridge{port: &recPort{}}
+	ctx := context.Background()
+	f := gocan.NewFrame(0x258, []byte{1, 2, 3, 4, 5, 6, 7, 8})
+	b.ReportAllocs()
+	for b.Loop() {
+		tx.Send(ctx, f)
+	}
+}
+
+func BenchmarkTxbridgeReceive(b *testing.B) {
+	cp := chanPort{rx: make(chan []byte)}
+	bus, err := gocan.OpenAdapter(context.Background(), &Txbridge{port: cp, subs: make(map[*commandSub]struct{})})
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer bus.Close()
+	sub := bus.Subscribe(context.Background(), 0x258)
+	frame := dongleFrame(b, 0x258, []byte{1, 2, 3, 4, 5, 6, 7, 8})
+	b.ReportAllocs()
+	for b.Loop() {
+		cp.rx <- frame
+		<-sub
 	}
 }

@@ -19,6 +19,7 @@ package scantool
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"slices"
@@ -100,6 +101,8 @@ type Scantool struct {
 	port     port
 	openPort func() (port, error) // opens the transport; nil = VCP from cfg.Port
 	line     []byte               // response accumulator reused across reads
+	cmd      []byte               // STPX command buffer reused across Sends
+	rbuf     [64]byte             // port read buffer; a local escapes through the port interface
 }
 
 func New(name string, cfg gocan.Config) (gocan.Adapter, error) {
@@ -219,7 +222,7 @@ func (st *Scantool) Close() error {
 	// misbehavior on STN1130 v5.10.1 (unACKed ECU frames retransmitted in
 	// bursts, stale replies leaking into the next STPX window). ATZ reboots
 	// to power-up defaults at 115.2 kbps; the next Open hunts it there.
-	st.port.Write([]byte("ATWS\r"))
+	st.port.Write([]byte("ATZ\r"))
 	time.Sleep(10 * time.Millisecond)
 	st.port.ResetInputBuffer()
 	st.port.ResetOutputBuffer()
@@ -230,9 +233,13 @@ func (st *Scantool) Close() error {
 // frames ride in the command response (there is no monitor mode), so they are
 // delivered to the bus here before Send returns.
 func (st *Scantool) Send(ctx context.Context, f gocan.Frame) error {
-	var cmd bytes.Buffer
-	fmt.Fprintf(&cmd, "STPXh:%03x,d:", f.ID&0xFFF)
-	fmt.Fprintf(&cmd, "%x", f.Bytes())
+	// Appended by hand into a reused buffer: fmt boxes every argument and
+	// this runs once per frame.
+	const hexdig = "0123456789abcdef"
+	id := f.ID & 0xFFF
+	cmd := append(st.cmd[:0], "STPXh:"...)
+	cmd = append(cmd, hexdig[id>>8], hexdig[id>>4&0xF], hexdig[id&0xF], ',', 'd', ':')
+	cmd = hex.AppendEncode(cmd, f.Data[:f.Length])
 	// The ctx deadline is cancellation only, never a wire timeout: the reply
 	// wait is the WithResponseTimeout hint (Request stamps it from a near
 	// deadline) or the STPTO250 device default. t: rides along only when it
@@ -244,16 +251,17 @@ func (st *Scantool) Send(ctx context.Context, f gocan.Frame) error {
 		if d := gocan.ResponseTimeout(ctx); d > 0 {
 			wait = min(d+time.Millisecond-1, 65535*time.Millisecond).Truncate(time.Millisecond)
 			if wait != defaultReplyWait {
-				fmt.Fprintf(&cmd, ",t:%d", wait.Milliseconds())
+				cmd = strconv.AppendInt(append(cmd, ",t:"...), wait.Milliseconds(), 10)
 			}
 		}
-		fmt.Fprintf(&cmd, ",r:%d", n)
+		cmd = strconv.AppendInt(append(cmd, ",r:"...), int64(n), 10)
 	}
+	st.cmd = append(cmd, '\r')
 
 	if st.cfg.Debug {
-		st.bus.Emit(gocan.Event{Type: gocan.EventTypeDebug, Details: "<o> " + cmd.String()})
+		st.bus.Emit(gocan.Event{Type: gocan.EventTypeDebug, Details: "<o> " + string(cmd)})
 	}
-	if err := st.sendCommand(ctx, cmd.String(), wait); err != nil {
+	if err := st.sendCommand(ctx, st.cmd, wait); err != nil {
 		// The port is our only link to the device; a failed exchange with no
 		// shutdown in progress means it is gone.
 		if ctx.Err() == nil && st.bus.Err() == nil {
@@ -269,7 +277,7 @@ func (st *Scantool) Send(ctx context.Context, f gocan.Frame) error {
 func (st *Scantool) SetFilter(filters []uint32) error {
 	st.filter, st.mask = canFilter(filters)
 	for _, cmd := range []string{"STPC", st.mask, st.filter, "STPO"} {
-		if err := st.sendCommand(context.Background(), cmd, 0); err != nil {
+		if err := st.sendCommand(context.Background(), []byte(cmd+"\r"), 0); err != nil {
 			return err
 		}
 	}
@@ -278,15 +286,15 @@ func (st *Scantool) SetFilter(filters []uint32) error {
 
 // handleLine processes one completed response line and resets the buffer.
 func (st *Scantool) handleLine() {
-	msg := string(st.line)
+	line := st.line // valid until the next append
 	st.line = st.line[:0]
-	if msg == "" {
+	if len(line) == 0 {
 		return
 	}
 	if st.cfg.Debug {
-		st.bus.Emit(gocan.Event{Type: gocan.EventTypeDebug, Details: "<i> " + msg})
+		st.bus.Emit(gocan.Event{Type: gocan.EventTypeDebug, Details: "<i> " + string(line)})
 	}
-	switch msg {
+	switch string(line) { // compiler compares in place, no conversion alloc
 	case "CAN ERROR":
 		st.bus.Emit(gocan.Event{Type: gocan.EventTypeError, Details: "CAN ERROR"})
 	case "STOPPED":
@@ -295,9 +303,9 @@ func (st *Scantool) handleLine() {
 		st.bus.Emit(gocan.Event{Type: gocan.EventTypeWarning, Details: "UNKNOWN COMMAND"})
 	case "NO DATA", "OK":
 	default:
-		f, err := decodeFrame(msg)
+		f, err := decodeFrame(line)
 		if err != nil {
-			st.bus.Emit(gocan.Event{Type: gocan.EventTypeError, Details: fmt.Sprintf("failed to decode frame %q: %v", msg, err)})
+			st.bus.Emit(gocan.Event{Type: gocan.EventTypeError, Details: fmt.Sprintf("failed to decode frame %q: %v", line, err)})
 			return
 		}
 		st.bus.Deliver(f)
@@ -310,14 +318,13 @@ func (st *Scantool) handleLine() {
 // what it needs. wait is the on-wire reply wait (STPX t:) the prompt may
 // lag behind; zero for commands that answer immediately. On cancellation
 // mid-window the STN is interrupted so the next command starts clean.
-func (st *Scantool) sendCommand(ctx context.Context, cmd string, wait time.Duration) error {
+func (st *Scantool) sendCommand(ctx context.Context, cmd []byte, wait time.Duration) error {
 	st.port.ResetInputBuffer() // discard stale bytes from an interrupted window
-	if _, err := st.port.Write([]byte(cmd + "\r")); err != nil {
+	if _, err := st.port.Write(cmd); err != nil {
 		return fmt.Errorf("failed to send command: %w", err)
 	}
 	deadline := time.Now().Add(wait + time.Second)
 	st.line = st.line[:0]
-	var readBuf [64]byte
 	for {
 		if err := context.Cause(ctx); err != nil && ctx.Err() != nil {
 			st.interrupt()
@@ -326,11 +333,11 @@ func (st *Scantool) sendCommand(ctx context.Context, cmd string, wait time.Durat
 		if time.Now().After(deadline) {
 			return errors.New("timeout waiting for '>' prompt")
 		}
-		n, err := st.port.Read(readBuf[:])
+		n, err := st.port.Read(st.rbuf[:])
 		if err != nil {
 			return fmt.Errorf("read from port: %w", err)
 		}
-		for _, b := range readBuf[:n] {
+		for _, b := range st.rbuf[:n] {
 			switch b {
 			case '>':
 				st.handleLine()
@@ -354,13 +361,12 @@ func (st *Scantool) interrupt() {
 		return
 	}
 	deadline := time.Now().Add(300 * time.Millisecond)
-	var readBuf [64]byte
 	for time.Now().Before(deadline) {
-		n, err := st.port.Read(readBuf[:])
+		n, err := st.port.Read(st.rbuf[:])
 		if err != nil {
 			return
 		}
-		if bytes.IndexByte(readBuf[:n], '>') >= 0 {
+		if bytes.IndexByte(st.rbuf[:n], '>') >= 0 {
 			return
 		}
 	}
@@ -485,13 +491,12 @@ func (st *Scantool) readLine(timeout time.Duration, match func(string) bool) (st
 func (st *Scantool) scanLines(timeout time.Duration, done func(line string, prompt bool) bool) (string, error) {
 	deadline := time.Now().Add(timeout)
 	var line []byte
-	var readBuf [64]byte
 	for time.Now().Before(deadline) {
-		n, err := st.port.Read(readBuf[:])
+		n, err := st.port.Read(st.rbuf[:])
 		if err != nil {
 			return "", err
 		}
-		for _, b := range readBuf[:n] {
+		for _, b := range st.rbuf[:n] {
 			switch b {
 			case '>', '\r', '\n':
 				s := string(line)
@@ -513,25 +518,17 @@ func hasOK(lines []string) bool {
 }
 
 // decodeFrame parses a response line "iiiDDDD.." (3 hex id + hex data).
-func decodeFrame(msg string) (gocan.Frame, error) {
-	if len(msg) < 3 {
-		return gocan.Frame{}, fmt.Errorf("short frame %q", msg)
+func decodeFrame(line []byte) (gocan.Frame, error) {
+	if len(line) < 3 || len(line)%2 == 0 || len(line) > 3+16 {
+		return gocan.Frame{}, errors.New("bad frame length")
 	}
-	id, err := strconv.ParseUint(msg[:3], 16, 32)
-	if err != nil {
+	var id [2]byte // "0iii" decodes to the big-endian 12-bit id
+	if _, err := hex.Decode(id[:], []byte{'0', line[0], line[1], line[2]}); err != nil {
 		return gocan.Frame{}, fmt.Errorf("failed to decode identifier: %w", err)
 	}
-	body := msg[3:]
-	if len(body)%2 != 0 || len(body) > 16 {
-		return gocan.Frame{}, fmt.Errorf("bad frame body %q", msg)
-	}
-	f := gocan.Frame{ID: uint32(id), Length: uint8(len(body) / 2)}
-	for i := 0; i < len(body); i += 2 {
-		v, err := strconv.ParseUint(body[i:i+2], 16, 8)
-		if err != nil {
-			return gocan.Frame{}, fmt.Errorf("bad frame body %q: %w", msg, err)
-		}
-		f.Data[i/2] = byte(v)
+	f := gocan.Frame{ID: uint32(id[0])<<8 | uint32(id[1]), Length: uint8((len(line) - 3) / 2)}
+	if _, err := hex.Decode(f.Data[:], line[3:]); err != nil {
+		return gocan.Frame{}, fmt.Errorf("bad frame body: %w", err)
 	}
 	return f, nil
 }

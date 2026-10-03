@@ -14,12 +14,10 @@ require (
 )
 
 require (
-	github.com/golang/mock v1.6.0 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/mdlayher/netlink v1.8.0 // indirect
 	github.com/mdlayher/socket v0.5.1 // indirect
 	golang.org/x/net v0.54.0 // indirect
-	golang.org/x/tools v0.45.0 // indirect
 )
 
 replace go.einride.tech/can => github.com/samuelbrian/can-go v0.0.2

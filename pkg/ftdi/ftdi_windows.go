@@ -204,8 +204,11 @@ func (d *Device) GetStatus() (rx_queue, tx_queue, events int32, e error) {
 	return rx_queue, tx_queue, events, nil
 }
 
+// GetQueueStatus, Read and Write run per frame, so they call
+// syscall.SyscallN directly: Proc.Call heap allocates its argument slice
+// and, being //go:uintptrescapes, the counters and the caller's buffer.
 func (d *Device) GetQueueStatus() (rx_queue int32, e error) {
-	r, _, _ := ftGetQueueStatus.Call(uintptr(*d), uintptr(unsafe.Pointer(&rx_queue)))
+	r, _, _ := syscall.SyscallN(ftGetQueueStatus.Addr(), uintptr(*d), uintptr(unsafe.Pointer(&rx_queue)))
 
 	if r != FT_OK {
 		return rx_queue, ftdiError(r)
@@ -215,7 +218,7 @@ func (d *Device) GetQueueStatus() (rx_queue int32, e error) {
 
 func (d *Device) Read(p []byte) (n int, e error) {
 	var bytesRead uint32
-	r1, _, _ := ftRead.Call(uintptr(*d), uintptr(unsafe.Pointer(&p[0])), uintptr(uint32(len(p))), uintptr(unsafe.Pointer(&bytesRead)))
+	r1, _, _ := syscall.SyscallN(ftRead.Addr(), uintptr(*d), uintptr(unsafe.Pointer(&p[0])), uintptr(uint32(len(p))), uintptr(unsafe.Pointer(&bytesRead)))
 	if r1 != FT_OK {
 		return int(bytesRead), ftdiError(r1)
 	}
@@ -224,7 +227,7 @@ func (d *Device) Read(p []byte) (n int, e error) {
 
 func (d *Device) Write(p []byte) (n int, e error) {
 	var bytesWritten uint32
-	r1, _, _ := ftWrite.Call(uintptr(*d), uintptr(unsafe.Pointer(&p[0])), uintptr(uint32(len(p))), uintptr(unsafe.Pointer(&bytesWritten)))
+	r1, _, _ := syscall.SyscallN(ftWrite.Addr(), uintptr(*d), uintptr(unsafe.Pointer(&p[0])), uintptr(uint32(len(p))), uintptr(unsafe.Pointer(&bytesWritten)))
 	if r1 != FT_OK {
 		return int(bytesWritten), ftdiError(r1)
 	}

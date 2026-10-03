@@ -10,9 +10,10 @@
 //
 // Firmware 1.2 added a CAN acceptance filter (cmdCanFilter): up to 32
 // little-endian uint32 IDs, dropped on the adapter before they cross USB.
-// Open reads the firmware version and only installs the filter on >= 1.2;
-// older firmware relays the whole bus and the Bus's subscription dispatch
-// does the filtering host-side.
+// Open reads the firmware version and only installs the filter on >= 1.2
+// (1.2: at most 7 ids); older firmware relays the whole bus and the Bus's
+// subscription dispatch does the filtering host-side. Firmware 1.3 keeps the
+// same wire protocol and only fixes firmware bugs.
 package combi
 
 import (
@@ -53,7 +54,11 @@ const (
 	cmdCanFilter    = 0x84 // acceptance filter (firmware >= 1.2)
 
 	maxHWFilterIDs = 32
-	maxCommandSize = 1024
+	// Firmware 1.2 parses a command that spans two 32-byte USB packets as two
+	// broken ones, and its 32-byte payload buffer overruns into the CAN
+	// test-mode flag past 8 ids: keep 0x84 to one packet (3+4n+1 <= 32).
+	maxHWFilterIDs12 = 7
+	maxCommandSize   = 1024
 )
 
 const libusbErrTimeout = libusb.ErrorCode(-7) // LIBUSB_ERROR_TIMEOUT
@@ -87,20 +92,28 @@ type Combi struct {
 	dev    *libusb.Device
 	handle *libusb.DeviceHandle
 	useEP2 bool // device exposes OUT on EP2 instead of EP5
+	inMPS  int  // IN endpoint wMaxPacketSize; readLoop reads exactly this much
 
 	closeOnce sync.Once
 
-	txAck     chan struct{} // firmware per-frame cmdCanTxFrame ack
+	txAck     chan bool // firmware per-frame cmdCanTxFrame reply: true ack, false nak
 	filterAck chan struct{}
 	adcValue  chan float32 // firmware cmdCanFilter ack
+
+	// Send-only (the Bus serializes Send), reused so a frame costs no allocations.
+	txBuf   [19]byte
+	txTimer *time.Timer // TX ack timeout; Go >= 1.23 timers make Reset safe without draining
 }
 
 func New(cfg gocan.Config) (gocan.Adapter, error) {
+	txTimer := time.NewTimer(time.Hour)
+	txTimer.Stop()
 	return &Combi{
 		cfg:       cfg,
-		txAck:     make(chan struct{}, 1),
+		txAck:     make(chan bool, 1),
 		filterAck: make(chan struct{}, 1),
 		adcValue:  make(chan float32, 1),
+		txTimer:   txTimer,
 	}, nil
 }
 
@@ -123,7 +136,8 @@ func (ca *Combi) Open(ctx context.Context, bus *gocan.Bus) error {
 		return fmt.Errorf("claim interface %d: %w", usbInterfaceNum, err)
 	}
 	ca.usbCtx, ca.dev, ca.handle = usbCtx, dev, handle
-	ca.useEP2 = !ca.hasOutEP5()
+	hasEP5, inMPS := ca.probeEndpoints()
+	ca.useEP2, ca.inMPS = !hasEP5, inMPS
 	if ca.useEP2 {
 		ca.emit(gocan.EventTypeInfo, "using EP2 (stm32 clone)")
 	}
@@ -158,8 +172,10 @@ func (ca *Combi) Open(ctx context.Context, bus *gocan.Bus) error {
 	// Install the firmware acceptance filter only AFTER the read loop is
 	// running (it delivers the ack) and only on firmware >= 1.2; older
 	// firmware has no cmdCanFilter and the Bus filters host-side.
-	if len(ca.cfg.CANFilter) > 0 && verErr == nil && (major > 1 || (major == 1 && minor >= 2)) {
-		if err := ca.setHardwareFilter(ca.cfg.CANFilter); err != nil {
+	if n := len(ca.cfg.CANFilter); n > 0 && verErr == nil && (major > 1 || (major == 1 && minor >= 2)) {
+		if major == 1 && minor == 2 && n > maxHWFilterIDs12 {
+			ca.emit(gocan.EventTypeInfo, fmt.Sprintf("%d CAN filter ids, firmware 1.2 takes %d: filtering host-side", n, maxHWFilterIDs12))
+		} else if err := ca.setHardwareFilter(ca.cfg.CANFilter); err != nil {
 			ca.emit(gocan.EventTypeWarning, fmt.Sprintf("failed to set CAN filter: %v", err))
 		}
 	}
@@ -178,42 +194,59 @@ func (ca *Combi) Close() error {
 // Send writes one frame and waits for the firmware's per-frame ack (the
 // firmware is single-threaded; outrunning it loses responses). The Bus never
 // calls Send concurrently.
+//
+// The firmware only uses CAN TX buffer 1 and NAKs the frame (without queuing
+// it) while that buffer still holds the previous one — lost arbitration on a
+// busy bus, or a slow bitrate. A NAK is resent until the ack deadline.
 func (ca *Combi) Send(ctx context.Context, f gocan.Frame) error {
-	// cmd, size(2), ID(4), data(8), len, ext, rtr, term
-	buf := [19]byte{cmdCanTxFrame, 0x00, 0x0F}
-	binary.LittleEndian.PutUint32(buf[3:], f.ID)
-	copy(buf[7:15], f.Data[:])
-	buf[15] = min(f.Length, 8)
+	encode(&ca.txBuf, f)
+
+	defer ca.txTimer.Stop()
+	for first := true; ; first = false {
+		// Drop any stale reply so we wait for *this* frame's.
+		select {
+		case <-ca.txAck:
+		default:
+		}
+
+		if _, err := ca.bulkOut(ca.txBuf[:], 250); err != nil {
+			err = fmt.Errorf("failed to send frame: %w", err)
+			ca.bus.Fatal(err)
+			return err
+		}
+
+		if ca.cfg.Debug {
+			ca.emit(gocan.EventTypeDebug, fmt.Sprintf("sent frame: %s", f.String()))
+		}
+		if first { // 100 ms from the first write, as before NAK resends existed
+			ca.txTimer.Reset(100 * time.Millisecond)
+		}
+
+		select {
+		case ok := <-ca.txAck:
+			if ok {
+				return nil
+			}
+		case <-ctx.Done():
+			return context.Cause(ctx)
+		case <-ca.txTimer.C:
+			return errors.New("timeout waiting for TX ack")
+		}
+	}
+}
+
+// encode fills b with the cmdCanTxFrame packet for f:
+// cmd, size(2), ID(4), data(8), len, ext, rtr, term.
+func encode(b *[19]byte, f gocan.Frame) {
+	*b = [19]byte{cmdCanTxFrame, 0x00, 0x0F}
+	binary.LittleEndian.PutUint32(b[3:], f.ID)
+	copy(b[7:15], f.Data[:])
+	b[15] = min(f.Length, 8)
 	if f.Extended {
-		buf[16] = 1
+		b[16] = 1
 	}
 	if f.Remote {
-		buf[17] = 1
-	}
-
-	// Drop any stale ack so we wait for *this* frame's ack.
-	select {
-	case <-ca.txAck:
-	default:
-	}
-
-	if _, err := ca.bulkOut(buf[:], 250); err != nil {
-		err = fmt.Errorf("failed to send frame: %w", err)
-		ca.bus.Fatal(err)
-		return err
-	}
-
-	if ca.cfg.Debug {
-		ca.emit(gocan.EventTypeDebug, fmt.Sprintf("sent frame: %s", f.String()))
-	}
-
-	select {
-	case <-ca.txAck:
-		return nil
-	case <-ctx.Done():
-		return context.Cause(ctx)
-	case <-time.After(100 * time.Millisecond):
-		return errors.New("timeout waiting for TX ack")
+		b[17] = 1
 	}
 }
 
@@ -285,11 +318,13 @@ func isUSBTimeout(err error) bool {
 	return ok && ec == libusbErrTimeout
 }
 
-// hasOutEP5 reports whether interface usbInterfaceNum exposes OUT endpoint 5.
-func (ca *Combi) hasOutEP5() bool {
+// probeEndpoints reports whether interface usbInterfaceNum exposes OUT
+// endpoint 5 and the IN endpoint's wMaxPacketSize.
+func (ca *Combi) probeEndpoints() (hasEP5 bool, inMPS int) {
+	inMPS = maxCommandSize // IN descriptor unknown: the old read size, which can't overflow
 	cfg, err := ca.dev.ActiveConfigDescriptor()
 	if err != nil {
-		return true // assume standard layout
+		return true, inMPS // assume standard layout
 	}
 	for _, si := range cfg.SupportedInterfaces {
 		for _, id := range si.InterfaceDescriptors {
@@ -297,13 +332,18 @@ func (ca *Combi) hasOutEP5() bool {
 				continue
 			}
 			for _, ep := range id.EndpointDescriptors {
-				if byte(ep.EndpointAddress) == combiOutEP {
-					return true
+				switch byte(ep.EndpointAddress) {
+				case combiOutEP:
+					hasEP5 = true
+				case combiInEP:
+					if ep.MaxPacketSize > 0 {
+						inMPS = int(ep.MaxPacketSize)
+					}
 				}
 			}
 		}
 	}
-	return false
+	return hasEP5, inMPS
 }
 
 func (ca *Combi) closeUSB() {
@@ -323,14 +363,8 @@ func (ca *Combi) drainInput(max time.Duration) {
 	deadline := time.Now().Add(max)
 	tmp := make([]byte, 512)
 	for time.Now().Before(deadline) {
-		n, err := ca.bulkIn(tmp, 10)
-		if err != nil {
-			if isUSBTimeout(err) {
-				return // input quiet
-			}
-			continue
-		}
-		if n == 0 {
+		// n == 0 is a firmware 1.3 ZLP, not quiet: only a timeout is.
+		if _, err := ca.bulkIn(tmp, 10); isUSBTimeout(err) {
 			return
 		}
 	}
@@ -343,10 +377,16 @@ func (ca *Combi) readVersion() (major, minor byte, err error) {
 		return 0, 0, err
 	}
 	buf := make([]byte, 64)
-	if _, err := ca.bulkIn(buf, 200); err != nil {
-		return 0, 0, err
+	n := 0
+	for n == 0 { // skip a firmware 1.3 ZLP
+		if n, err = ca.bulkIn(buf, 200); err != nil {
+			return 0, 0, err
+		}
 	}
 	// reply: cmd, size(2), minor, major, term
+	if n < 6 || buf[0] != cmdBrdFWVersion || buf[1] != 0 || buf[2] != 2 {
+		return 0, 0, fmt.Errorf("unexpected version reply: % 02X", buf[:n])
+	}
 	return buf[4], buf[3], nil
 }
 
@@ -387,7 +427,11 @@ const (
 
 func (ca *Combi) readLoop(ctx context.Context) {
 	var (
-		readBuf [maxCommandSize]byte
+		// Exactly one packet per transfer. The firmware (LPCUSB serial
+		// stack) never sends a ZLP, so a larger transfer whose data ends on
+		// a full packet stays open until the timeout, and gotmc returns 0
+		// bytes on timeout: the frames/acks in it are silently lost.
+		readBuf = make([]byte, ca.inMPS)
 		state   = psCmd
 		cmd     byte
 		size    uint16
@@ -396,7 +440,7 @@ func (ca *Combi) readLoop(ctx context.Context) {
 	)
 
 	for ctx.Err() == nil {
-		n, err := ca.bulkIn(readBuf[:], 100)
+		n, err := ca.bulkIn(readBuf, 100)
 		if err != nil {
 			if isUSBTimeout(err) {
 				continue // idle, no data
@@ -440,6 +484,13 @@ func (ca *Combi) readLoop(ctx context.Context) {
 			case psTerm:
 				state = psCmd
 				if b == termNak {
+					if cmd == cmdCanTxFrame { // TX buffer busy; Send retries
+						select {
+						case ca.txAck <- false:
+						default:
+						}
+						continue
+					}
 					ca.errorf("command %02X failed (NAK)", cmd)
 					continue
 				} else if b != termAck {
@@ -461,7 +512,7 @@ func (ca *Combi) processCommand(cmd byte, data []byte) {
 		ca.deliverFrame(data)
 	case cmdCanTxFrame:
 		select {
-		case ca.txAck <- struct{}{}:
+		case ca.txAck <- true:
 		default:
 		}
 	case cmdCanFilter:

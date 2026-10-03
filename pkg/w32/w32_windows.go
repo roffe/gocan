@@ -66,8 +66,11 @@ func CreateEvent(manualReset, initialState bool, name string) (syscall.Handle, e
 
 // WaitForSingleObject(waitHandle, timeoutMs)
 // timeoutMs can be INFINITE_TIMEOUT
+//
+// Receive loops call this per frame burst, so it uses syscall.SyscallN
+// rather than Proc.Call, which heap allocates its argument slice.
 func WaitForSingleObject(h syscall.Handle, timeoutMs uint32) (uint32, error) {
-	r1, _, err := procWaitForSingleObject.Call(uintptr(h), uintptr(timeoutMs))
+	r1, _, err := syscall.SyscallN(procWaitForSingleObject.Addr(), uintptr(h), uintptr(timeoutMs))
 	ret := uint32(r1)
 	switch ret {
 	case WAIT_OBJECT_0:
@@ -75,7 +78,7 @@ func WaitForSingleObject(h syscall.Handle, timeoutMs uint32) (uint32, error) {
 	case WAIT_TIMEOUT:
 		return ret, syscall.ETIMEDOUT
 	case WAIT_FAILED:
-		if err != syscall.Errno(0) {
+		if err != 0 {
 			return ret, err
 		}
 		return ret, syscall.EINVAL

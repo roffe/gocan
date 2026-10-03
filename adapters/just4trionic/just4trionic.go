@@ -41,6 +41,7 @@ type Just4Trionic struct {
 	port    serial.Port
 	canRate string
 	line    []byte
+	txBuf   [27]byte // longest transmit command (t + 8 id + dlc + 16 data + CR); Send-only, which the Bus serializes
 }
 
 func New(cfg gocan.Config) (gocan.Adapter, error) {
@@ -107,18 +108,18 @@ func (a *Just4Trionic) Close() error {
 // Send encodes and writes one frame; the write completing is the confirmation
 // (the firmware has no TX ack).
 func (a *Just4Trionic) Send(ctx context.Context, f gocan.Frame) error {
-	out := "t" + strconv.FormatUint(uint64(f.ID), 16) +
-		strconv.Itoa(int(f.Length)) +
-		hex.EncodeToString(f.Data[:f.Length])
+	out := strconv.AppendUint(append(a.txBuf[:0], 't'), uint64(f.ID), 16)
+	out = append(out, '0'+f.Length)
+	out = hex.AppendEncode(out, f.Data[:f.Length])
 	for i := int(f.Length); i < 8; i++ {
-		out += "00"
+		out = append(out, "00"...)
 	}
-	out += "\r"
-	if _, err := a.port.Write([]byte(out)); err != nil {
+	out = append(out, '\r')
+	if _, err := a.port.Write(out); err != nil {
 		return fmt.Errorf("failed to write to com port: %q, %w", out, err)
 	}
 	if a.cfg.Debug {
-		a.bus.Emit(gocan.Event{Type: gocan.EventTypeDebug, Details: ">> " + out})
+		a.bus.Emit(gocan.Event{Type: gocan.EventTypeDebug, Details: ">> " + string(out)})
 	}
 	return nil
 }
@@ -162,7 +163,7 @@ func (a *Just4Trionic) parse(data []byte) {
 		}
 		if b == 0x0A {
 			if a.line[0] == 'w' {
-				f, err := decodeFrame(a.line[1 : len(a.line)-1])
+				f, err := decodeFrame(a.line[1:max(1, len(a.line)-1)]) // drop the trailing CR; a bare "w" is a short frame, not a panic
 				if err != nil {
 					a.bus.Emit(gocan.Event{Type: gocan.EventTypeError, Details: fmt.Sprintf("failed to decode frame: %v %X", err, a.line)})
 				} else {

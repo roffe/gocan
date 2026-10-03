@@ -13,31 +13,6 @@ import (
 	"unsafe"
 )
 
-func prepFrameBufferC(data []byte) (ptr unsafe.Pointer, length uintptr) {
-	if len(data) == 0 {
-		return nil, 0
-	}
-
-	mem := C.malloc(C.size_t(len(data)))
-	if mem == nil {
-		panic("malloc failed")
-	}
-
-	// copy from Go slice into C memory
-	dst := unsafe.Slice((*byte)(mem), len(data))
-	copy(dst, data)
-
-	return mem, uintptr(len(data))
-}
-
-// releaseFrameBufferC frees the C memory allocated by prepFrameBufferC.
-func releaseFrameBufferC(ptr unsafe.Pointer) {
-	if ptr == nil {
-		return
-	}
-	C.free(unsafe.Pointer(ptr))
-}
-
 const (
 	// Tune this. For classical CAN it's 8 bytes, CAN FD up to 64.
 	// You can bump it if your adapter supports larger payloads.

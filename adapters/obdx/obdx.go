@@ -36,6 +36,8 @@ type OBDXProWifi struct {
 	bus       *gocan.Bus
 	conn      net.Conn
 	closeOnce sync.Once
+	txData    [12]byte // id + payload of the frame being sent; Send-only, which the Bus serializes
+	txBuf     [15]byte // encoded DVI command (cmd + len + 12 data + checksum)
 }
 
 func New(cfg gocan.Config) (gocan.Adapter, error) {
@@ -118,12 +120,13 @@ func (a *OBDXProWifi) Close() error {
 }
 
 func (a *OBDXProWifi) Send(ctx context.Context, f gocan.Frame) error {
-	sendCmd := dvi.New(dvi.CMD_SEND_TO_NETWORK_NORMAL,
-		append([]byte{byte(f.ID >> 24), byte(f.ID >> 16), byte(f.ID >> 8), byte(f.ID)}, f.Bytes()...))
+	binary.BigEndian.PutUint32(a.txData[:4], f.ID)
+	n := 4 + copy(a.txData[4:], f.Data[:f.Length])
+	sendCmd := dvi.New(dvi.CMD_SEND_TO_NETWORK_NORMAL, a.txData[:n])
 	if a.cfg.Debug {
 		a.bus.Emit(gocan.Event{Type: gocan.EventTypeDebug, Details: "dvi out: " + sendCmd.String()})
 	}
-	if _, err := a.conn.Write(sendCmd.Bytes()); err != nil {
+	if _, err := a.conn.Write(sendCmd.AppendBytes(a.txBuf[:0])); err != nil {
 		return fmt.Errorf("failed to send frame: %w", err)
 	}
 	return nil

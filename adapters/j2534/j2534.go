@@ -78,21 +78,34 @@ type J2534 struct {
 	calls chan func()   // DLL work, run on the worker's locked OS thread
 	done  chan struct{} // closed once the worker has exited
 
+	// Send's hand-off to the worker, built once so a frame costs no closure
+	// or channel allocation. The Bus never calls Send concurrently, so one
+	// set is enough; the calls/sendDone channel operations order the
+	// accesses between Send and the worker.
+	sendFn    func()        // ma.send
+	sendDone  chan struct{} // buffered 1; the worker signals send finished
+	sendFrame gocan.Frame
+	sendCtx   context.Context
+	sendErr   error
+
 	// Worker-thread only, no synchronization needed.
 	filters  []uint32
-	rx       passthru.PassThruMsg // reused; PassThruMsg is 4KB
+	rx, tx   passthru.PassThruMsg // reused; PassThruMsg is 4KB
 	torn     bool                 // DLL released, nothing may call into it
 	closeErr error
 }
 
 func New(cfg gocan.Config) (gocan.Adapter, error) {
-	return &J2534{
-		cfg:     cfg,
-		flags:   passthru.CAN_ID_BOTH | passthru.CAN_29BIT_ID,
-		filters: cfg.CANFilter,
-		calls:   make(chan func()),
-		done:    make(chan struct{}),
-	}, nil
+	ma := &J2534{
+		cfg:      cfg,
+		flags:    passthru.CAN_ID_BOTH | passthru.CAN_29BIT_ID,
+		filters:  cfg.CANFilter,
+		calls:    make(chan func()),
+		done:     make(chan struct{}),
+		sendDone: make(chan struct{}, 1),
+	}
+	ma.sendFn = ma.send
+	return ma, nil
 }
 
 func (ma *J2534) Open(ctx context.Context, bus *gocan.Bus) error {
@@ -145,6 +158,8 @@ func (ma *J2534) run(ctx context.Context, baudRate uint32, swcan bool, errc chan
 	}
 	errc <- nil
 
+	idle := time.NewTimer(pollInterval) // reused: time.After allocates per poll
+	defer idle.Stop()
 	errCount := 0
 	for {
 		// Queued work (Send, SetFilter, teardown) goes first; polling the bus
@@ -191,13 +206,14 @@ func (ma *J2534) run(ctx context.Context, baudRate uint32, swcan bool, errc chan
 		if got {
 			continue // drain before idling
 		}
+		idle.Reset(pollInterval)
 		select {
 		case fn := <-ma.calls:
 			fn()
 			if ma.torn {
 				return
 			}
-		case <-time.After(pollInterval):
+		case <-idle.C:
 		}
 	}
 }
@@ -352,54 +368,74 @@ func (ma *J2534) Close() error {
 }
 
 func (ma *J2534) Send(ctx context.Context, f gocan.Frame) error {
+	ma.sendFrame, ma.sendCtx = f, ctx
+	select {
+	case ma.calls <- ma.sendFn:
+	case <-ma.done:
+		return gocan.ErrClosed
+	}
+	select {
+	case <-ma.sendDone:
+	case <-ma.done:
+		return gocan.ErrClosed
+	}
+	err := ma.sendErr
+	ma.sendCtx, ma.sendErr = nil, nil // don't hold on to the caller's ctx
+	return err
+}
+
+// send is Send's body, run on the worker thread.
+func (ma *J2534) send() {
+	ma.sendErr = ma.write(ma.sendCtx, &ma.sendFrame)
+	ma.sendDone <- struct{}{}
+}
+
+func (ma *J2534) write(ctx context.Context, f *gocan.Frame) error {
 	var txflags uint32
 	if f.Extended {
 		txflags = passthru.CAN_29BIT_ID
 	}
-	msg := &passthru.PassThruMsg{
-		ProtocolID:     ma.protocol,
-		DataSize:       4 + uint32(f.Length),
-		ExtraDataIndex: 4 + uint32(f.Length),
-		TxFlags:        txflags,
-	}
 	if ma.protocol == passthru.SW_CAN_PS && !ma.tech2passThru {
-		msg.TxFlags |= passthru.SW_CAN_HV_TX
+		txflags |= passthru.SW_CAN_HV_TX
 	}
+	msg := &ma.tx
+	msg.ProtocolID = ma.protocol
+	msg.RxStatus = 0
+	msg.TxFlags = txflags
+	msg.Timestamp = 0
+	msg.DataSize = 4 + uint32(f.Length)
+	msg.ExtraDataIndex = 4 + uint32(f.Length)
 	binary.BigEndian.PutUint32(msg.Data[:], f.ID)
 	copy(msg.Data[4:], f.Bytes())
 
+	// Timeout 0 queues the frame in the device and returns; a non-zero
+	// timeout blocks until it is on the wire, a USB round trip per frame
+	// (T7 flash on a MongoosePro: 32 s). A full queue refuses the frame
+	// with 0 queued: ERR_BUFFER_FULL per spec, ERR_TIMEOUT from the
+	// MongoosePro ("only sent 0 of 1", device code 0x103) when a T7 fast
+	// download bursts 1024 frames. Keep reading while it drains so replies
+	// aren't held up, and retry.
 	var err error
-	if derr := ma.do(func() {
-		// Timeout 0 queues the frame in the device and returns; a non-zero
-		// timeout blocks until it is on the wire, a USB round trip per frame
-		// (T7 flash on a MongoosePro: 32 s). A full queue refuses the frame
-		// with 0 queued: ERR_BUFFER_FULL per spec, ERR_TIMEOUT from the
-		// MongoosePro ("only sent 0 of 1", device code 0x103) when a T7 fast
-		// download bursts 1024 frames. Keep reading while it drains so replies
-		// aren't held up, and retry.
-		deadline := time.Now().Add(time.Second)
-		for {
-			numMsg := uint32(1)
-			err = ma.h.PassThruWriteMsgs(ma.channelID, msg, &numMsg, 0)
-			full := numMsg == 0 && (errors.Is(err, passthru.ErrBufferFull) || errors.Is(err, passthru.ErrTimeout))
-			if !full || ctx.Err() != nil || time.Now().After(deadline) {
-				break
-			}
-			if got, _ := ma.pump(); !got {
-				time.Sleep(pollInterval)
-			}
+	deadline := time.Now().Add(time.Second)
+	for {
+		numMsg := uint32(1)
+		err = ma.h.PassThruWriteMsgs(ma.channelID, msg, &numMsg, 0)
+		full := numMsg == 0 && (errors.Is(err, passthru.ErrBufferFull) || errors.Is(err, passthru.ErrTimeout))
+		if !full || ctx.Err() != nil || time.Now().After(deadline) {
+			break
 		}
-		if err == nil {
-			return
+		if got, _ := ma.pump(); !got {
+			time.Sleep(pollInterval)
 		}
-		// A bare ERR_TIMEOUT hides why the device could not transmit; the
-		// library's text usually carries the device code. checkErr only fetches
-		// it for ERR_FAILED, and it is thread-local, so ask here.
-		if s, lerr := ma.h.PassThruGetLastError(); lerr == nil && s != "" {
-			err = fmt.Errorf("%s: %w", s, err)
-		}
-	}); derr != nil {
-		return derr
+	}
+	if err == nil {
+		return nil
+	}
+	// A bare ERR_TIMEOUT hides why the device could not transmit; the
+	// library's text usually carries the device code. checkErr only fetches
+	// it for ERR_FAILED, and it is thread-local, so ask here.
+	if s, lerr := ma.h.PassThruGetLastError(); lerr == nil && s != "" {
+		err = fmt.Errorf("%s: %w", s, err)
 	}
 	return err
 }

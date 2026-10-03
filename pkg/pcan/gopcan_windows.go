@@ -158,12 +158,17 @@ func CAN_GetStatus(channel TPCANHandle) (TPCANStatus, error) {
 // PCAN_RECEIVE_EVENT: once the event is signaled, you’re expected to
 // drain the queue completely so the event can be triggered again next
 // time new data arrives.
+//
+// CAN_Read and CAN_Write run per frame, so they call syscall.SyscallN
+// directly: Proc.Call heap allocates its argument slice and, being
+// //go:uintptrescapes, the message and timestamp.
 func CAN_Read(channel TPCANHandle, message *TPCANMsg, timestamp *TPCANTimestamp) error {
-	return checkErr(procCANRead.Call(
+	r1, _, _ := syscall.SyscallN(procCANRead.Addr(),
 		uintptr(channel),
 		uintptr(unsafe.Pointer(message)),
 		uintptr(unsafe.Pointer(timestamp)),
-	))
+	)
+	return checkErr(r1, 0, nil)
 }
 
 // CAN_ReadFD dequeues one CAN FD frame (up to 64 data bytes) plus a timestamp.
@@ -196,7 +201,8 @@ func CAN_ReadFD(channel TPCANHandle, message *TPCANMsgFD, timestamp *TPCANTimest
 // PCAN-Basic examples use this to send "trigger" frames to wake up a
 // device and then wait on a read event to know when the device answers.
 func CAN_Write(channel TPCANHandle, message *TPCANMsg) error {
-	return checkErr(procCANWrite.Call(uintptr(channel), uintptr(unsafe.Pointer(message))))
+	r1, _, _ := syscall.SyscallN(procCANWrite.Addr(), uintptr(channel), uintptr(unsafe.Pointer(message)))
+	return checkErr(r1, 0, nil)
 }
 
 // CAN_WriteFD enqueues one CAN FD frame (up to 64 bytes payload) for TX.

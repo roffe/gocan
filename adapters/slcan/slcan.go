@@ -29,10 +29,11 @@ func init() {
 }
 
 type SLCan struct {
-	cfg  gocan.Config
-	bus  *gocan.Bus
-	port serial.Port
-	line []byte
+	cfg   gocan.Config
+	bus   *gocan.Bus
+	port  serial.Port
+	line  []byte
+	txBuf [22]byte // longest transmit command (t + 3 id + dlc + 16 data + CR); Send-only, which the Bus serializes
 }
 
 func New(cfg gocan.Config) (gocan.Adapter, error) {
@@ -89,8 +90,7 @@ func (sl *SLCan) Close() error {
 }
 
 func (sl *SLCan) Send(ctx context.Context, f gocan.Frame) error {
-	buf := make([]byte, 0, 5+int(f.Length)*2+1)
-	buf = append(buf, 't')
+	buf := append(sl.txBuf[:0], 't')
 	id := f.ID & 0x7FF
 	buf = append(buf, nybbleToHex(byte(id>>8)), nybbleToHex(byte(id>>4)&0xF), nybbleToHex(byte(id)&0xF))
 	buf = append(buf, nybbleToHex(f.Length&0xF))

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"iter"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 )
@@ -51,7 +52,7 @@ type Bus struct {
 	sendMu sync.Mutex
 
 	subMu      sync.Mutex
-	submap     map[uint32]map[*sub]struct{}
+	submap     map[uint32][]*sub // entries are kept when emptied, so a repeated Request reuses the slice
 	globalSubs []*sub
 
 	sinkMu sync.Mutex
@@ -88,7 +89,7 @@ func open(ctx context.Context, name string, adapter Adapter, opts ...Option) (*B
 		name:    name,
 		ctx:     cctx,
 		cancel:  cancel,
-		submap:  make(map[uint32]map[*sub]struct{}),
+		submap:  make(map[uint32][]*sub),
 	}
 	for _, opt := range opts {
 		opt(b)
@@ -190,9 +191,8 @@ func (b *Bus) Send(ctx context.Context, f Frame) error {
 // Recv waits for a single frame carrying one of the given identifiers (no
 // identifiers = any frame). Bound it with a context deadline.
 func (b *Bus) Recv(ctx context.Context, identifiers ...uint32) (Frame, error) {
-	sctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	s := b.newSub(sctx, 1, identifiers)
+	s := b.addSub(1, identifiers)
+	defer b.releaseSub(s)
 	return b.waitSub(ctx, s)
 }
 
@@ -218,9 +218,10 @@ func (b *Bus) Request(ctx context.Context, frame Frame, replyIdentifiers ...uint
 			}
 		}
 	}
-	sctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	s := b.newSub(sctx, 1, replyIdentifiers)
+	// Released before returning, not on ctx cancellation: a subscription left
+	// behind would catch (and warn about dropping) the next request's reply.
+	s := b.addSub(1, replyIdentifiers)
+	defer b.releaseSub(s)
 	if err := b.Send(ctx, frame); err != nil {
 		return Frame{}, err
 	}
@@ -232,14 +233,16 @@ func (b *Bus) Request(ctx context.Context, frame Frame, replyIdentifiers ...uint
 // subscriber that stops draining loses frames. The channel is closed when
 // ctx is cancelled or the bus terminates.
 func (b *Bus) Subscribe(ctx context.Context, identifiers ...uint32) <-chan Frame {
-	return b.newSub(ctx, 64, identifiers).ch
+	return b.SubscribeN(ctx, 64, identifiers...)
 }
 
 // SubscribeN is Subscribe with a caller-sized buffer, for streams that arrive
 // faster than a 64-frame buffer survives a scheduling hiccup (e.g. a bulk dump
 // at full bus load). Sized for the whole transfer, it never drops.
 func (b *Bus) SubscribeN(ctx context.Context, buffer int, identifiers ...uint32) <-chan Frame {
-	return b.newSub(ctx, max(buffer, 1), identifiers).ch
+	s := b.addSub(max(buffer, 1), identifiers)
+	context.AfterFunc(ctx, func() { b.releaseSub(s) })
+	return s.ch
 }
 
 // Frames returns an iterator over frames carrying one of the given
@@ -279,18 +282,18 @@ func (b *Bus) waitSub(ctx context.Context, s *sub) (Frame, error) {
 // sub is a single subscription. Its channel is closed exactly once, under
 // subMu, when the subscription is released.
 type sub struct {
-	ids  map[uint32]struct{}
-	ch   chan Frame
-	once sync.Once
+	ids   []uint32 // sorted, unique; nil = all traffic
+	idbuf [4]uint32
+	ch    chan Frame
+	once  sync.Once
 }
 
-func (b *Bus) newSub(ctx context.Context, buffer int, identifiers []uint32) *sub {
+func (b *Bus) addSub(buffer int, identifiers []uint32) *sub {
 	s := &sub{ch: make(chan Frame, buffer)}
 	if len(identifiers) > 0 {
-		s.ids = make(map[uint32]struct{}, len(identifiers))
-		for _, id := range identifiers {
-			s.ids[id] = struct{}{}
-		}
+		s.ids = append(s.idbuf[:0], identifiers...) // inline up to 4 IDs, our own copy beyond
+		slices.Sort(s.ids)
+		s.ids = slices.Compact(s.ids)
 	}
 	b.subMu.Lock()
 	if b.alive() != nil {
@@ -302,18 +305,11 @@ func (b *Bus) newSub(ctx context.Context, buffer int, identifiers []uint32) *sub
 	}
 	if s.ids == nil {
 		b.globalSubs = append(b.globalSubs, s)
-	} else {
-		for id := range s.ids {
-			m, ok := b.submap[id]
-			if !ok {
-				m = make(map[*sub]struct{})
-				b.submap[id] = m
-			}
-			m[s] = struct{}{}
-		}
+	}
+	for _, id := range s.ids {
+		b.submap[id] = append(b.submap[id], s)
 	}
 	b.subMu.Unlock()
-	context.AfterFunc(ctx, func() { b.releaseSub(s) })
 	return s
 }
 
@@ -322,21 +318,10 @@ func (b *Bus) releaseSub(s *sub) {
 		b.subMu.Lock()
 		defer b.subMu.Unlock()
 		if s.ids == nil {
-			for i, cur := range b.globalSubs {
-				if cur == s {
-					b.globalSubs = append(b.globalSubs[:i], b.globalSubs[i+1:]...)
-					break
-				}
-			}
-		} else {
-			for id := range s.ids {
-				if m, ok := b.submap[id]; ok {
-					delete(m, s)
-					if len(m) == 0 {
-						delete(b.submap, id)
-					}
-				}
-			}
+			b.globalSubs = deleteSub(b.globalSubs, s)
+		}
+		for _, id := range s.ids {
+			b.submap[id] = deleteSub(b.submap[id], s)
 		}
 		// Closing under subMu is safe against Deliver, which sends under the
 		// same lock.
@@ -344,13 +329,18 @@ func (b *Bus) releaseSub(s *sub) {
 	})
 }
 
+func deleteSub(subs []*sub, s *sub) []*sub {
+	if i := slices.Index(subs, s); i >= 0 {
+		return slices.Delete(subs, i, i+1)
+	}
+	return subs
+}
+
 func (b *Bus) releaseAllSubs() {
 	b.subMu.Lock()
-	subs := append([]*sub{}, b.globalSubs...)
-	for _, m := range b.submap {
-		for s := range m {
-			subs = append(subs, s)
-		}
+	subs := slices.Clone(b.globalSubs)
+	for _, l := range b.submap {
+		subs = append(subs, l...) // a multi-ID sub repeats; releaseSub runs once
 	}
 	b.subMu.Unlock()
 	for _, s := range subs {
@@ -371,13 +361,11 @@ func (b *Bus) Deliver(f Frame) {
 			dropped++
 		}
 	}
-	if m, ok := b.submap[f.ID]; ok {
-		for s := range m {
-			select {
-			case s.ch <- f:
-			default:
-				dropped++
-			}
+	for _, s := range b.submap[f.ID] {
+		select {
+		case s.ch <- f:
+		default:
+			dropped++
 		}
 	}
 	b.subMu.Unlock()

@@ -88,11 +88,7 @@ func (p *PCAN) Close() error {
 // Send writes one frame; CAN_Write queues it on the controller, which is the
 // closest the PCANBasic API offers to a write confirmation.
 func (p *PCAN) Send(ctx context.Context, f gocan.Frame) error {
-	msg := pcan.TPCANMsg{
-		ID:  f.ID,
-		LEN: f.Length,
-	}
-	copy(msg.DATA[:], f.Data[:f.Length])
+	msg := toMsg(f)
 	if err := pcan.CAN_Write(p.ch, &msg); err != nil {
 		return fmt.Errorf("failed to send frame: %w", err)
 	}
@@ -130,14 +126,39 @@ func (p *PCAN) readLoop(ctx context.Context) {
 				}
 				return
 			}
-			if msg.LEN > 8 {
-				continue
+			if f, ok := fromMsg(&msg); ok {
+				p.bus.Deliver(f)
 			}
-			f := gocan.Frame{ID: msg.ID, Length: msg.LEN}
-			copy(f.Data[:], msg.DATA[:msg.LEN])
-			p.bus.Deliver(f)
 		}
 	}
+}
+
+func toMsg(f gocan.Frame) pcan.TPCANMsg {
+	msg := pcan.TPCANMsg{ID: f.ID, MSGTYPE: pcan.PCAN_MESSAGE_STANDARD, LEN: min(f.Length, 8)}
+	if f.Extended {
+		msg.MSGTYPE |= pcan.PCAN_MESSAGE_EXTENDED
+	}
+	if f.Remote {
+		msg.MSGTYPE |= pcan.PCAN_MESSAGE_RTR
+	}
+	copy(msg.DATA[:], f.Data[:msg.LEN])
+	return msg
+}
+
+// fromMsg converts a received data frame; status and error messages, which
+// share the read queue, are not frames.
+func fromMsg(msg *pcan.TPCANMsg) (gocan.Frame, bool) {
+	if msg.MSGTYPE&(pcan.PCAN_MESSAGE_STATUS|pcan.PCAN_MESSAGE_ERRFRAME) != 0 || msg.LEN > 8 {
+		return gocan.Frame{}, false
+	}
+	f := gocan.Frame{
+		ID:       msg.ID,
+		Extended: msg.MSGTYPE&pcan.PCAN_MESSAGE_EXTENDED != 0,
+		Remote:   msg.MSGTYPE&pcan.PCAN_MESSAGE_RTR != 0,
+		Length:   msg.LEN,
+	}
+	copy(f.Data[:], msg.DATA[:msg.LEN])
+	return f, true
 }
 
 func cString(b []byte) string {

@@ -15,16 +15,22 @@ import (
 // rnd-ash/ecu_diagnostics, which also defined the ~/.passthru/*.json layout
 // FindDLLs reads), and PassThruMsg's layout depends on it. A driver built
 // with a 64-bit unsigned long would not be usable through this binding.
+//
+// ReadMsgs and WriteMsgs run per frame (and per idle poll), so they are raw
+// symbols called through purego.SyscallN: a RegisterFunc'd func goes through
+// reflect, five allocations a call. SyscallN still costs one, its variadic
+// argument slice, and moves what the pointer arguments point at to the heap
+// (//go:uintptrescapes), so pass buffers that already live there.
 type PassThru struct {
 	lib uintptr
+
+	passThruReadMsgs, passThruWriteMsgs uintptr
 
 	passThruReadVersionProc func(deviceID uint32, firmware, dll, api *byte) uint32
 	passThruOpen            func(name *byte, deviceID *uint32) uint32
 	passThruClose           func(deviceID uint32) uint32
 	passThruConnect         func(deviceID, protocolID, flags, baudRate uint32, channelID *uint32) uint32
 	passThruDisconnect      func(channelID uint32) uint32
-	passThruReadMsgs        func(channelID uint32, msg *PassThruMsg, numMsgs *uint32, timeout uint32) uint32
-	passThruWriteMsgs       func(channelID uint32, msg *PassThruMsg, numMsgs *uint32, timeout uint32) uint32
 	passThruStartMsgFilter  func(channelID, filterType uint32, mask, pattern, flowControl *PassThruMsg, msgID *uint32) uint32
 	passThruIoctl           func(handleID, ioctlID uint32, input, output unsafe.Pointer) uint32
 	passThruGetLastError    func(description *byte) uint32
@@ -57,6 +63,10 @@ func New(libName string) (*PassThru, error) {
 			// otherwise leave it mapped for the life of the process.
 			purego.Dlclose(lib)
 			return nil, fmt.Errorf("%s: %w", libName, err)
+		}
+		if p, ok := s.fptr.(*uintptr); ok {
+			*p = sym
+			continue
 		}
 		purego.RegisterFunc(s.fptr, sym)
 	}
@@ -108,12 +118,14 @@ func (j *PassThru) PassThruReadMsg(channelID uint32, pMsg *PassThruMsg, timeout 
 //
 // long PassThruReadMsgs(unsigned long ChannelID, PassThruMsg *pMsg, unsigned long *pNumMsgs, unsigned long Timeout);
 func (j *PassThru) PassThruReadMsgs(channelID uint32, pMsg *PassThruMsg, pNumMsgs *uint32, timeout uint32) error {
-	return j.checkErr(j.passThruReadMsgs(channelID, pMsg, pNumMsgs, timeout))
+	ret, _, _ := purego.SyscallN(j.passThruReadMsgs, uintptr(channelID), uintptr(unsafe.Pointer(pMsg)), uintptr(unsafe.Pointer(pNumMsgs)), uintptr(timeout))
+	return j.checkErr(uint32(ret))
 }
 
 // long PassThruWriteMsgs(unsigned long ChannelID, PassThruMsg *pMsg, unsigned long *pNumMsgs, unsigned long Timeout);
 func (j *PassThru) PassThruWriteMsgs(channelID uint32, pMsg *PassThruMsg, pNumMsgs *uint32, timeout uint32) error {
-	return j.checkErr(j.passThruWriteMsgs(channelID, pMsg, pNumMsgs, timeout))
+	ret, _, _ := purego.SyscallN(j.passThruWriteMsgs, uintptr(channelID), uintptr(unsafe.Pointer(pMsg)), uintptr(unsafe.Pointer(pNumMsgs)), uintptr(timeout))
+	return j.checkErr(uint32(ret))
 }
 
 // long PassThruStartMsgFilter(unsigned long ChannelID, unsigned long FilterType, PassThruMsg *pMaskMsg, PassThruMsg *pPatternMsg, PassThruMsg *pFlowControlMsg, unsigned long *pMsgID);

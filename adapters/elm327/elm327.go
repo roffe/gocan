@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"math"
 	"strconv"
-	"strings"
 	"time"
 
 	gocan "github.com/roffe/gocan/v2"
@@ -29,6 +28,7 @@ const (
 	respOK      = "OK\r\r"
 	promptByte  = '>'
 	cmdDeadline = time.Second
+	hexdig      = "0123456789ABCDEF"
 )
 
 func init() {
@@ -48,7 +48,9 @@ type ELM327 struct {
 
 	currentID uint32
 	response  bool
-	line      []byte
+	line      []byte   // response accumulator reused across commands
+	cmd       []byte   // command buffer reused across commands (Open, then Sends, which the Bus serializes)
+	rbuf      [64]byte // port read buffer; a local escapes through the port interface
 }
 
 func New(cfg gocan.Config) (gocan.Adapter, error) {
@@ -92,7 +94,7 @@ func (el *ELM327) Close() error {
 }
 
 func (el *ELM327) init() error {
-	el.writePort("ATZ")
+	el.writePort([]byte("ATZ\r"))
 	time.Sleep(1 * time.Second)
 	el.port.ResetInputBuffer()
 
@@ -117,7 +119,7 @@ func (el *ELM327) init() error {
 		if err != nil {
 			return fmt.Errorf("error sending command %q: %w", cmd, err)
 		}
-		if !strings.HasSuffix(resp, respOK) {
+		if !bytes.HasSuffix(resp, []byte(respOK)) {
 			return fmt.Errorf("error sending command %q: %q", cmd, resp)
 		}
 	}
@@ -153,15 +155,24 @@ func (el *ELM327) Send(ctx context.Context, f gocan.Frame) error {
 		}
 	}
 
-	resp, err := el.sendCommand(fmt.Sprintf("%02X", f.Bytes()))
+	// Bare uppercase hex; an empty frame goes out as "00", as the fmt %02X
+	// this replaced padded it.
+	el.cmd = el.cmd[:0]
+	if f.Length == 0 {
+		el.cmd = append(el.cmd, "00"...)
+	}
+	for _, b := range f.Data[:f.Length] {
+		el.cmd = append(el.cmd, hexdig[b>>4], hexdig[b&0xF])
+	}
+	resp, err := el.exchange()
 	if err != nil {
 		return fmt.Errorf("failed to send frame: %w", err)
 	}
-	if resp == "\r" {
+	if string(resp) == "\r" {
 		return nil
 	}
-	for msg := range strings.SplitSeq(strings.TrimSuffix(resp, "\r\r"), "\r") {
-		switch msg {
+	for msg := range bytes.SplitSeq(bytes.TrimSuffix(resp, []byte("\r\r")), []byte("\r")) {
+		switch string(msg) { // compiler compares in place, no conversion alloc
 		case "", "OK":
 			continue
 		case "NO DATA":
@@ -175,10 +186,10 @@ func (el *ELM327) Send(ctx context.Context, f gocan.Frame) error {
 			continue
 		}
 		if len(msg) < 4 {
-			el.bus.Emit(gocan.Event{Type: gocan.EventTypeError, Details: "message invalid: " + msg})
+			el.bus.Emit(gocan.Event{Type: gocan.EventTypeError, Details: "message invalid: " + string(msg)})
 			continue
 		}
-		id, err := strconv.ParseUint(msg[0:3], 16, 32)
+		id, err := strconv.ParseUint(string(msg[0:3]), 16, 32)
 		if err != nil {
 			el.bus.Emit(gocan.Event{Type: gocan.EventTypeError, Details: fmt.Sprintf("invalid id in message %q: %v", msg, err)})
 			continue
@@ -189,7 +200,7 @@ func (el *ELM327) Send(ctx context.Context, f gocan.Frame) error {
 			continue
 		}
 		rf := gocan.Frame{ID: uint32(id), Length: uint8(len(body) / 2)}
-		if _, err := hex.Decode(rf.Data[:rf.Length], []byte(body)); err != nil {
+		if _, err := hex.Decode(rf.Data[:rf.Length], body); err != nil {
 			el.bus.Emit(gocan.Event{Type: gocan.EventTypeError, Details: fmt.Sprintf("invalid data in message %q: %v", msg, err)})
 			continue
 		}
@@ -199,11 +210,21 @@ func (el *ELM327) Send(ctx context.Context, f gocan.Frame) error {
 }
 
 func (el *ELM327) setHeader(id uint32) error {
-	resp, err := el.sendCommand(fmt.Sprintf("ATSH%03X", id))
+	// ATSH%03X by hand: a T7 session switches header on every frame
+	// (requests on 0x240, acks on 0x266) and fmt boxes the id.
+	n := 3
+	for n < 8 && id>>(4*n) != 0 {
+		n++
+	}
+	el.cmd = append(el.cmd[:0], "ATSH"...)
+	for i := n - 1; i >= 0; i-- {
+		el.cmd = append(el.cmd, hexdig[id>>(4*i)&0xF])
+	}
+	resp, err := el.exchange()
 	if err != nil {
 		return fmt.Errorf("failed to set header for ID %03X: %w", id, err)
 	}
-	if resp != respOK {
+	if string(resp) != respOK {
 		return fmt.Errorf("failed to set header for ID %03X: %q", id, resp)
 	}
 	el.currentID = id
@@ -219,7 +240,7 @@ func (el *ELM327) setResponse(enabled bool) error {
 	if err != nil {
 		return fmt.Errorf("failed to set response required: %w", err)
 	}
-	if resp != respOK {
+	if string(resp) != respOK {
 		return fmt.Errorf("failed to set response required: %q", resp)
 	}
 	el.response = enabled
@@ -241,44 +262,55 @@ func (el *ELM327) setFilter(ids []uint32) error {
 		if err != nil {
 			return fmt.Errorf("error setting filter: %w", err)
 		}
-		if resp != respOK {
+		if string(resp) != respOK {
 			return fmt.Errorf("error setting filter: %q", resp)
 		}
 	}
 	return nil
 }
 
-func (el *ELM327) sendCommand(cmd string) (string, error) {
-	if err := el.writePort(cmd); err != nil {
-		return "", err
+// sendCommand sends cmd and returns the response up to the '>' prompt; see
+// exchange.
+func (el *ELM327) sendCommand(cmd string) ([]byte, error) {
+	el.cmd = append(el.cmd[:0], cmd...)
+	return el.exchange()
+}
+
+// exchange sends the command in el.cmd, CR terminated, and returns the
+// response up to the '>' prompt. The response aliases el.line: valid until
+// the next command.
+func (el *ELM327) exchange() ([]byte, error) {
+	el.cmd = append(el.cmd, '\r')
+	if err := el.writePort(el.cmd); err != nil {
+		return nil, err
 	}
 	deadline := time.Now().Add(cmdDeadline)
 	el.line = el.line[:0]
-	var readBuf [64]byte
 	for {
 		if time.Now().After(deadline) {
-			return "", errors.New("timeout waiting for '>' prompt")
+			return nil, errors.New("timeout waiting for '>' prompt")
 		}
-		n, err := el.port.Read(readBuf[:])
+		n, err := el.port.Read(el.rbuf[:])
 		if err != nil {
-			return "", fmt.Errorf("read from port: %w", err)
+			return nil, fmt.Errorf("read from port: %w", err)
 		}
-		for _, b := range readBuf[:n] {
+		for _, b := range el.rbuf[:n] {
 			if b == promptByte {
-				return string(el.line), nil
+				return el.line, nil
 			}
 			el.line = append(el.line, b)
 		}
 	}
 }
 
-func (el *ELM327) writePort(cmd string) error {
-	n, err := el.port.Write([]byte(cmd + "\r"))
+// writePort writes a CR-terminated command.
+func (el *ELM327) writePort(cmd []byte) error {
+	n, err := el.port.Write(cmd)
 	if err != nil {
 		return fmt.Errorf("failed to send command: %w", err)
 	}
-	if n != len(cmd)+1 {
-		return fmt.Errorf("failed to send full command, sent %d of %d bytes", n, len(cmd)+1)
+	if n != len(cmd) {
+		return fmt.Errorf("failed to send full command, sent %d of %d bytes", n, len(cmd))
 	}
 	return nil
 }
@@ -294,7 +326,7 @@ func (el *ELM327) changeDeviceBaudrate(from, to int) error {
 		return err
 	}
 	divider := int(math.Round(4000000.0 / float64(to)))
-	el.writePort(fmt.Sprintf("ATBRD%02X", divider))
+	el.writePort(fmt.Appendf(nil, "ATBRD%02X\r", divider))
 	time.Sleep(50 * time.Millisecond)
 
 	if err := el.port.ResetInputBuffer(); err != nil {

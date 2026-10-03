@@ -92,16 +92,20 @@ type Packet struct {
 }
 
 func (p *Packet) ToBytes() []byte {
-	wireLen := int(p.Length) + 4
-	buf := make([]byte, wireLen)
+	buf := make([]byte, int(p.Length)+4)
+	p.putHeader(buf)
+	copy(buf[8:], p.Payload)
+	return buf
+}
+
+// putHeader writes the 8-byte wire header into buf, leaving buf[6:8] alone.
+func (p *Packet) putHeader(buf []byte) {
 	binary.LittleEndian.PutUint16(buf[0:2], p.Length)
 	// Check is length^0x51E6 as an LE u16. For len<256 the high byte is always
 	// 0x51 so it looks like a constant magic; for len>=256 (flashing) it is not.
 	binary.LittleEndian.PutUint16(buf[2:4], p.Length^ChecksumWord)
 	buf[4] = p.Direction
 	buf[5] = p.Channel
-	copy(buf[8:], p.Payload)
-	return buf
 }
 
 func (p *Packet) SubCommand() uint8 {
@@ -154,20 +158,43 @@ func (p *Packet) ParseCANFrame() (*CANFrame, error) {
 // Parser handles streaming packet parsing.
 type Parser struct {
 	buf []byte
+	off int // start of the unparsed bytes in buf
 }
 
 func NewParser() *Parser {
 	return &Parser{buf: make([]byte, 0, 4096)}
 }
 
+// Feed appends data and returns the complete packets now buffered, each with
+// its own copy of the payload.
 func (p *Parser) Feed(data []byte) ([]*Packet, error) {
-	p.buf = append(p.buf, data...)
+	pkts, err := p.parse(data, nil)
 	var packets []*Packet
+	for _, pkt := range pkts {
+		pkt.Payload = bytes.Clone(pkt.Payload)
+		packets = append(packets, &pkt)
+	}
+	return packets, err
+}
+
+// parse appends data and then every complete packet buffered to dst. The
+// packets' Payloads alias the parser's buffer, so they are only valid until
+// the next call: the read loop handles them in place rather than paying a
+// Packet and a payload copy per frame.
+func (p *Parser) parse(data []byte, dst []Packet) ([]Packet, error) {
+	// Slide the unparsed tail back to the front instead of letting the
+	// window walk off the end of buf, which reallocated it on every read.
+	if p.off > 0 && len(p.buf)+len(data) > cap(p.buf) {
+		p.buf = p.buf[:copy(p.buf, p.buf[p.off:])]
+		p.off = 0
+	}
+	p.buf = append(p.buf, data...)
 
 	dropped := 0
-	for len(p.buf) >= 4 {
-		length := binary.LittleEndian.Uint16(p.buf[0:2])
-		check := binary.LittleEndian.Uint16(p.buf[2:4])
+	for len(p.buf)-p.off >= 4 {
+		b := p.buf[p.off:]
+		length := binary.LittleEndian.Uint16(b[0:2])
+		check := binary.LittleEndian.Uint16(b[2:4])
 
 		// Validate the full check word (length^0x51E6, PROTOCOL.md §2) so
 		// >=256B frames pass too; the high byte only looks like a constant
@@ -175,40 +202,38 @@ func (p *Parser) Feed(data []byte) ([]*Packet, error) {
 		// treat it as garbage. On any mismatch drop one byte and rescan —
 		// always makes progress, never wedges on a corrupt stream.
 		if check != length^ChecksumWord || length < 8 {
-			p.buf = p.buf[1:]
+			p.off++
 			dropped++
 			continue
 		}
 
 		wireLen := int(length) + 4
-		if len(p.buf) < wireLen {
+		if len(b) < wireLen {
 			break
 		}
 
 		var direction, channel uint8
-		if p.buf[4] == DirectionOut {
+		if b[4] == DirectionOut {
 			direction = DirectionOut
-			channel = p.buf[5]
+			channel = b[5]
 		} else {
 			direction = DirectionIn
-			channel = p.buf[7]
+			channel = b[7]
 		}
 
-		pkt := &Packet{
+		dst = append(dst, Packet{
 			Length:    length,
 			Direction: direction,
 			Channel:   channel,
-			Payload:   make([]byte, wireLen-8),
-		}
-		copy(pkt.Payload, p.buf[8:wireLen])
-		packets = append(packets, pkt)
-		p.buf = p.buf[wireLen:]
+			Payload:   b[8:wireLen:wireLen],
+		})
+		p.off += wireLen
 	}
 
 	if dropped > 0 {
-		return packets, fmt.Errorf("resync: dropped %d bytes", dropped)
+		return dst, fmt.Errorf("resync: dropped %d bytes", dropped)
 	}
-	return packets, nil
+	return dst, nil
 }
 
 // pendingRequest tracks a request waiting for response.
@@ -246,12 +271,18 @@ type Device struct {
 
 	onCANFrame func(*CANFrame)
 	onError    func(error)
+
+	// PassThruWriteMsgs builds its wire frame here; txMu covers the periodic
+	// senders, which write concurrently with the caller.
+	txMu  sync.Mutex
+	txBuf [8 + 32]byte
 }
 
 // Option configures the device.
 type Option func(*Device)
 
-// WithCANFrameHandler sets the CAN frame callback.
+// WithCANFrameHandler sets the CAN frame callback. Frames pushed to a handler
+// or channel are not also queued for PassThruReadMsgs.
 func WithCANFrameHandler(handler func(*CANFrame)) Option {
 	return func(d *Device) { d.onCANFrame = handler }
 }
@@ -315,6 +346,7 @@ func (d *Device) Close() error {
 func (d *Device) readLoop() {
 	defer d.wg.Done()
 	buf := make([]byte, 1024)
+	var packets []Packet // reused; payloads alias the parser's buffer
 	for d.running.Load() {
 		n, err := d.port.Read(buf)
 		if err != nil {
@@ -326,16 +358,17 @@ func (d *Device) readLoop() {
 		if n == 0 {
 			continue
 		}
-		packets, err := d.parser.Feed(buf[:n])
+		packets, err = d.parser.parse(buf[:n], packets[:0])
 		if err != nil {
 			d.handleError(err)
 		}
-		for _, pkt := range packets {
-			d.handlePacket(pkt)
+		for i := range packets {
+			d.handlePacket(&packets[i])
 		}
 	}
 }
 
+// handlePacket must not keep pkt: its payload is the parser's buffer.
 func (d *Device) handlePacket(pkt *Packet) {
 	if pkt.Direction != DirectionIn {
 		return
@@ -358,6 +391,9 @@ func (d *Device) handlePacket(pkt *Packet) {
 			case d.canRxCh <- frame:
 			default: // channel full, drop
 			}
+		}
+		if cb != nil || d.canRxCh != nil {
+			return // pushed to the consumer; queueing too would fill rxQueue for good
 		}
 		// Host-side FIFO for PassThruReadMsgs; flag overflow like the DLL does.
 		select {
@@ -392,8 +428,10 @@ func (d *Device) handlePacket(pkt *Packet) {
 	}
 	d.mu.Unlock()
 	if ok {
+		resp := *pkt
+		resp.Payload = bytes.Clone(pkt.Payload)
 		select {
-		case req.response <- pkt:
+		case req.response <- &resp:
 		default:
 		}
 	}

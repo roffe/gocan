@@ -50,6 +50,8 @@ type RCan struct {
 	handle *libusb.DeviceHandle
 
 	closeOnce sync.Once
+
+	txBuf [4 + 8]byte // Send's packet, reused; the Bus serializes Send
 }
 
 func New(cfg gocan.Config) (gocan.Adapter, error) {
@@ -139,14 +141,14 @@ func (r *RCan) Send(_ context.Context, f gocan.Frame) error {
 	if f.Extended {
 		return errors.New("rCAN: extended IDs not implemented")
 	}
-	var buf [4 + 8]byte
-	buf[0] = cmdCANFrame
-	buf[1] = byte(f.ID >> 8)
-	buf[2] = byte(f.ID)
-	buf[3] = f.Length
-	copy(buf[4:], f.Data[:f.Length])
-	_, err := r.bulkOut(buf[:4+f.Length], 10)
+	_, err := r.bulkOut(encode(r.txBuf[:0], f), 10)
 	return err
+}
+
+// encode appends the transmit packet for a standard frame to b.
+func encode(b []byte, f gocan.Frame) []byte {
+	b = append(b, cmdCANFrame, byte(f.ID>>8), byte(f.ID), f.Length)
+	return append(b, f.Data[:f.Length]...)
 }
 
 func (r *RCan) readLoop(ctx context.Context) {

@@ -65,6 +65,13 @@ type CANlib struct {
 	timeoutRead  uint32
 	timeoutWrite uint32
 	closeOnce    sync.Once
+	readDone     chan struct{} // closed when readLoop has left the driver
+
+	// Driver calls force their buffers onto the heap; these live there
+	// already, so the per-frame path doesn't allocate. tx is Send-only (the
+	// Bus serializes Send), rx is readLoop-only.
+	tx gocan.Frame
+	rx canlib.CANMessage
 }
 
 func New(channel int, cfg gocan.Config) (gocan.Adapter, error) {
@@ -92,6 +99,7 @@ func (k *CANlib) Open(ctx context.Context, bus *gocan.Bus) error {
 		return fmt.Errorf("setSpeed: %v, RH: %v WH: %v", err, err1, err2)
 	}
 
+	k.readDone = make(chan struct{})
 	go k.readLoop(ctx)
 
 	if err := k.readHandle.BusOn(); err != nil {
@@ -102,6 +110,12 @@ func (k *CANlib) Open(ctx context.Context, bus *gocan.Bus) error {
 
 func (k *CANlib) Close() error {
 	k.closeOnce.Do(func() {
+		// The Bus cancelled ctx first, so readLoop exits within one ReadWait.
+		// Closing the handles under an in-flight canReadWait left init access
+		// held and an immediate reopen failed with "Access denied".
+		if k.readDone != nil {
+			<-k.readDone
+		}
 		k.readHandle.BusOff()
 		k.writeHandle.BusOff()
 		k.readHandle.FlushReceiveQueue()
@@ -119,16 +133,29 @@ func (k *CANlib) Close() error {
 // USB round trip each: a T7 flash took ~60 s instead of ~25 s. A full driver
 // queue is drained once and the write retried.
 func (k *CANlib) Send(ctx context.Context, f gocan.Frame) error {
-	err := k.writeHandle.Write(f.ID, f.Bytes(), canlib.MSG_STD)
+	k.tx = f
+	flags := msgFlags(f)
+	err := k.writeHandle.Write(f.ID, k.tx.Bytes(), flags)
 	if errors.Is(err, canlib.ErrTxBufOfl) {
 		if err = k.writeHandle.WriteSync(txDrainTimeoutMs); err == nil {
-			err = k.writeHandle.Write(f.ID, f.Bytes(), canlib.MSG_STD)
+			err = k.writeHandle.Write(f.ID, k.tx.Bytes(), flags)
 		}
 	}
 	if err != nil {
 		return fmt.Errorf("Send: %w", err)
 	}
 	return nil
+}
+
+func msgFlags(f gocan.Frame) canlib.MsgFlag {
+	flags := canlib.MSG_STD
+	if f.Extended {
+		flags = canlib.MSG_EXT
+	}
+	if f.Remote {
+		flags |= canlib.MSG_RTR
+	}
+	return flags
 }
 
 func (k *CANlib) openChannels() (err error) {
@@ -183,8 +210,9 @@ func (k *CANlib) setSpeed(canRate float64) error {
 }
 
 func (k *CANlib) readLoop(ctx context.Context) {
+	defer close(k.readDone)
 	for ctx.Err() == nil {
-		msg, err := k.readHandle.ReadWait(k.timeoutRead)
+		err := k.readHandle.ReadWait(&k.rx, k.timeoutRead)
 		if err != nil {
 			if err == canlib.ErrNoMsg || err == canlib.ErrTimeout {
 				continue
@@ -194,14 +222,14 @@ func (k *CANlib) readLoop(ctx context.Context) {
 			}
 			continue
 		}
-		if err := k.deliver(msg); err != nil {
+		if err := k.deliver(&k.rx); err != nil {
 			k.bus.Emit(gocan.Event{Type: gocan.EventTypeError, Details: err.Error(), Err: err})
 		}
 	}
 }
 
 func (k *CANlib) deliver(msg *canlib.CANMessage) error {
-	if len(msg.Data) < int(msg.DLC) || msg.DLC > 8 {
+	if msg.DLC > 8 {
 		return errors.New("readLoop invalid data length")
 	}
 	f := gocan.Frame{

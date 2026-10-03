@@ -1,4 +1,4 @@
-//go:build ftdi
+//go:build ftdi && (windows || linux)
 
 package scantool
 
@@ -10,9 +10,10 @@ import (
 	"github.com/roffe/gocan/v2/pkg/ftdi"
 )
 
-// Registers STN adapters attached via the FTDI D2XX driver as
+// Registers STN adapters attached via FTDI's userspace driver as
 // "d2xx <model>". Opt-in with the "ftdi" build tag (needs the D2XX driver
-// on Windows / libftdi on Linux).
+// on Windows / libftdi1 on Linux, where the device's /dev/ttyUSBn is gone
+// while it is open this way).
 func init() {
 	gocan.RegisterScanner(scanD2XXDevices)
 }
@@ -34,7 +35,7 @@ func scanD2XXDevices() []gocan.AdapterInfo {
 		}
 		baseName := dev.Description
 		name := "d2xx " + baseName
-		index, serialNo := dev.Index, dev.SerialNumber
+		index, serialNo, pid := dev.Index, dev.SerialNumber, int(dev.ID&0xFFFF)
 		out = append(out, gocan.AdapterInfo{
 			Name:         name,
 			Description:  "ftdi d2xx " + baseName,
@@ -48,7 +49,7 @@ func scanD2XXDevices() []gocan.AdapterInfo {
 				st := a.(*Scantool)
 				st.name = name
 				st.openPort = func() (port, error) {
-					return openD2XX(index, serialNo)
+					return openD2XX(index, serialNo, pid)
 				}
 				return st, nil
 			},
@@ -75,8 +76,8 @@ func (d d2xxPort) SetReadTimeout(t time.Duration) error {
 func (d d2xxPort) ResetInputBuffer() error  { return d.Purge(ftdi.FT_PURGE_RX) }
 func (d d2xxPort) ResetOutputBuffer() error { return d.Purge(ftdi.FT_PURGE_TX) }
 
-func openD2XX(index uint64, serialNo string) (port, error) {
-	p, err := ftdi.Open(ftdi.DeviceInfo{Index: index, SerialNumber: serialNo}, 0x6015)
+func openD2XX(index uint64, serialNo string, pid int) (port, error) {
+	p, err := ftdi.Open(ftdi.DeviceInfo{Index: index, SerialNumber: serialNo}, pid)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open ftdi device: %w", err)
 	}

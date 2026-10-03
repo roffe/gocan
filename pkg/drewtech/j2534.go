@@ -191,7 +191,13 @@ func (d *Device) PassThruWriteMsgs(canID uint32, data []byte) error {
 	if len(data) > 8 {
 		return fmt.Errorf("invalid message: %d data bytes, CAN max is 8", len(data))
 	}
-	payload := make([]byte, 32)
+	// Built in place in d.txBuf: cmd + ToBytes would allocate three times
+	// per frame.
+	d.txMu.Lock()
+	defer d.txMu.Unlock()
+	buf := d.txBuf[:]
+	clear(buf)
+	payload := buf[8:]
 	payload[0] = SubCmdCANTx
 	payload[1] = FlagRequestFinal
 	binary.LittleEndian.PutUint16(payload[2:4], d.nextSeq())
@@ -199,7 +205,10 @@ func (d *Device) PassThruWriteMsgs(canID uint32, data []byte) error {
 	binary.LittleEndian.PutUint16(payload[16:18], uint16(4+len(data))) // id + data
 	binary.BigEndian.PutUint32(payload[20:24], canID)
 	copy(payload[24:], data)
-	return d.send(cmd(d.channel, payload))
+	hdr := Packet{Length: uint16(len(payload) + 4), Direction: DirectionOut, Channel: d.channel}
+	hdr.putHeader(buf)
+	_, err := d.port.Write(buf)
+	return err
 }
 
 // -------- 7 & 8. Periodic messages (host-side) --------

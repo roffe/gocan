@@ -102,9 +102,10 @@ var (
 // Handle is a handle to a CAN channel (circuit).
 type Handle int32
 
+// CANMessage is filled in place by Read/ReadWait (C long is 32 bits here).
 type CANMessage struct {
 	Identifier uint32
-	Data       []byte
+	Data       [64]byte
 	DLC        uint32
 	Flags      uint32
 	Timestamp  uint32
@@ -395,46 +396,22 @@ func (hnd Handle) ReadErrorCounters() (uint32, uint32, uint32, error) {
 	return tx, rx, overrun, NewError(int32(r1))
 }
 
-func (hnd Handle) Read() (*CANMessage, error) {
-	msg := &CANMessage{
-		Data: make([]byte, 64),
-	}
-	r1, _, _ := procRead.Call(uintptr(hnd), uintptr(unsafe.Pointer(&msg.Identifier)), uintptr(unsafe.Pointer(&msg.Data[0])), uintptr(unsafe.Pointer(&msg.DLC)), uintptr(unsafe.Pointer(&msg.Flags)), uintptr(unsafe.Pointer(&msg.Timestamp)))
-	if err := NewError(int32(r1)); err != nil {
-		return nil, err
-	}
-	return msg, nil
+// Read fetches the next queued frame into msg.
+//
+// Read, ReadWait and Write run per frame, so they call syscall.SyscallN
+// directly: Proc.Call heap allocates its argument slice and, being
+// //go:uintptrescapes, whatever the pointer arguments point at.
+func (hnd Handle) Read(msg *CANMessage) error {
+	r1, _, _ := syscall.SyscallN(procRead.Addr(), uintptr(hnd), uintptr(unsafe.Pointer(&msg.Identifier)), uintptr(unsafe.Pointer(&msg.Data)),
+		uintptr(unsafe.Pointer(&msg.DLC)), uintptr(unsafe.Pointer(&msg.Flags)), uintptr(unsafe.Pointer(&msg.Timestamp)))
+	return NewError(int32(r1))
 }
 
-// Reads a message from the receive buffer. If no message is available, the function waits until a message arrives or a timeout occurs.
-func (hnd Handle) ReadWait(timeout uint32) (*CANMessage, error) {
-	var (
-		identifier uint32
-		data       [64]byte
-		dlc        uint32
-		flags      uint32
-		timestamp  uint32
-	)
-
-	r1, _, _ := procReadWait.Call(
-		uintptr(hnd),
-		uintptr(unsafe.Pointer(&identifier)),
-		uintptr(unsafe.Pointer(&data[0])),
-		uintptr(unsafe.Pointer(&dlc)),
-		uintptr(unsafe.Pointer(&flags)),
-		uintptr(unsafe.Pointer(&timestamp)),
-		uintptr(timeout),
-	)
-	if err := NewError(int32(r1)); err != nil {
-		return nil, err
-	}
-	return &CANMessage{
-		Identifier: identifier,
-		Data:       data[:dlc],
-		DLC:        dlc,
-		Flags:      flags,
-		Timestamp:  timestamp,
-	}, nil
+// ReadWait is Read, waiting up to timeout ms for a frame.
+func (hnd Handle) ReadWait(msg *CANMessage, timeout uint32) error {
+	r1, _, _ := syscall.SyscallN(procReadWait.Addr(), uintptr(hnd), uintptr(unsafe.Pointer(&msg.Identifier)), uintptr(unsafe.Pointer(&msg.Data)),
+		uintptr(unsafe.Pointer(&msg.DLC)), uintptr(unsafe.Pointer(&msg.Flags)), uintptr(unsafe.Pointer(&msg.Timestamp)), uintptr(timeout))
+	return NewError(int32(r1))
 }
 
 // This function sends a CAN message.
@@ -443,13 +420,14 @@ func (hnd Handle) ReadWait(timeout uint32) (*CANMessage, error) {
 // longer panics on &data[0].
 func (hnd Handle) Write(identifier uint32, data []byte, flags MsgFlag) error {
 	if len(data) == 0 {
-		return checkErr(procWrite.Call(uintptr(hnd), uintptr(identifier), 0, 0, uintptr(flags)))
+		r1, _, _ := syscall.SyscallN(procWrite.Addr(), uintptr(hnd), uintptr(identifier), 0, 0, uintptr(flags))
+		return NewError(int32(r1))
 	}
 	cb, pooled := getCBuf(len(data))
 	copy(unsafe.Slice((*byte)(cb.ptr), len(data)), data)
-	err := checkErr(procWrite.Call(uintptr(hnd), uintptr(identifier), uintptr(cb.ptr), uintptr(len(data)), uintptr(flags)))
+	r1, _, _ := syscall.SyscallN(procWrite.Addr(), uintptr(hnd), uintptr(identifier), uintptr(cb.ptr), uintptr(len(data)), uintptr(flags))
 	putCBuf(cb, pooled)
-	return err
+	return NewError(int32(r1))
 }
 
 // Waits until all CAN messages for the specified handle are sent, or the timeout period expires.
@@ -487,25 +465,6 @@ func (hnd Handle) writeFrameNoAlloc(identifier uint32, data []byte, flags MsgFla
 	// Return or free buffer.
 	putCBuf(cb, pooled)
 
-	return err
-}
-
-// This function sends a CAN message and returns when the message has been successfully transmitted, or the timeout expires.
-func (hnd Handle) WriteWait2(identifier uint32, data []byte, flags MsgFlag, timeoutMS uint32) error {
-	return checkErr(procWriteWait.Call(uintptr(hnd), uintptr(identifier), uintptr(unsafe.Pointer(&data[0])), uintptr(len(data)), uintptr(flags), uintptr(timeoutMS)))
-}
-
-func (hnd Handle) WriteWait3(identifier uint32, data []byte, flags MsgFlag, timeoutMS uint32) error {
-	ptr, length := prepFrameBufferC(data)
-	err := checkErr(procWriteWait.Call(
-		uintptr(hnd),
-		uintptr(identifier),
-		uintptr(ptr),
-		length,
-		uintptr(flags),
-		uintptr(timeoutMS),
-	))
-	releaseFrameBufferC(ptr)
 	return err
 }
 

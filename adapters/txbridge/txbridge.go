@@ -12,6 +12,7 @@
 package txbridge
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -46,6 +47,8 @@ type Txbridge struct {
 
 	subMu sync.Mutex
 	subs  map[*commandSub]struct{}
+
+	txBuf [2 + 3 + 8 + 1]byte // Send's framed command, reused; the Bus serializes Send
 }
 
 // commandSub is one Subscribe listener: a set of command bytes and its channel.
@@ -114,7 +117,19 @@ func (tx *Txbridge) Close() error {
 // Send serializes and writes a single CAN frame; the write completing is the
 // confirmation.
 func (tx *Txbridge) Send(ctx context.Context, f gocan.Frame) error {
-	return tx.Command('t', append([]byte{uint8(f.ID >> 8), uint8(f.ID), f.Length}, f.Bytes()...))
+	return tx.Raw(encode(tx.txBuf[:0], f))
+}
+
+// encode appends f to b as the framed 't' command Command would build:
+// 't', size, payload (idHi, idLo, dlc, data), payload sum.
+func encode(b []byte, f gocan.Frame) []byte {
+	b = append(b, 't', 3+f.Length, uint8(f.ID>>8), uint8(f.ID), f.Length)
+	b = append(b, f.Data[:f.Length]...)
+	sum := uint8(f.ID>>8) + uint8(f.ID) + f.Length
+	for _, v := range f.Data[:f.Length] {
+		sum += v
+	}
+	return append(b, sum)
 }
 
 // Command frames and writes one serial command (cmd, len, data, checksum).
@@ -252,6 +267,7 @@ func (tx *Txbridge) readLoop(ctx context.Context) {
 		cmdbuffPtr      uint8
 	)
 	cmdbuff := make([]byte, 256)
+	port := tx.port // Close nils tx.port while this loop may still be reading
 	readbuf := make([]byte, 4096)
 
 	reset := func() {
@@ -263,7 +279,7 @@ func (tx *Txbridge) readLoop(ctx context.Context) {
 	}
 
 	for {
-		n, err := tx.port.Read(readbuf)
+		n, err := port.Read(readbuf)
 		if err != nil {
 			if ctx.Err() == nil && !errors.Is(err, net.ErrClosed) {
 				tx.bus.Fatal(err)
@@ -297,9 +313,7 @@ func (tx *Txbridge) readLoop(ctx context.Context) {
 					reset()
 					continue
 				}
-				data := make([]byte, commandSize)
-				copy(data, cmdbuff[:cmdbuffPtr])
-				tx.handleCommand(command, data)
+				tx.handleCommand(command, cmdbuff[:cmdbuffPtr])
 				reset()
 				continue
 			}
@@ -312,6 +326,8 @@ func (tx *Txbridge) readLoop(ctx context.Context) {
 	}
 }
 
+// handleCommand acts on one received command. data is the read loop's
+// buffer: copy whatever outlives the call.
 func (tx *Txbridge) handleCommand(command byte, data []byte) {
 	if tx.cfg.Debug {
 		tx.bus.Emit(gocan.Event{Type: gocan.EventTypeDebug, Details: fmt.Sprintf("rx<< %q % X", command, data)})
@@ -343,10 +359,10 @@ func (tx *Txbridge) handleCommand(command byte, data []byte) {
 		default:
 			tx.bus.Emit(gocan.Event{Type: gocan.EventTypeError, Details: fmt.Sprintf("Unknown: %X", data)})
 		}
-		tx.dispatch(&serialcommand.SerialCommand{Command: command, Data: data})
+		tx.dispatch(&serialcommand.SerialCommand{Command: command, Data: bytes.Clone(data)})
 	default:
 		// dongle host-side commands ('r', 'R', 'w', 'W', 'G', ...)
-		tx.dispatch(&serialcommand.SerialCommand{Command: command, Data: data})
+		tx.dispatch(&serialcommand.SerialCommand{Command: command, Data: bytes.Clone(data)})
 	}
 }
 

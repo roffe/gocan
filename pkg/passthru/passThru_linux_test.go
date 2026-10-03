@@ -120,6 +120,34 @@ func TestFakeLibrary(t *testing.T) {
 	}
 }
 
+// TestHotPathAllocs guards the per-frame calls: the only allocation left is
+// purego.SyscallN's variadic argument slice, one per call (RegisterFunc'd
+// funcs cost five).
+func TestHotPathAllocs(t *testing.T) {
+	pt, err := New(buildFakeLib(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pt.Close()
+	rx, num := new(PassThruMsg), new(uint32)
+	tx := &PassThruMsg{ProtocolID: CAN, TxFlags: CAN_29BIT_ID, DataSize: 5, ExtraDataIndex: 5}
+	binary.BigEndian.PutUint32(tx.Data[:], 0x258)
+	tx.Data[4] = 0x42
+	n := testing.AllocsPerRun(100, func() {
+		*num = 1
+		if err := pt.PassThruReadMsgs(9, rx, num, 0); err != nil && !errors.Is(err, ErrBufferEmpty) {
+			t.Fatal(err)
+		}
+		*num = 1
+		if err := pt.PassThruWriteMsgs(9, tx, num, 25); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if n > 2 {
+		t.Errorf("ReadMsgs+WriteMsgs allocate %v times, want <= 2", n)
+	}
+}
+
 func TestFindDLLs(t *testing.T) {
 	lib := buildFakeLib(t)
 	home := t.TempDir()

@@ -43,6 +43,8 @@ const (
 	bell = 0x07 // error reply
 )
 
+var cmdStatus = []byte{'F', cr} // polled every second; shared so it isn't reallocated
+
 // Transmit flow control: how many commands may be outstanding before Send
 // blocks for the device's z/Z ack.
 //
@@ -98,6 +100,7 @@ type CANUSB struct {
 	sendSem chan struct{} // outstanding-command credits, released by the z/Z/F/BELL reply
 	writeMu sync.Mutex    // serializes port writes (Send vs status poll vs SetFilter)
 	line    []byte        // reply parser accumulator
+	txBuf   [27]byte      // longest transmit command (T + 8 id + dlc + 16 data + CR); Send-only, which the Bus serializes
 }
 
 func New(cfg gocan.Config) (gocan.Adapter, error) {
@@ -210,7 +213,7 @@ func (cu *CANUSB) Send(ctx context.Context, f gocan.Frame) error {
 	case <-cu.bus.Done():
 		return gocan.ErrClosed
 	}
-	return cu.write(encode(f))
+	return cu.write(encode(cu.txBuf[:0], f))
 }
 
 // SetFilter reconfigures the SJA1000 acceptance filter at runtime. The
@@ -254,7 +257,7 @@ func (cu *CANUSB) statusPoll(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			}
-			if cu.write([]byte{'F', cr}) != nil {
+			if cu.write(cmdStatus) != nil {
 				return
 			}
 		}
@@ -372,18 +375,18 @@ func (cu *CANUSB) deliverFrame(line []byte, extended bool) {
 	cu.bus.Deliver(f)
 }
 
-// encode builds the ASCII transmit command for a CAN frame.
-func encode(f gocan.Frame) []byte {
-	var b []byte
+// encode appends the ASCII transmit command for a CAN frame to b.
+func encode(b []byte, f gocan.Frame) []byte {
+	cmd, id, digits := byte('t'), f.ID&0x7FF, 3
 	if f.Extended {
-		b = append(b, 'T')
-		b = append(b, fmt.Sprintf("%08X", f.ID&0x1FFFFFFF)...)
-	} else {
-		b = append(b, 't')
-		b = append(b, fmt.Sprintf("%03X", f.ID&0x7FF)...)
+		cmd, id, digits = 'T', f.ID&0x1FFFFFFF, 8
+	}
+	b = append(b, cmd)
+	for i := digits - 1; i >= 0; i-- {
+		b = append(b, "0123456789ABCDEF"[id>>(4*i)&0xF])
 	}
 	b = append(b, '0'+f.Length)
-	b = append(b, hex.EncodeToString(f.Data[:f.Length])...)
+	b = hex.AppendEncode(b, f.Data[:f.Length])
 	return append(b, cr)
 }
 

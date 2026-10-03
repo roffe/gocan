@@ -65,6 +65,7 @@ type CANlib struct {
 	timeoutRead  uint32
 	timeoutWrite uint32
 	closeOnce    sync.Once
+	readDone     chan struct{} // closed once readLoop has unregistered the callback
 }
 
 func New(channel int, cfg gocan.Config) (gocan.Adapter, error) {
@@ -89,6 +90,7 @@ func (k *CANlib) Open(ctx context.Context, bus *gocan.Bus) error {
 		return fmt.Errorf("setSpeed: %v, RH: %v WH: %v", err, err1, err2)
 	}
 
+	k.readDone = make(chan struct{})
 	go k.readLoop(ctx)
 
 	if err := k.readHandle.BusOn(); err != nil {
@@ -99,6 +101,9 @@ func (k *CANlib) Open(ctx context.Context, bus *gocan.Bus) error {
 
 func (k *CANlib) Close() error {
 	k.closeOnce.Do(func() {
+		if k.readDone != nil {
+			<-k.readDone // the Bus cancelled ctx first, so readLoop is unwinding
+		}
 		k.readHandle.BusOff()
 		k.writeHandle.BusOff()
 		k.readHandle.FlushReceiveQueue()
@@ -116,16 +121,28 @@ func (k *CANlib) Close() error {
 // USB round trip each: a T7 flash took ~60 s instead of ~25 s. A full driver
 // queue is drained once and the write retried.
 func (k *CANlib) Send(ctx context.Context, f gocan.Frame) error {
-	err := k.writeHandle.Write(f.ID, f.Bytes(), canlib.MSG_STD)
+	flags := msgFlags(f)
+	err := k.writeHandle.Write(f.ID, f.Bytes(), flags)
 	if errors.Is(err, canlib.ErrTxBufOfl) {
 		if err = k.writeHandle.WriteSync(txDrainTimeoutMs); err == nil {
-			err = k.writeHandle.Write(f.ID, f.Bytes(), canlib.MSG_STD)
+			err = k.writeHandle.Write(f.ID, f.Bytes(), flags)
 		}
 	}
 	if err != nil {
 		return fmt.Errorf("Send: %w", err)
 	}
 	return nil
+}
+
+func msgFlags(f gocan.Frame) canlib.MsgFlag {
+	flags := canlib.MSG_STD
+	if f.Extended {
+		flags = canlib.MSG_EXT
+	}
+	if f.Remote {
+		flags |= canlib.MSG_RTR
+	}
+	return flags
 }
 
 func (k *CANlib) openChannels() (err error) {
@@ -180,6 +197,7 @@ func (k *CANlib) setSpeed(canRate float64) error {
 // readLoop installs the RX notification callback and parks until shutdown;
 // deliveries happen on the driver's callback thread.
 func (k *CANlib) readLoop(ctx context.Context) {
+	defer close(k.readDone)
 	if err := k.readHandle.SetNotifyCallback(k.handleCallback, canlib.NOTIFY_RX); err != nil {
 		k.bus.Emit(gocan.Event{Type: gocan.EventTypeError, Details: fmt.Sprintf("set callback error: %v", err), Err: err})
 	}
@@ -188,8 +206,9 @@ func (k *CANlib) readLoop(ctx context.Context) {
 }
 
 func (k *CANlib) handleCallback(hhnd int32, cbctx uintptr, event canlib.NotifyFlag) uintptr {
+	var msg canlib.CANMessage // stays on the stack: Read calls SyscallN, not Proc.Call
 	for {
-		msg, err := k.readHandle.Read()
+		err := k.readHandle.Read(&msg)
 		if err != nil {
 			if err == canlib.ErrNoMsg {
 				break
@@ -197,7 +216,7 @@ func (k *CANlib) handleCallback(hhnd int32, cbctx uintptr, event canlib.NotifyFl
 			k.bus.Emit(gocan.Event{Type: gocan.EventTypeError, Details: fmt.Sprintf("recv error: %v", err), Err: err})
 			return 0
 		}
-		if err := k.deliver(msg); err != nil {
+		if err := k.deliver(&msg); err != nil {
 			k.bus.Emit(gocan.Event{Type: gocan.EventTypeError, Details: err.Error(), Err: err})
 		}
 	}
@@ -205,7 +224,7 @@ func (k *CANlib) handleCallback(hhnd int32, cbctx uintptr, event canlib.NotifyFl
 }
 
 func (k *CANlib) deliver(msg *canlib.CANMessage) error {
-	if len(msg.Data) < int(msg.DLC) || msg.DLC > 8 {
+	if msg.DLC > 8 {
 		return errors.New("readLoop invalid data length")
 	}
 	f := gocan.Frame{

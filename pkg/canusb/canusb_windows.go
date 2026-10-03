@@ -164,11 +164,16 @@ func (ch *CANHANDLE) ReadFirst(id uint32, flags MessageFlag) (msg *CANMsg, err e
 }
 
 // Write message to channel
+//
+// Write and Flush run per frame, so they call syscall.SyscallN directly:
+// Proc.Call heap allocates its argument slice and, being
+// //go:uintptrescapes, the message.
 func (ch *CANHANDLE) Write(msg *CANMsg) error {
 	if msg.Len > 8 {
 		return ErrMessageDataToLarge
 	}
-	return checkErr(procWrite.Call(uintptr(ch.h), uintptr(unsafe.Pointer(msg))))
+	r1, _, _ := syscall.SyscallN(procWrite.Addr(), uintptr(ch.h), uintptr(unsafe.Pointer(msg)))
+	return NewError(int32(r1))
 }
 
 // Write message to channel with handle h.
@@ -233,7 +238,8 @@ func (ch *CANHANDLE) VersionInfo() (string, error) {
 //
 // If flushflags is set to FLUSH_DONTWAIT the queue is just emptied and there will be no wait for any frames in it to be sent
 func (ch *CANHANDLE) Flush(flags FlushFlag) error {
-	return checkErr(procFlush.Call(uintptr(ch.h), uintptr(flags)))
+	r1, _, _ := syscall.SyscallN(procFlush.Addr(), uintptr(ch.h), uintptr(flags))
+	return NewError(int32(r1))
 }
 
 // Get statistics for channel
@@ -250,12 +256,14 @@ func (ch *CANHANDLE) SetTimeouts(receiveTimeout, sendTimeout uint32) error {
 
 // Set a receive callback function. Set the callback to nil to reset it.
 //
-// The callback will be called in a separate goroutine using a buffered channel to prevent blocking the device.
+// fn is called on the DLL's receive thread with the DLL's own message
+// buffer, so a frame costs no allocation: msg is only valid until fn
+// returns, copy what you keep.
 func (ch *CANHANDLE) SetReceiveCallback(fn CallbackFunc) error {
 	if fn == nil {
 		return checkErr(procSetReceiveCallBack.Call(uintptr(ch.h), 0))
 	}
-	return checkErr(procSetReceiveCallBack.Call(uintptr(ch.h), syscall.NewCallback(createWrapper(fn))))
+	return checkErr(procSetReceiveCallBack.Call(uintptr(ch.h), syscall.NewCallback(fn)))
 }
 
 // Set a receive callback function. Set the callback to nil to reset it.
@@ -266,19 +274,6 @@ func (ch *CANHANDLE) SetAsyncReceiveCallback(fn CallbackFunc) error {
 		return checkErr(procSetReceiveCallBack.Call(uintptr(ch.h), 0))
 	}
 	return checkErr(procSetReceiveCallBack.Call(uintptr(ch.h), syscall.NewCallback(createAsyncWrapper(fn))))
-}
-
-func createWrapper(fn CallbackFunc) func(cbmsg *CANMsg) uintptr {
-	return func(canMsg *CANMsg) uintptr {
-		msg := &CANMsg{
-			ID:        canMsg.ID,
-			Timestamp: canMsg.Timestamp,
-			Flags:     canMsg.Flags,
-			Len:       canMsg.Len,
-		}
-		copy(msg.Data[:], canMsg.Data[:])
-		return fn(msg)
-	}
 }
 
 func createAsyncWrapper(fn CallbackFunc) func(cbmsg *CANMsg) uintptr {

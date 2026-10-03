@@ -274,3 +274,44 @@ func TestCANUSBAcceptanceFilters(t *testing.T) {
 		t.Fatalf("fallback: got %s %s", code, mask)
 	}
 }
+
+func BenchmarkCANUSBEncode(b *testing.B) {
+	std := gocan.NewFrame(0x240, []byte{0x3F, 0x81, 1, 2, 3, 4, 5, 6})
+	ext := gocan.NewExtendedFrame(0x18DAF110, []byte{1, 2, 3})
+	var buf [27]byte
+	b.ReportAllocs()
+	for b.Loop() {
+		encode(buf[:0], std)
+		encode(buf[:0], ext)
+	}
+}
+
+func BenchmarkCANUSBParse(b *testing.B) {
+	bus := openCANUSB(&testing.T{}, newFakePort(false))
+	cu := &CANUSB{bus: bus} // private parser state, untouched by the bus's read loop
+	data := []byte("t25883F81112233445566\rT18DAF1103010203\rz\r")
+	b.ReportAllocs()
+	for b.Loop() {
+		cu.parse(data)
+	}
+}
+
+func TestCANUSBEncode(t *testing.T) {
+	var buf [27]byte
+	for _, tt := range []struct {
+		f    gocan.Frame
+		want string
+	}{
+		{gocan.NewFrame(0x7, nil), "t0070\r"},
+		{gocan.NewFrame(0xFFFF, []byte{0xAB}), "t7FF1ab\r"}, // masked to 11 bits
+		{gocan.NewExtendedFrame(0xFFFFFFFF, []byte{1, 2, 3, 4, 5, 6, 7, 8}), "T1FFFFFFF80102030405060708\r"},
+	} {
+		if got := string(encode(buf[:0], tt.f)); got != tt.want {
+			t.Errorf("encode(%s) = %q, want %q", tt.f, got, tt.want)
+		}
+	}
+	f := gocan.NewExtendedFrame(0x18DAF110, []byte{1, 2, 3, 4, 5, 6, 7, 8})
+	if n := testing.AllocsPerRun(100, func() { encode(buf[:0], f) }); n != 0 {
+		t.Fatalf("encode allocates %v times per frame, want 0", n)
+	}
+}

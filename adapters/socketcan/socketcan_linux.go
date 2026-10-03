@@ -2,14 +2,14 @@ package socketcan
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"net"
+	"os"
 	"strings"
 
 	"github.com/roffe/gocan/v2"
-	"go.einride.tech/can"
 	"go.einride.tech/can/pkg/candevice"
-	"go.einride.tech/can/pkg/socketcan"
 	"golang.org/x/sys/unix"
 )
 
@@ -37,11 +37,9 @@ type SocketCAN struct {
 	cfg       gocan.Config
 	bus       *gocan.Bus
 	dev       *candevice.Device
-	virtual   bool
 	broughtUp bool // we took the interface up, so we take it down again
-	conn      net.Conn
-	tx        *socketcan.Transmitter
-	rx        *socketcan.Receiver
+	f         *os.File
+	deadline  bool // f has a write deadline; Send is serialized by the Bus
 }
 
 func New(cfg gocan.Config) (gocan.Adapter, error) {
@@ -57,28 +55,44 @@ func (a *SocketCAN) Open(ctx context.Context, bus *gocan.Bus) error {
 	}
 	// vcan interfaces have no bittiming and are shared between processes;
 	// leave their device state alone.
-	a.virtual = strings.HasPrefix(a.cfg.Port, "vcan")
-	if !a.virtual {
+	if !strings.HasPrefix(a.cfg.Port, "vcan") {
 		if err := a.bringUp(); err != nil {
 			return err
 		}
 	}
-
-	filters := make([]socketcan.IDFilter, len(a.cfg.CANFilter))
-	for i, filter := range a.cfg.CANFilter {
-		filters[i].ID = filter
-		filters[i].Mask = unix.CAN_SFF_MASK
+	if a.f, err = a.dial(); err != nil {
+		return fmt.Errorf("socketcan %s: %w", a.cfg.Port, err)
 	}
-
-	a.conn, err = socketcan.DialContext(ctx, "can", a.cfg.Port, socketcan.WithFilterReceivedFramesByID(filters))
-	if err != nil {
-		return err
-	}
-	a.tx = socketcan.NewTransmitter(a.conn)
-	a.rx = socketcan.NewReceiver(a.conn)
-
 	go a.readLoop(ctx)
 	return nil
+}
+
+// dial opens a non-blocking CAN_RAW socket bound to the interface. As an
+// os.File it sits on the runtime poller, so Close unblocks the read loop.
+func (a *SocketCAN) dial() (*os.File, error) {
+	ifi, err := net.InterfaceByName(a.cfg.Port)
+	if err != nil {
+		return nil, err
+	}
+	fd, err := unix.Socket(unix.AF_CAN, unix.SOCK_RAW|unix.SOCK_NONBLOCK|unix.SOCK_CLOEXEC, unix.CAN_RAW)
+	if err != nil {
+		return nil, err
+	}
+	if len(a.cfg.CANFilter) > 0 {
+		filters := make([]unix.CanFilter, len(a.cfg.CANFilter))
+		for i, id := range a.cfg.CANFilter {
+			filters[i] = unix.CanFilter{Id: id, Mask: unix.CAN_SFF_MASK}
+		}
+		err = unix.SetsockoptCanRawFilter(fd, unix.SOL_CAN_RAW, unix.CAN_RAW_FILTER, filters)
+	}
+	if err == nil {
+		err = unix.Bind(fd, &unix.SockaddrCAN{Ifindex: ifi.Index})
+	}
+	if err != nil {
+		unix.Close(fd)
+		return nil, err
+	}
+	return os.NewFile(uintptr(fd), a.cfg.Port), nil
 }
 
 // bringUp configures the interface only if it is down. An interface that is
@@ -114,8 +128,8 @@ func (a *SocketCAN) configErr(err error) error {
 }
 
 func (a *SocketCAN) Close() error {
-	if a.conn != nil {
-		a.conn.Close() // unblocks the read loop
+	if a.f != nil {
+		a.f.Close() // unblocks the read loop
 	}
 	if a.dev != nil && a.broughtUp {
 		return a.dev.SetDown()
@@ -123,34 +137,67 @@ func (a *SocketCAN) Close() error {
 	return nil
 }
 
-// Send transmits one frame; TransmitFrame blocks until the kernel accepts it.
+// struct can_frame: canid_t (host order) | len | pad, res0, len8_dlc | data[8]
+const frameSize = 16
+
+// Send transmits one frame; the write blocks until the kernel accepts it.
 func (a *SocketCAN) Send(ctx context.Context, f gocan.Frame) error {
-	frame := can.Frame{
-		ID:         f.ID,
-		Length:     f.Length,
-		IsExtended: f.Extended || a.cfg.UseExtendedID,
+	// Set a deadline when ctx has one, clear a previous one when it does not:
+	// an expired deadline left on the fd fails every later write.
+	if d, ok := ctx.Deadline(); ok || a.deadline {
+		if err := a.f.SetWriteDeadline(d); err != nil {
+			return fmt.Errorf("send error: %w", err)
+		}
+		a.deadline = ok
 	}
-	copy(frame.Data[:], f.Data[:f.Length])
-	if err := a.tx.TransmitFrame(ctx, frame); err != nil {
+	var buf [frameSize]byte // stays on the stack: os.File.Write does not retain it
+	id := f.ID
+	if f.Extended || a.cfg.UseExtendedID {
+		id = id&unix.CAN_EFF_MASK | unix.CAN_EFF_FLAG
+	} else {
+		id &= unix.CAN_SFF_MASK
+	}
+	if f.Remote {
+		id |= unix.CAN_RTR_FLAG
+	}
+	binary.NativeEndian.PutUint32(buf[:], id)
+	buf[4] = min(f.Length, 8)
+	copy(buf[8:], f.Data[:buf[4]])
+	if _, err := a.f.Write(buf[:]); err != nil {
 		return fmt.Errorf("send error: %w", err)
 	}
 	return nil
 }
 
 func (a *SocketCAN) readLoop(ctx context.Context) {
-	for a.rx.Receive() {
+	var buf [frameSize]byte
+	for {
+		n, err := a.f.Read(buf[:])
+		if err != nil {
+			if ctx.Err() == nil {
+				a.bus.Fatal(fmt.Errorf("socketcan receive: %w", err))
+			}
+			return
+		}
 		if ctx.Err() != nil {
 			return
 		}
-		f := a.rx.Frame()
-		frame := gocan.Frame{ID: f.ID, Length: f.Length, Extended: f.IsExtended, Remote: f.IsRemote}
-		copy(frame.Data[:], f.Data[:f.Length])
-		a.bus.Deliver(frame)
-	}
-	if ctx.Err() == nil {
-		if err := a.rx.Err(); err != nil {
-			a.bus.Fatal(fmt.Errorf("socketcan receive: %w", err))
+		id := binary.NativeEndian.Uint32(buf[:])
+		if n != frameSize || id&unix.CAN_ERR_FLAG != 0 {
+			continue
 		}
+		frame := gocan.Frame{
+			Extended: id&unix.CAN_EFF_FLAG != 0,
+			Remote:   id&unix.CAN_RTR_FLAG != 0,
+			Length:   min(buf[4], 8),
+		}
+		if frame.Extended {
+			frame.ID = id & unix.CAN_EFF_MASK
+		} else {
+			frame.ID = id & unix.CAN_SFF_MASK
+		}
+		copy(frame.Data[:], buf[8:8+frame.Length])
+		a.bus.Deliver(frame)
 	}
 }
 

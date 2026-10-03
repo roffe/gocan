@@ -150,7 +150,7 @@ func (p *stnPort) writes() []string {
 	return append([]string{}, p.wrote...)
 }
 
-func openScantool(t *testing.T, fp *stnPort) *gocan.Bus {
+func openScantool(t testing.TB, fp *stnPort) *gocan.Bus {
 	t.Helper()
 	a, err := New(OBDLinkSX, gocan.Config{CANRate: 500})
 	if err != nil {
@@ -209,5 +209,67 @@ func TestOpenFastPathAtTarget(t *testing.T) {
 	}
 	if fp.devBaud != 2_000_000 {
 		t.Fatalf("device baud after open: %d", fp.devBaud)
+	}
+}
+
+// replyPort answers every write with one canned reply, allocation-free.
+type replyPort struct {
+	reply, last []byte
+	pos         int
+}
+
+func (p *replyPort) Write(b []byte) (int, error) {
+	p.last, p.pos = append(p.last[:0], b...), 0
+	return len(b), nil
+}
+func (p *replyPort) Read(b []byte) (int, error) {
+	n := copy(b, p.reply[p.pos:])
+	p.pos += n
+	return n, nil
+}
+func (p *replyPort) Close() error                       { return nil }
+func (p *replyPort) SetBaud(int) error                  { return nil }
+func (p *replyPort) SetReadTimeout(time.Duration) error { return nil }
+func (p *replyPort) ResetInputBuffer() error            { return nil }
+func (p *replyPort) ResetOutputBuffer() error           { return nil }
+
+// Send is the per-frame hot path: it must build the STPX command, decode
+// the reply lines and deliver them without allocating.
+func TestSendNoAlloc(t *testing.T) {
+	bus := openScantool(t, &stnPort{devBaud: 2_000_000})
+	fp := &replyPort{reply: []byte("7E8" + "0641A000" + "00000000" + "\r7E8\r\r>")}
+	st := bus.Adapter().(*Scantool)
+	st.port = fp
+	frames := bus.SubscribeN(context.Background(), 256) // room for every run: a drop would allocate a warning
+	f := gocan.NewFrame(0x7E0, []byte{0x02, 0x10, 0x81})
+	ctx := gocan.WithResponseTimeout(gocan.WithExpectedResponses(context.Background(), 2), time.Second)
+
+	if err := st.Send(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(fp.last); got != "STPXh:7e0,d:021081,t:1000,r:2\r" {
+		t.Fatalf("command %q", got)
+	}
+	for _, want := range []gocan.Frame{
+		{ID: 0x7E8, Length: 8, Data: [8]byte{0x06, 0x41, 0xA0}},
+		{ID: 0x7E8},
+	} {
+		if got := <-frames; got != want {
+			t.Fatalf("frame %v, want %v", got, want)
+		}
+	}
+	if n := testing.AllocsPerRun(100, func() { st.Send(ctx, f) }); n != 0 {
+		t.Fatalf("Send allocates %v times per call", n)
+	}
+}
+
+func BenchmarkScantoolSend(b *testing.B) {
+	st := openScantool(b, &stnPort{devBaud: 2_000_000}).Adapter().(*Scantool)
+	st.port = &replyPort{reply: []byte("7E8" + "0641A000" + "00000000" + "\r7E8\r\r>")}
+	f := gocan.NewFrame(0x7E0, []byte{0x02, 0x10, 0x81})
+	ctx := gocan.WithResponseTimeout(gocan.WithExpectedResponses(context.Background(), 2), time.Second)
+	b.ReportAllocs()
+	for b.Loop() {
+		st.Send(ctx, f)
 	}
 }

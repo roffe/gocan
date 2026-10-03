@@ -31,10 +31,11 @@ func init() {
 }
 
 type YACA struct {
-	cfg  gocan.Config
-	bus  *gocan.Bus
-	port serial.Port
-	line []byte
+	cfg   gocan.Config
+	bus   *gocan.Bus
+	port  serial.Port
+	line  []byte
+	txBuf [22]byte // longest transmit command (t + 3 id + dlc + 16 data + CR); Send-only, which the Bus serializes
 }
 
 func New(cfg gocan.Config) (gocan.Adapter, error) {
@@ -91,14 +92,24 @@ func (ya *YACA) Close() error {
 }
 
 func (ya *YACA) Send(ctx context.Context, f gocan.Frame) error {
-	out := fmt.Sprintf("t%03x%d%s\x0D", f.ID&0xFFF, f.Length, hex.EncodeToString(f.Bytes()))
-	if _, err := ya.port.Write([]byte(out)); err != nil {
+	out := encode(ya.txBuf[:0], f)
+	if _, err := ya.port.Write(out); err != nil {
 		return fmt.Errorf("failed to write to com port: %s, %w", out, err)
 	}
 	if ya.cfg.Debug {
-		ya.bus.Emit(gocan.Event{Type: gocan.EventTypeDebug, Details: ">> " + out})
+		ya.bus.Emit(gocan.Event{Type: gocan.EventTypeDebug, Details: ">> " + string(out)})
 	}
 	return nil
+}
+
+// encode appends the transmit command for f to b: lower-case hex, the id
+// masked to 12 bits (the adapter has no extended frames).
+func encode(b []byte, f gocan.Frame) []byte {
+	const digits = "0123456789abcdef"
+	id := f.ID & 0xFFF
+	b = append(b, 't', digits[id>>8], digits[id>>4&0xF], digits[id&0xF], '0'+f.Length)
+	b = hex.AppendEncode(b, f.Data[:f.Length])
+	return append(b, '\r')
 }
 
 // SetFilter reprograms the acceptance filter; the channel must be closed

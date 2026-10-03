@@ -11,7 +11,13 @@ import (
 // libcanlib is loaded through purego, so no cgo or Kvaser headers are
 // needed at build time. C long / unsigned long map to Go int / uint, which
 // match their width on every Linux ABI Go supports.
+//
+// The per-frame calls are raw symbol addresses called through SyscallN:
+// a RegisterFunc'd func goes through reflect on every call, which costs
+// allocations per frame. The rest stay typed for readability.
 var (
+	procRead, procReadWait, procWrite, procWriteSync uintptr
+
 	InitErr  error
 	initOnce sync.Once
 
@@ -36,10 +42,6 @@ var (
 	canSetBusParamsC200    func(h Handle, btr0, btr1 uint8) int32
 	canSetBusOutputControl func(h Handle, drivertype uint32) int32
 	canReadErrorCounters   func(h Handle, tx, rx, overrun *uint32) int32
-	canRead                func(h Handle, id *int, msg unsafe.Pointer, dlc, flags *uint32, ts *uint) int32
-	canReadWait            func(h Handle, id *int, msg unsafe.Pointer, dlc, flags *uint32, ts *uint, timeout uint) int32
-	canWrite               func(h Handle, id int, msg unsafe.Pointer, dlc, flags uint32) int32
-	canWriteSync           func(h Handle, timeout uint) int32
 	canWriteWait           func(h Handle, id int, msg unsafe.Pointer, dlc, flags uint32, timeout uint) int32
 )
 
@@ -75,10 +77,10 @@ func Init() error {
 			{"canSetBusParamsC200", &canSetBusParamsC200},
 			{"canSetBusOutputControl", &canSetBusOutputControl},
 			{"canReadErrorCounters", &canReadErrorCounters},
-			{"canRead", &canRead},
-			{"canReadWait", &canReadWait},
-			{"canWrite", &canWrite},
-			{"canWriteSync", &canWriteSync},
+			{"canRead", &procRead},
+			{"canReadWait", &procReadWait},
+			{"canWrite", &procWrite},
+			{"canWriteSync", &procWriteSync},
 			{"canWriteWait", &canWriteWait},
 		} {
 			sym, err := purego.Dlsym(lib, s.name)
@@ -87,7 +89,11 @@ func Init() error {
 				purego.Dlclose(lib)
 				return
 			}
-			purego.RegisterFunc(s.fptr, sym)
+			if p, ok := s.fptr.(*uintptr); ok {
+				*p = sym
+			} else {
+				purego.RegisterFunc(s.fptr, sym)
+			}
 		}
 		canInitializeLibrary()
 	})
@@ -97,12 +103,14 @@ func Init() error {
 // Handle is a handle to a CAN channel (circuit).
 type Handle int32
 
+// CANMessage is filled in place by Read/ReadWait; Identifier and Timestamp
+// have the width of the C longs the driver writes into them.
 type CANMessage struct {
-	Identifier uint32
-	Data       []byte
+	Identifier int
+	Timestamp  uint
 	DLC        uint32
 	Flags      uint32
-	Timestamp  uint32
+	Data       [64]byte
 }
 
 func InitializeLibrary() error {
@@ -340,48 +348,31 @@ func (h Handle) ReadErrorCounters() (uint32, uint32, uint32, error) {
 	return tx, rx, overrun, NewError(r)
 }
 
-func (h Handle) Read() (*CANMessage, error) {
-	var (
-		id         int
-		dlc, flags uint32
-		ts         uint
-		data       [64]byte
-	)
-	if err := NewError(canRead(h, &id, unsafe.Pointer(&data[0]), &dlc, &flags, &ts)); err != nil {
-		return nil, err
-	}
-	return newMessage(id, data[:], dlc, flags, ts), nil
+// Read fetches the next queued frame into msg. msg must outlive the call
+// on the heap (e.g. a struct field) or every call allocates it there.
+func (h Handle) Read(msg *CANMessage) error {
+	r, _, _ := purego.SyscallN(procRead, uintptr(h), uintptr(unsafe.Pointer(&msg.Identifier)), uintptr(unsafe.Pointer(&msg.Data)),
+		uintptr(unsafe.Pointer(&msg.DLC)), uintptr(unsafe.Pointer(&msg.Flags)), uintptr(unsafe.Pointer(&msg.Timestamp)))
+	return NewError(int32(r))
 }
 
-func (h Handle) ReadWait(timeout uint32) (*CANMessage, error) {
-	var (
-		id         int
-		dlc, flags uint32
-		ts         uint
-		data       [64]byte
-	)
-	if err := NewError(canReadWait(h, &id, unsafe.Pointer(&data[0]), &dlc, &flags, &ts, uint(timeout))); err != nil {
-		return nil, err
-	}
-	return newMessage(id, data[:], dlc, flags, ts), nil
+// ReadWait is Read, waiting up to timeout ms for a frame.
+func (h Handle) ReadWait(msg *CANMessage, timeout uint32) error {
+	r, _, _ := purego.SyscallN(procReadWait, uintptr(h), uintptr(unsafe.Pointer(&msg.Identifier)), uintptr(unsafe.Pointer(&msg.Data)),
+		uintptr(unsafe.Pointer(&msg.DLC)), uintptr(unsafe.Pointer(&msg.Flags)), uintptr(unsafe.Pointer(&msg.Timestamp)), uintptr(timeout))
+	return NewError(int32(r))
 }
 
-func newMessage(id int, data []byte, dlc, flags uint32, ts uint) *CANMessage {
-	return &CANMessage{
-		Identifier: uint32(id),
-		Data:       append([]byte(nil), data[:min(dlc, uint32(len(data)))]...),
-		DLC:        dlc,
-		Flags:      flags,
-		Timestamp:  uint32(ts),
-	}
-}
-
+// Write queues a frame. data escapes to the heap, so pass a buffer that
+// already lives there to keep the call allocation free.
 func (h Handle) Write(identifier uint32, data []byte, flags MsgFlag) error {
-	return NewError(canWrite(h, int(identifier), dataPtr(data), uint32(len(data)), uint32(flags)))
+	r, _, _ := purego.SyscallN(procWrite, uintptr(h), uintptr(identifier), uintptr(dataPtr(data)), uintptr(len(data)), uintptr(flags))
+	return NewError(int32(r))
 }
 
 func (h Handle) WriteSync(timeoutMS uint32) error {
-	return NewError(canWriteSync(h, uint(timeoutMS)))
+	r, _, _ := purego.SyscallN(procWriteSync, uintptr(h), uintptr(timeoutMS))
+	return NewError(int32(r))
 }
 
 func (h Handle) WriteWait(identifier uint32, data []byte, flags MsgFlag, timeoutMS uint32) error {

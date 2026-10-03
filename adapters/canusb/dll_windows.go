@@ -128,7 +128,7 @@ func (d *DLL) Close() error {
 // Send writes one frame and flushes with FLUSH_WAIT, which blocks until the
 // transmit queue drains — the closest the DLL offers to an on-the-wire ack.
 func (d *DLL) Send(ctx context.Context, f gocan.Frame) error {
-	msg := &dll.CANMsg{ID: f.ID, Len: f.Length}
+	msg := dll.CANMsg{ID: f.ID, Len: f.Length} // stack: Write uses SyscallN
 	if f.Extended {
 		msg.Flags |= dll.CANMSG_EXTENDED
 	}
@@ -139,7 +139,7 @@ func (d *DLL) Send(ctx context.Context, f gocan.Frame) error {
 	if d.cfg.Debug {
 		d.debug(">> " + f.String())
 	}
-	if err := d.h.Write(msg); err != nil {
+	if err := d.h.Write(&msg); err != nil {
 		return fmt.Errorf("write failed: %w", err)
 	}
 	if err := d.h.Flush(dll.FLUSH_WAIT); err != nil {
@@ -148,7 +148,8 @@ func (d *DLL) Send(ctx context.Context, f gocan.Frame) error {
 	return nil
 }
 
-// deliver is the DLL receive callback.
+// deliver is the DLL receive callback; msg is the DLL's buffer, only valid
+// until we return.
 func (d *DLL) deliver(msg *dll.CANMsg) uintptr {
 	if msg.Len > 8 {
 		// Len > 8 means the callback struct layout is off, not a long frame.

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"testing"
+
+	"go.bug.st/serial"
 )
 
 // TestParseCANFrame checks the documented RX offsets: dataLen(LE)@[18:20],
@@ -158,5 +160,74 @@ func TestWriteMsgsRejectsOversized(t *testing.T) {
 func TestExtractVersionsShortInput(t *testing.T) {
 	if fi := ExtractVersions(make([]byte, 10)); fi != (FirmwareInfo{}) {
 		t.Fatalf("want zero value for short input, got %+v", fi)
+	}
+}
+
+// lastWrite records the most recent write; the embedded nil Port panics on
+// anything else.
+type lastWrite struct {
+	serial.Port
+	b []byte
+}
+
+func (w *lastWrite) Write(p []byte) (int, error) {
+	w.b = append(w.b[:0], p...)
+	return len(p), nil
+}
+
+// TestWriteMsgsInPlace checks the frame built in the reused buffer is the
+// one cmd+ToBytes produced, and that sending it allocates nothing.
+func TestWriteMsgsInPlace(t *testing.T) {
+	w := &lastWrite{}
+	d := New()
+	d.port = w
+	data := []byte{0x40, 0xA1, 0x02, 0x1A, 0x90}
+	if err := d.PassThruWriteMsgs(0x7E0, data); err != nil {
+		t.Fatal(err)
+	}
+	payload := make([]byte, 32)
+	payload[0] = SubCmdCANTx
+	payload[1] = FlagRequestFinal
+	binary.LittleEndian.PutUint16(payload[2:4], 1)
+	binary.LittleEndian.PutUint16(payload[4:6], 0x0001)
+	binary.LittleEndian.PutUint16(payload[16:18], uint16(4+len(data)))
+	binary.BigEndian.PutUint32(payload[20:24], 0x7E0)
+	copy(payload[24:], data)
+	if want := cmd(canChannel, payload).ToBytes(); !bytes.Equal(w.b, want) {
+		t.Fatalf("wire\n got % X\nwant % X", w.b, want)
+	}
+	if n := testing.AllocsPerRun(100, func() { d.PassThruWriteMsgs(0x7E0, data) }); n != 0 {
+		t.Errorf("PassThruWriteMsgs allocates %v times per frame, want 0", n)
+	}
+}
+
+// TestReadPathAllocs runs RX pushes through what readLoop does per read: the
+// only allocations left are the CANFrame handed to the callback and queues.
+func TestReadPathAllocs(t *testing.T) {
+	var got CANFrame
+	d := New(WithCANFrameHandler(func(f *CANFrame) { got = *f }))
+	rx := []byte{
+		0x1e, 0x00, 0xf8, 0x51, 0x00, 0x00, 0x01, 0x05,
+		0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x48, 0x0b,
+		0x00, 0x00, 0x00, 0x00, 0xfc, 0x37, 0x0d, 0x00,
+		0x06, 0x00, 0x06, 0x00, 0x00, 0x00, 0x07, 0xe8,
+		0x01, 0x50,
+	}
+	var packets []Packet
+	n := testing.AllocsPerRun(1000, func() {
+		var err error
+		if packets, err = d.parser.parse(rx, packets[:0]); err != nil || len(packets) != 1 {
+			t.Fatalf("parse: %d packets, %v", len(packets), err)
+		}
+		d.handlePacket(&packets[0])
+	})
+	if got.ID != 0x7E8 || !bytes.Equal(got.Data, []byte{0x01, 0x50}) {
+		t.Fatalf("callback got %v", &got)
+	}
+	if n > 2 {
+		t.Errorf("read path allocates %v times per frame, want <= 2 (frame + data)", n)
+	}
+	if q := len(d.rxQueue); q != 0 {
+		t.Errorf("%d frames queued for PassThruReadMsgs behind a handler", q)
 	}
 }

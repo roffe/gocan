@@ -177,3 +177,71 @@ func TestOnEventUnregister(t *testing.T) {
 		t.Fatalf("want 1 event after unregister, got %d", n)
 	}
 }
+
+// BenchmarkRequest is one request/reply exchange with a per-request deadline,
+// the shape of every KWP/GMLAN call (t7kwp acks a chunk this way).
+func BenchmarkRequest(b *testing.B) {
+	bus, err := Open(context.Background(), "loopback", Config{})
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer bus.Close()
+	f := NewFrame(0x240, []byte{0x40, 0xA1, 0x02, 0x21, 0xF0})
+	b.ReportAllocs()
+	for b.Loop() {
+		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+		if _, err := bus.Request(ctx, f, 0x240); err != nil {
+			b.Fatal(err)
+		}
+		cancel()
+	}
+}
+
+// BenchmarkDeliver is the adapter read loop's per-frame cost with a logger's
+// worth of subscriptions: a hit fans out to one, a miss (most of an
+// unfiltered bus) matches none.
+func BenchmarkDeliver(b *testing.B) {
+	bus, err := Open(context.Background(), "loopback", Config{})
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer bus.Close()
+	ctx := context.Background()
+	bus.Subscribe(ctx, 0x1A0, 0x280, 0x3A0, 0x664, 0x665)
+	ch := bus.Subscribe(ctx, 0x258)
+	hit, miss := NewFrame(0x258, []byte{1, 2, 3}), NewFrame(0x5C0, []byte{1, 2, 3})
+	b.Run("hit", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			bus.Deliver(hit)
+			<-ch
+		}
+	})
+	b.Run("miss", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			bus.Deliver(miss)
+		}
+	})
+}
+
+// Request must drop its reply subscription before returning, or it catches
+// the next request's reply; a repeated identifier must not deliver twice.
+func TestSubscriptionBookkeeping(t *testing.T) {
+	bus := openLoopback(t)
+	ctx := context.Background()
+	if _, err := bus.Request(ctx, NewFrame(0x240, nil), 0x240); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(bus.submap[0x240]); n != 0 {
+		t.Fatalf("%d subscription(s) left on 0x240 after Request", n)
+	}
+	ch := bus.Subscribe(ctx, 0x100, 0x100)
+	bus.Deliver(NewFrame(0x100, nil))
+	<-ch
+	select {
+	case f := <-ch:
+		t.Fatalf("duplicate delivery %s", f)
+	default:
+	}
+}

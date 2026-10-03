@@ -16,23 +16,32 @@ const (
 )
 
 func Parse(data []byte) (*Command, error) {
-	if len(data) < 3 {
-		return nil, fmt.Errorf("data too short")
+	cmd := new(Command)
+	if err := cmd.decode(data); err != nil {
+		return nil, err
 	}
-	cmd := &Command{
+	return cmd, nil
+}
+
+// decode fills c from one encoded command; c.data aliases data.
+func (c *Command) decode(data []byte) error {
+	if len(data) < 3 {
+		return fmt.Errorf("data too short")
+	}
+	*c = Command{
 		command:  data[0],
 		length:   data[1],
 		data:     data[2 : 2+data[1]],
 		checksum: data[2+data[1]],
 	}
 
-	//	log.Printf("data: %X", cmd.data)
+	//	log.Printf("data: %X", c.data)
 
-	if calulateChecksum(cmd) != cmd.checksum {
-		return nil, fmt.Errorf("checksum error")
+	if calulateChecksum(c) != c.checksum {
+		return fmt.Errorf("checksum error")
 	}
 
-	return cmd, nil
+	return nil
 }
 
 func (c *Command) Length() int {
@@ -82,5 +91,10 @@ func calulateChecksum(d *Command) byte {
 }
 
 func (d *Command) Bytes() []byte {
-	return append(append([]byte{d.command, d.length}, d.data...), d.checksum)
+	return d.AppendBytes(make([]byte, 0, 3+len(d.data)))
+}
+
+// AppendBytes appends the encoded command to b.
+func (d *Command) AppendBytes(b []byte) []byte {
+	return append(append(append(b, d.command, d.length), d.data...), d.checksum)
 }

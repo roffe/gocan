@@ -126,10 +126,14 @@ func (j *PassThru) PassThruOpen(deviceName string, pDeviceID *uint32) error {
 	return j.checkErr(uint32(ret))
 }
 
+// PassThruReadMsg, PassThruReadMsgs and PassThruWriteMsgs run per frame (and
+// per idle poll), so they call syscall.SyscallN directly: Proc.Call heap
+// allocates its argument slice and, being //go:uintptrescapes, everything
+// the pointer arguments point at. SyscallN keeps both on the stack.
 func (j *PassThru) PassThruReadMsg(channelID uint32, pMsg *PassThruMsg, timeout uint32) (uint32, error) {
 	pNumMsgs := uint32(1)
 	// long PassThruReadMsgs(unsigned long ChannelID, PassThruMsg *pMsg, unsigned long *pNumMsgs, unsigned long Timeout);
-	ret, _, _ := j.passThruReadMsgs.Call(
+	ret, _, _ := syscall.SyscallN(j.passThruReadMsgs.Addr(),
 		uintptr(channelID),
 		uintptr(unsafe.Pointer(pMsg)),
 		uintptr(unsafe.Pointer(&pNumMsgs)),
@@ -146,7 +150,7 @@ func (j *PassThru) PassThruReadMsg(channelID uint32, pMsg *PassThruMsg, timeout 
 // backing storage, e.g. &msgs[0] on a []PassThruMsg.
 func (j *PassThru) PassThruReadMsgs(channelID uint32, pMsg *PassThruMsg, pNumMsgs *uint32, timeout uint32) error {
 	// long PassThruReadMsgs(unsigned long ChannelID, PassThruMsg *pMsg, unsigned long *pNumMsgs, unsigned long Timeout);
-	ret, _, _ := j.passThruReadMsgs.Call(
+	ret, _, _ := syscall.SyscallN(j.passThruReadMsgs.Addr(),
 		uintptr(channelID),
 		uintptr(unsafe.Pointer(pMsg)),
 		uintptr(unsafe.Pointer(pNumMsgs)),
@@ -157,7 +161,7 @@ func (j *PassThru) PassThruReadMsgs(channelID uint32, pMsg *PassThruMsg, pNumMsg
 
 func (j *PassThru) PassThruWriteMsgs(channelID uint32, pMsg *PassThruMsg, pNumMsgs *uint32, timeout uint32) error {
 	// long PassThruWriteMsgs(unsigned long ChannelID, PassThruMsg *pMsg, unsigned long *pNumMsgs, unsigned long Timeout);
-	ret, _, _ := j.passThruWriteMsgs.Call(
+	ret, _, _ := syscall.SyscallN(j.passThruWriteMsgs.Addr(),
 		uintptr(channelID),
 		uintptr(unsafe.Pointer(pMsg)),
 		uintptr(unsafe.Pointer(pNumMsgs)),
