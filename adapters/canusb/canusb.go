@@ -22,7 +22,8 @@
 // parser releases on z/Z/F/BELL, so at most defaultTxCredits commands are ever
 // outstanding (see the constant for what the manual allows and why the depth
 // matters). Writes are serialized, and the device drains its USB FIFO in order,
-// so frame order is preserved regardless of the window.
+// so frame order is preserved regardless of the window. Transmit is also paced
+// to the bit rate, see txBacklog.
 package canusb
 
 import (
@@ -67,6 +68,15 @@ const (
 	maxTxCredits     = 8 // CAN transmit FIFO depth, manual §1.2
 )
 
+// txBacklog is how many frames of bus time Send lets queue in the device
+// before it waits. z only means the frame is queued; a full transmit FIFO
+// answers BELL and drops it, and nothing reports when a frame reaches the
+// wire. Credits bound the USB parser, not the bus, so an ackless stream (T7
+// fast flash, ISO-TP consecutive frames) can outrun the bus. Send meters frames
+// to the bit rate instead: requests and short bursts go straight out, a stream
+// runs at bus speed. Half the FIFO leaves room for the timer oversleeping.
+const txBacklog = 4
+
 func init() {
 	gocan.Register(gocan.AdapterInfo{
 		Name:               "CANUSB VCP",
@@ -98,6 +108,8 @@ type CANUSB struct {
 	code, mask string // M acceptance-code / m acceptance-mask commands
 
 	sendSem chan struct{} // outstanding-command credits, released by the z/Z/F/BELL reply
+	bitTime time.Duration // one bit at cfg.CANRate
+	txFree  time.Time     // when the frames sent so far are on the wire; Send-only
 	writeMu sync.Mutex    // serializes port writes (Send vs status poll vs SetFilter)
 	line    []byte        // reply parser accumulator
 	txBuf   [27]byte      // longest transmit command (T + 8 id + dlc + 16 data + CR); Send-only, which the Bus serializes
@@ -122,6 +134,7 @@ func New(cfg gocan.Config) (gocan.Adapter, error) {
 		code:    code,
 		mask:    mask,
 		sendSem: make(chan struct{}, credits),
+		bitTime: time.Duration(float64(time.Second) / (cfg.CANRate * 1000)),
 	}, nil
 }
 
@@ -203,9 +216,13 @@ func (cu *CANUSB) Close() error {
 }
 
 // Send encodes and writes one frame, blocking while the transmit window is
-// full. It returns once the frame is written, not once the device acks it —
-// the ack releases the credit for a later Send. The Bus serializes callers.
+// full or the bus is txBacklog frames behind. It returns once the frame is
+// written, not once the device acks it — the ack releases the credit for a
+// later Send. The Bus serializes callers.
 func (cu *CANUSB) Send(ctx context.Context, f gocan.Frame) error {
+	if err := cu.pace(ctx, f); err != nil {
+		return err
+	}
 	select {
 	case cu.sendSem <- struct{}{}:
 	case <-ctx.Done():
@@ -214,6 +231,45 @@ func (cu *CANUSB) Send(ctx context.Context, f gocan.Frame) error {
 		return gocan.ErrClosed
 	}
 	return cu.write(encode(cu.txBuf[:0], f))
+}
+
+// pace waits until f fits in txBacklog frames of bus time.
+// ponytail: models the bus as ours alone; sustained foreign traffic drains the
+// FIFO slower than this and can still BELL. Back off on BELL if that shows up.
+func (cu *CANUSB) pace(ctx context.Context, f gocan.Frame) error {
+	now := time.Now()
+	d := frameBits(f) * cu.bitTime
+	if cu.txFree.Before(now) {
+		cu.txFree = now
+	}
+	wait := cu.txFree.Sub(now) - txBacklog*d
+	cu.txFree = cu.txFree.Add(d)
+	if wait <= 0 {
+		return nil
+	}
+	t := time.NewTimer(wait)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return nil
+	case <-ctx.Done():
+		return context.Cause(ctx)
+	case <-cu.bus.Done():
+		return gocan.ErrClosed
+	}
+}
+
+// frameBits is f's worst-case length on the wire: 47 bits plus data for a
+// standard frame (67 extended) through interframe space, plus a stuff bit per
+// 4 bits from SOF to CRC. Flash data is long 00/FF runs, so worst case is the
+// usual case.
+func frameBits(f gocan.Frame) time.Duration {
+	n := 8 * time.Duration(f.Length)
+	fixed, stuffed := 47+n, 34+n
+	if f.Extended {
+		fixed, stuffed = fixed+20, stuffed+20
+	}
+	return fixed + (stuffed-1)/4
 }
 
 // SetFilter reconfigures the SJA1000 acceptance filter at runtime. The

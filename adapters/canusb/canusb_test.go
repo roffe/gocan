@@ -315,3 +315,22 @@ func TestCANUSBEncode(t *testing.T) {
 		t.Fatalf("encode allocates %v times per frame, want 0", n)
 	}
 }
+
+func TestCANUSBPacesToBusRate(t *testing.T) {
+	if got := frameBits(gocan.NewFrame(0x7C0, make([]byte, 8))); got != 135 {
+		t.Fatalf("8 byte standard frame: %d bits, want 135", got)
+	}
+	bus := openCANUSB(t, newFakePort(true))
+	// 500 kbit/s: 270 µs a frame. The first txBacklog+1 go at once, the rest
+	// at bus speed.
+	const n = 40
+	start := time.Now()
+	for i := 0; i < n; i++ {
+		if err := bus.Send(context.Background(), gocan.NewFrame(0x7C0, make([]byte, 8))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if min := (n - txBacklog - 1) * 270 * time.Microsecond; time.Since(start) < min {
+		t.Fatalf("%d frames in %v, bus needs at least %v", n, time.Since(start), min)
+	}
+}
