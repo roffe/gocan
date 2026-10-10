@@ -667,7 +667,10 @@ func (t *Client) ReadFlash(ctx context.Context, addr, length int) ([]byte, error
 					log.Printf("failed to read memory by address, pos: 0x%X, length: 0x%X, retrying: %v", readPos, readLength, err)
 				}
 				var b []byte
-				if b, err = t.ReadMemoryByAddressF0(ctx, readPos, readLength); err == nil {
+				if b, err = t.ReadMemoryByAddressF0(ctx, readPos, readLength); err == nil && len(b) != readLength {
+					err = fmt.Errorf("short read: got %d of %d bytes", len(b), readLength)
+				}
+				if err == nil {
 					out.Write(b)
 					break
 				}
@@ -737,7 +740,11 @@ func (t *Client) recvData(ctx context.Context, length int) ([]byte, error) {
 				return nil, fmt.Errorf("recvData: subscription closed")
 			}
 			// Handle frame based on control byte
-			if frame.Data[0]&0x40 == 0x40 { // Start or continuation frame
+			if frame.Data[0]&0x40 == 0x40 { // First frame
+				if err := checkErr(frame); err != nil {
+					_ = t.Ack(ctx, frame.Data[0], false)
+					return nil, err
+				}
 				// Calculate remaining payload excluding non-payload bytes
 				payloadLeft = int(frame.Data[2]) - 2
 				for i := 5; i < 8 && payloadLeft > 0 && receivedBytes < length; i++ {
@@ -1166,8 +1173,11 @@ func getFunctionNameN(depth int) string {
 	return textAfterLastDot(fn.Name())
 }
 
+// checkErr returns the negative response in f, if any. Only a reply's first
+// frame (byte 0 bit 0x40) carries the service id at byte 3; later frames are
+// payload from byte 2 on, so a 0x7F there is data.
 func checkErr(f gocan.Frame) error {
-	if f.Data[3] == 0x7F {
+	if f.Data[0]&0x40 != 0 && f.Data[3] == 0x7F {
 		return fmt.Errorf("%s: %s %w", getFunctionNameN(2), TranslateServiceID(f.Data[4]), TranslateErrorCode(f.Data[5]))
 	}
 	return nil
