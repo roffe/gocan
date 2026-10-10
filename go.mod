@@ -3,14 +3,14 @@ module github.com/roffe/gocan/v2
 go 1.26.0
 
 require (
-	github.com/ebitengine/purego v0.9.1
+	github.com/ebitengine/purego v0.11.1
 	github.com/gotmc/libusb/v2 v2.6.0
 	github.com/yuin/gopher-lua v1.1.2
 	go.bug.st/serial v1.8.0
 	go.einride.tech/can v0.16.1
-	golang.org/x/mod v0.36.0
-	golang.org/x/sync v0.20.0
-	golang.org/x/sys v0.46.0
+	golang.org/x/mod v0.42.0
+	golang.org/x/sync v0.24.0
+	golang.org/x/sys v0.49.0
 )
 
 require (
