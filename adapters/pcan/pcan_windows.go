@@ -68,7 +68,7 @@ func (p *PCAN) Open(ctx context.Context, bus *gocan.Bus) error {
 		return err
 	}
 	param := pcan.DWORD(pcan.PCAN_PARAMETER_ON)
-	if err := pcan.CAN_SetValue(p.ch, pcan.PCAN_BUSOFF_AUTORESET, uintptr(unsafe.Pointer(&param)), 4); err != nil {
+	if err := pcan.CAN_SetValue(p.ch, pcan.PCAN_BUSOFF_AUTORESET, unsafe.Pointer(&param), 4); err != nil {
 		bus.Emit(gocan.Event{Type: gocan.EventTypeWarning, Details: "Failed to set BUSOFF_AUTORESET parameter"})
 	}
 	firmwareVersion, err := pcan.GetFirmwareVersion(p.ch)
@@ -103,6 +103,9 @@ func (p *PCAN) readLoop(ctx context.Context) {
 	}
 	defer rxEvent.ClearReceiveEvent(p.ch)
 
+	// CAN_Read returns these with a message, as PEAK's samples handle them.
+	const busStatus = pcan.PCAN_ERROR_ANYBUSERR | pcan.PCAN_ERROR_OVERRUN | pcan.PCAN_ERROR_QOVERRUN
+	var status pcan.TPCANStatus
 	for ctx.Err() == nil {
 		if err := rxEvent.Wait(10); err != nil {
 			if err == syscall.ETIMEDOUT {
@@ -118,13 +121,20 @@ func (p *PCAN) readLoop(ctx context.Context) {
 			var timestamp pcan.TPCANTimestamp
 			err := pcan.CAN_Read(p.ch, &msg, &timestamp)
 			if err != nil {
-				if pe, ok := err.(pcan.PCANError); ok && pe.Code == pcan.PCAN_ERROR_QRCVEMPTY {
+				pe, ok := err.(pcan.PCANError)
+				if ok && pe.Code&pcan.PCAN_ERROR_QRCVEMPTY != 0 {
 					break
 				}
-				if ctx.Err() == nil {
-					p.bus.Fatal(err)
+				if !ok || pe.Code&^busStatus != 0 {
+					if ctx.Err() == nil {
+						p.bus.Fatal(err)
+					}
+					return
 				}
-				return
+				if pe.Code != status {
+					status = pe.Code
+					p.bus.Emit(gocan.Event{Type: gocan.EventTypeWarning, Details: err.Error()})
+				}
 			}
 			if f, ok := fromMsg(&msg); ok {
 				p.bus.Deliver(f)

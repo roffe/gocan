@@ -52,7 +52,7 @@ func SetReceiveEvent(channel TPCANHandle) (*ReceiveEvent, error) {
 	if err := CAN_SetValue(
 		channel,
 		PCAN_RECEIVE_EVENT,
-		uintptr(unsafe.Pointer(&eventVal32)),
+		unsafe.Pointer(&eventVal32),
 		4, // sizeof(DWORD)
 	); err != nil {
 		// important: close handle if we fail to register it
@@ -75,7 +75,7 @@ func (re *ReceiveEvent) ClearReceiveEvent(channel TPCANHandle) error {
 	if err := CAN_SetValue(
 		channel,
 		PCAN_RECEIVE_EVENT,
-		uintptr(unsafe.Pointer(&zero)),
+		unsafe.Pointer(&zero),
 		4,
 	); err != nil {
 		return fmt.Errorf("CAN_SetValue(PCAN_RECEIVE_EVENT=0) failed: %w", err)

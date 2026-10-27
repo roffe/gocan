@@ -262,11 +262,11 @@ func CAN_FilterMessages(channel TPCANHandle, fromID uint32, toID uint32, mode TP
 //
 // buffer must point to storage large enough for the expected value,
 // and bufferLength must match that size in bytes.
-func CAN_GetValue(channel TPCANHandle, parameter TPCANParameter, buffer uintptr, bufferLength uint32) error {
+func CAN_GetValue(channel TPCANHandle, parameter TPCANParameter, buffer unsafe.Pointer, bufferLength uint32) error {
 	return checkErr(procGetValue.Call(
 		uintptr(channel),
 		uintptr(parameter),
-		buffer,
+		uintptr(buffer),
 		uintptr(bufferLength),
 	))
 }
@@ -295,11 +295,11 @@ func CAN_GetValue(channel TPCANHandle, parameter TPCANParameter, buffer uintptr,
 // Some parameters reset back to default after you Uninitialize or
 // re-Initialize the channel (PCAN_RECEIVE_EVENT is one of those: you
 // must set it again every time you bring the channel up).
-func CAN_SetValue(channel TPCANHandle, parameter TPCANParameter, buffer uintptr, bufferLength uint32) error {
+func CAN_SetValue(channel TPCANHandle, parameter TPCANParameter, buffer unsafe.Pointer, bufferLength uint32) error {
 	return checkErr(procSetValue.Call(
 		uintptr(channel),
 		uintptr(parameter),
-		buffer,
+		uintptr(buffer),
 		uintptr(bufferLength),
 	))
 }
@@ -386,7 +386,7 @@ func cString(b []byte) string {
 
 func GetChannelCondition(channel TPCANHandle) ChannelCondition {
 	var condition ChannelCondition
-	if err := CAN_GetValue(channel, PCAN_CHANNEL_CONDITION, uintptr(unsafe.Pointer(&condition)), 1); err != nil {
+	if err := CAN_GetValue(channel, PCAN_CHANNEL_CONDITION, unsafe.Pointer(&condition), 1); err != nil {
 		log.Println(err)
 		return CHANNEL_UNAVAILABLE
 	}
@@ -398,12 +398,12 @@ func SetChannelIdentifying(channel TPCANHandle, enabled bool) error {
 	if enabled {
 		param = PCAN_PARAMETER_ON
 	}
-	return CAN_SetValue(channel, PCAN_CHANNEL_IDENTIFYING, uintptr(unsafe.Pointer(&param)), 4)
+	return CAN_SetValue(channel, PCAN_CHANNEL_IDENTIFYING, unsafe.Pointer(&param), 4)
 }
 
 func GetDeviceID(channel TPCANHandle) (uint32, error) {
 	var deviceID uint32
-	if err := CAN_GetValue(channel, PCAN_DEVICE_ID, uintptr(unsafe.Pointer(&deviceID)), 4); err != nil {
+	if err := CAN_GetValue(channel, PCAN_DEVICE_ID, unsafe.Pointer(&deviceID), 4); err != nil {
 		return 0, err
 	}
 	return deviceID, nil
@@ -411,7 +411,7 @@ func GetDeviceID(channel TPCANHandle) (uint32, error) {
 
 func GetHardwareName(channel TPCANHandle) (string, error) {
 	var name [MAX_LENGTH_HARDWARE_NAME]byte
-	if err := CAN_GetValue(channel, PCAN_HARDWARE_NAME, uintptr(unsafe.Pointer(&name[0])), MAX_LENGTH_HARDWARE_NAME); err != nil {
+	if err := CAN_GetValue(channel, PCAN_HARDWARE_NAME, unsafe.Pointer(&name[0]), MAX_LENGTH_HARDWARE_NAME); err != nil {
 		return "", err
 	}
 	return cString(name[:]), nil
@@ -419,7 +419,7 @@ func GetHardwareName(channel TPCANHandle) (string, error) {
 
 func GetDevicePartNumber(channel TPCANHandle) (string, error) {
 	var partNumber [100]byte
-	if err := CAN_GetValue(channel, PCAN_DEVICE_PART_NUMBER, uintptr(unsafe.Pointer(&partNumber[0])), 100); err != nil {
+	if err := CAN_GetValue(channel, PCAN_DEVICE_PART_NUMBER, unsafe.Pointer(&partNumber[0]), 100); err != nil {
 		return "", err
 	}
 	return cString(partNumber[:]), nil
@@ -427,7 +427,7 @@ func GetDevicePartNumber(channel TPCANHandle) (string, error) {
 
 func GetDeviceGUID(channel TPCANHandle) (string, error) {
 	var guid [MAX_LENGTH_VERSION_STRING]byte
-	if err := CAN_GetValue(channel, PCAN_DEVICE_GUID, uintptr(unsafe.Pointer(&guid[0])), MAX_LENGTH_VERSION_STRING); err != nil {
+	if err := CAN_GetValue(channel, PCAN_DEVICE_GUID, unsafe.Pointer(&guid[0]), MAX_LENGTH_VERSION_STRING); err != nil {
 		return "", err
 	}
 	return cString(guid[:]), nil
@@ -435,7 +435,7 @@ func GetDeviceGUID(channel TPCANHandle) (string, error) {
 
 func GetAPIVersion() (string, error) {
 	var version [MAX_LENGTH_VERSION_STRING]byte
-	if err := CAN_GetValue(0, PCAN_API_VERSION, uintptr(unsafe.Pointer(&version[0])), MAX_LENGTH_VERSION_STRING); err != nil {
+	if err := CAN_GetValue(0, PCAN_API_VERSION, unsafe.Pointer(&version[0]), MAX_LENGTH_VERSION_STRING); err != nil {
 		return "", err
 	}
 	return cString(version[:]), nil
@@ -443,7 +443,7 @@ func GetAPIVersion() (string, error) {
 
 func GetChannelVersion(channel TPCANHandle) (string, error) {
 	var version [MAX_LENGTH_VERSION_STRING]byte
-	if err := CAN_GetValue(channel, PCAN_CHANNEL_VERSION, uintptr(unsafe.Pointer(&version[0])), MAX_LENGTH_VERSION_STRING); err != nil {
+	if err := CAN_GetValue(channel, PCAN_CHANNEL_VERSION, unsafe.Pointer(&version[0]), MAX_LENGTH_VERSION_STRING); err != nil {
 		return "", err
 	}
 	return cString(version[:]), nil
@@ -451,7 +451,7 @@ func GetChannelVersion(channel TPCANHandle) (string, error) {
 
 func GetChannelFeatures(channel TPCANHandle) (uint32, error) {
 	var features uint32
-	if err := CAN_GetValue(channel, PCAN_CHANNEL_FEATURES, uintptr(unsafe.Pointer(&features)), 4); err != nil {
+	if err := CAN_GetValue(channel, PCAN_CHANNEL_FEATURES, unsafe.Pointer(&features), 4); err != nil {
 		return 0, err
 	}
 	return features, nil
@@ -459,7 +459,7 @@ func GetChannelFeatures(channel TPCANHandle) (uint32, error) {
 
 func GetFirmwareVersion(channel TPCANHandle) (string, error) {
 	var version [MAX_LENGTH_VERSION_STRING]byte
-	if err := CAN_GetValue(channel, PCAN_FIRMWARE_VERSION, uintptr(unsafe.Pointer(&version[0])), MAX_LENGTH_VERSION_STRING); err != nil {
+	if err := CAN_GetValue(channel, PCAN_FIRMWARE_VERSION, unsafe.Pointer(&version[0]), MAX_LENGTH_VERSION_STRING); err != nil {
 		return "", err
 	}
 	return cString(version[:]), nil
@@ -467,14 +467,14 @@ func GetFirmwareVersion(channel TPCANHandle) (string, error) {
 
 func GetAttachedChannelsCount() ([]TPCANChannelInformation, error) {
 	var count uint32
-	if err := CAN_GetValue(PCAN_NONEBUS, PCAN_ATTACHED_CHANNELS_COUNT, uintptr(unsafe.Pointer(&count)), 4); err != nil {
+	if err := CAN_GetValue(PCAN_NONEBUS, PCAN_ATTACHED_CHANNELS_COUNT, unsafe.Pointer(&count), 4); err != nil {
 		return nil, err
 	}
 	if count == 0 {
 		return []TPCANChannelInformation{}, nil
 	}
 	channels := make([]TPCANChannelInformation, count)
-	if err := CAN_GetValue(PCAN_NONEBUS, PCAN_ATTACHED_CHANNELS, uintptr(unsafe.Pointer(&channels[0])), uint32(unsafe.Sizeof(TPCANChannelInformation{}))*count); err != nil {
+	if err := CAN_GetValue(PCAN_NONEBUS, PCAN_ATTACHED_CHANNELS, unsafe.Pointer(&channels[0]), uint32(unsafe.Sizeof(TPCANChannelInformation{}))*count); err != nil {
 		return nil, err
 	}
 	return channels, nil
