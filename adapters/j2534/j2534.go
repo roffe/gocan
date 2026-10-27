@@ -49,9 +49,14 @@ const (
 	// after our 0x266 ACK, paid ~10 ms per frame and logged at ~16 Hz.
 	// Measured on a MongoosePro + T7 (4-frame read): 10 ms blocking 50 ms,
 	// 1 ms poll 9.1 ms, 100 µs poll 6.6 ms at ~1-5% of a core.
-	// ponytail: fixed poll, up to 10k empty reads/s; back off when idle if a
-	// vendor DLL turns out to do device I/O per read.
 	pollInterval = 100 * time.Microsecond
+	// With no frame and no call for idleAfter the worker polls at
+	// idlePollInterval. Any call, a Send included, puts it back on the fast
+	// poll before the reply can arrive. Each wakeup costs a handoff to the
+	// locked thread, so idle CPU follows the wakeup rate: against a no-op
+	// driver 1.4% of a core at 100 µs, 0.9% at 2 ms, 0.3% at 10 ms.
+	idleAfter        = 100 * time.Millisecond
+	idlePollInterval = 10 * time.Millisecond
 	// A DLL that fails reads instantly (cable pulled, channel invalidated)
 	// would otherwise spin the worker at 100% CPU spamming events. Bail out
 	// rather than trying to enumerate every return code that means "dead".
@@ -161,6 +166,7 @@ func (ma *J2534) run(ctx context.Context, baudRate uint32, swcan bool, errc chan
 	idle := time.NewTimer(pollInterval) // reused: time.After allocates per poll
 	defer idle.Stop()
 	errCount := 0
+	active := time.Now() // last frame or call
 	for {
 		// Queued work (Send, SetFilter, teardown) goes first; polling the bus
 		// is what this thread does with the time left over.
@@ -170,6 +176,7 @@ func (ma *J2534) run(ctx context.Context, baudRate uint32, swcan bool, errc chan
 			if ma.torn {
 				return
 			}
+			active = time.Now()
 			continue
 		default:
 		}
@@ -204,15 +211,21 @@ func (ma *J2534) run(ctx context.Context, baudRate uint32, swcan bool, errc chan
 		}
 		errCount = 0
 		if got {
+			active = time.Now()
 			continue // drain before idling
 		}
-		idle.Reset(pollInterval)
+		if time.Since(active) < idleAfter {
+			idle.Reset(pollInterval)
+		} else {
+			idle.Reset(idlePollInterval)
+		}
 		select {
 		case fn := <-ma.calls:
 			fn()
 			if ma.torn {
 				return
 			}
+			active = time.Now()
 		case <-idle.C:
 		}
 	}
