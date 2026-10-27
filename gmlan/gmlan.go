@@ -238,6 +238,9 @@ func (cl *Client) ReadDataByIdentifierUint16(ctx context.Context, pid byte) (uin
 	if err != nil {
 		return 0, err
 	}
+	if len(resp) < 2 {
+		return 0, fmt.Errorf("ReadDataByIdentifierUint16: short reply [% 02X]", resp)
+	}
 	retval := uint16(resp[0]) * 256
 	retval += uint16(resp[1])
 	return retval, nil
