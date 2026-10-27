@@ -1,8 +1,11 @@
 package passthru
 
 import (
+	"errors"
 	"syscall"
 	"unsafe"
+
+	"github.com/roffe/gocan/v2/pkg/w32"
 )
 
 type PassThru struct {
@@ -20,7 +23,7 @@ type PassThru struct {
 }
 
 func New(dllName string) (*PassThru, error) {
-	dll, err := syscall.LoadDLL(dllName)
+	dll, err := w32.LoadDLL(dllName)
 	if err != nil {
 		return nil, err
 	}
@@ -139,10 +142,12 @@ func (j *PassThru) PassThruReadMsg(channelID uint32, pMsg *PassThruMsg, timeout 
 		uintptr(unsafe.Pointer(&pNumMsgs)),
 		uintptr(timeout),
 	)
-	if err := j.checkErr(uint32(ret)); err != nil {
+	// With ErrBufferOverflow the message read is valid; earlier ones were lost.
+	err := j.checkErr(uint32(ret))
+	if err != nil && !errors.Is(err, ErrBufferOverflow) {
 		return 0, err
 	}
-	return pNumMsgs, nil
+	return pNumMsgs, err
 }
 
 // PassThruReadMsgs reads up to *pNumMsgs messages into the contiguous array

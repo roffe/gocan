@@ -22,11 +22,12 @@ uint32_t PassThruDisconnect(uint32_t ch) { return ch == 9 ? 0 : 0x02; }
 uint32_t PassThruReadMsgs(uint32_t ch, PASSTHRU_MSG *msg, uint32_t *n, uint32_t timeout) {
 	if (ch != 9 || *n != 1) return 0x02;
 	static int k; /* alternate frame / empty: covers ERR_BUFFER_EMPTY and a polling reader */
-	if (k++ & 1) { *n = 0; return 0x10; }
+	int i = k++;
+	if (i & 1) { *n = 0; return 0x10; }
 	msg->ProtocolID = 5; msg->RxStatus = 0x100; msg->TxFlags = 0; msg->Timestamp = 1234;
 	msg->DataSize = 6; msg->ExtraDataIndex = 6;
 	memcpy(msg->Data, "\x00\x00\x02\x58\xAB\xCD", 6);
-	*n = 1; return 0;
+	*n = 1; return i == 2 ? 0x12 : 0; /* the second frame comes with ERR_BUFFER_OVERFLOW */
 }
 uint32_t PassThruWriteMsgs(uint32_t ch, PASSTHRU_MSG *msg, uint32_t *n, uint32_t timeout) {
 	if (ch != 9 || *n != 1 || (timeout != 0 && timeout != 25)) return 0x02;
