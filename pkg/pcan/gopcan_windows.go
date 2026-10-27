@@ -5,6 +5,8 @@ import (
 	"sync"
 	"syscall"
 	"unsafe"
+
+	"github.com/roffe/gocan/v2/pkg/w32"
 )
 
 var (
@@ -50,7 +52,7 @@ var (
 func Init() error {
 	initOnce.Do(func() {
 		var err error
-		pcan, err = syscall.LoadDLL("PCANBasic.dll")
+		pcan, err = w32.LoadDLL("PCANBasic.dll")
 		if err != nil {
 			InitErr = err
 			return

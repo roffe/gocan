@@ -107,10 +107,9 @@ func (p *PCAN) readLoop(ctx context.Context) {
 	const busStatus = pcan.PCAN_ERROR_ANYBUSERR | pcan.PCAN_ERROR_OVERRUN | pcan.PCAN_ERROR_QOVERRUN
 	var status pcan.TPCANStatus
 	for ctx.Err() == nil {
-		if err := rxEvent.Wait(10); err != nil {
-			if err == syscall.ETIMEDOUT {
-				continue
-			}
+		// Drain after a timeout too: a frame queued before the event was
+		// registered never signals it.
+		if err := rxEvent.Wait(10); err != nil && err != syscall.ETIMEDOUT {
 			if ctx.Err() == nil {
 				p.bus.Fatal(fmt.Errorf("wait failed: %w", err))
 			}
