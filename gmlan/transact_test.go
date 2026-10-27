@@ -3,6 +3,7 @@ package gmlan
 import (
 	"bytes"
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -147,5 +148,39 @@ func TestAnswers(t *testing.T) {
 		if got := answers(tt.req, tt.resp); got != tt.want {
 			t.Errorf("%s: answers(% 02X, % 02X) = %v, want %v", tt.name, tt.req, tt.resp, got, tt.want)
 		}
+	}
+}
+
+// A consecutive frame shorter than the first frame promised is an error, not
+// a zero-filled tail.
+func TestShortConsecutiveFrame(t *testing.T) {
+	cl := newTestClient(t, func(e *fakeECU, req gocan.Frame) {
+		switch {
+		case isRDBI(req):
+			e.deliver(firstFrame...)
+		case isFlowCtl(req):
+			e.deliver(0x21, 5, 6)
+		}
+	})
+	if got, err := cl.ReadDataByIdentifier(context.Background(), 0x18); err == nil {
+		t.Fatalf("short read returned % 02X, nil", got)
+	}
+}
+
+// A bus that dies mid report is an error, not the DTCs so far.
+func TestReadDTCBusDies(t *testing.T) {
+	cl := newTestClient(t, func(e *fakeECU, req gocan.Frame) {
+		if b := req.Bytes(); len(b) >= 2 && b[1] == 0xA9 {
+			go func() {
+				e.deliver(0x03, 0x7F, 0xA9, 0x78, 0, 0, 0, 0)
+				time.Sleep(10 * time.Millisecond)
+				e.bus.Deliver(gocan.NewFrame(0x5E8, []byte{0x81, 0x01, 0x22, 0x02, 0x12, 0, 0, 0}))
+				time.Sleep(10 * time.Millisecond)
+				e.bus.Fatal(errors.New("adapter unplugged"))
+			}()
+		}
+	})
+	if dtcs, err := cl.ReadDiagnosticInformationStatusOfDTCByStatusMask(context.Background(), 0x12); err == nil {
+		t.Fatalf("dead bus returned %v, nil", dtcs)
 	}
 }

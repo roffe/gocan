@@ -316,6 +316,9 @@ func (cl *Client) ReadDataByIdentifierFrame(ctx context.Context, frame gocan.Fra
 			// Wrap sequence number without branches: 0x21..0x2F -> 0x20 -> 0x21...
 			seq = 0x20 | ((seq + 1) & 0x0F)
 		}
+		if left > 0 {
+			return nil, fmt.Errorf("ReadDataByIdentifier[11]: consecutive frames %d bytes short", left)
+		}
 		return buf, nil
 	}
 	return nil, fmt.Errorf("ReadDataByIdentifier[12]: unknown response [% 02X]", resp.Bytes())
@@ -412,6 +415,9 @@ func (cl *Client) ReadMemoryByAddress(ctx context.Context, address, length uint3
 
 			// wrap 0x21..0x2F -> 0x20 -> 0x21...
 			seq = 0x20 | ((seq + 1) & 0x0F)
+		}
+		if left > 0 {
+			return nil, fmt.Errorf("ReadMemoryByAddress[9]: consecutive frames %d bytes short", left)
 		}
 		return buf, nil
 	}
@@ -1029,7 +1035,7 @@ func (cl *Client) ReadDiagnosticInformation(ctx context.Context, level Diagnosti
 			return nil, ctx.Err()
 		case resp, ok := <-codeChan:
 			if !ok {
-				return out, nil
+				return nil, errors.New("readDiagnosticInformation: bus closed before the end of the report")
 			}
 			if resp.Data[1] == 0x00 && resp.Data[2] == 0x00 && resp.Data[3] == 0x00 { // No more DTCs
 				return out, nil
