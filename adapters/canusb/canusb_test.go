@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -48,6 +49,9 @@ func (p *fakePort) Write(b []byte) (int, error) {
 	p.mu.Lock()
 	p.wrote = append(p.wrote, string(b))
 	p.mu.Unlock()
+	if b[0] == 'F' {
+		p.feed("F00\r")
+	}
 	if p.autoAck {
 		switch b[0] {
 		case 't':
@@ -90,7 +94,7 @@ func (p *fakePort) SetReadTimeout(time.Duration) error { return nil }
 func (p *fakePort) ResetInputBuffer() error            { return nil }
 func (p *fakePort) ResetOutputBuffer() error           { return nil }
 
-func openCANUSB(t *testing.T, fp *fakePort, opts ...gocan.Option) *gocan.Bus {
+func openCANUSB(t *testing.T, fp serialPort, opts ...gocan.Option) *gocan.Bus {
 	t.Helper()
 	a, err := New(gocan.Config{CANRate: 500, CANFilter: []uint32{0x238, 0x258}})
 	if err != nil {
@@ -109,7 +113,7 @@ func TestCANUSBOpenSequence(t *testing.T) {
 	fp := newFakePort(true)
 	bus := openCANUSB(t, fp)
 
-	want := []string{"\r", "\r", "\r", "V\r", "N\r", "Z0\r", "S6\r", "M00004300\r", "m00000C10\r", "O\r"}
+	want := []string{"\r", "\r", "\r", "C\r", "V\r", "N\r", "Z0\r", "S6\r", "M00004300\r", "m00000C10\r", "O\r"}
 	got := fp.writes()
 	if len(got) < len(want) {
 		t.Fatalf("want %d setup writes, got %v", len(want), got)
@@ -332,5 +336,60 @@ func TestCANUSBPacesToBusRate(t *testing.T) {
 	}
 	if min := (n - txBacklog - 1) * 270 * time.Microsecond; time.Since(start) < min {
 		t.Fatalf("%d frames in %v, bus needs at least %v", n, time.Since(start), min)
+	}
+}
+
+// Lost transmit acks come back through the status poll instead of wedging Send.
+func TestCANUSBRecoversLostAcks(t *testing.T) {
+	bus := openCANUSB(t, newFakePort(false))
+	for i := range defaultTxCredits {
+		if err := bus.Send(context.Background(), gocan.NewFrame(uint32(0x100+i), nil)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := bus.Send(ctx, gocan.NewFrame(0x200, nil)); err != nil {
+		t.Fatalf("Send after lost acks: %v", err)
+	}
+}
+
+// failPort fails every write once fail is set, and the write equal to failOn.
+type failPort struct {
+	*fakePort
+	fail   atomic.Bool
+	failOn string
+	closed atomic.Bool
+}
+
+func (p *failPort) Write(b []byte) (int, error) {
+	if p.fail.Load() || string(b) == p.failOn {
+		return 0, errors.New("EIO")
+	}
+	return p.fakePort.Write(b)
+}
+
+func (p *failPort) Close() error {
+	p.closed.Store(true)
+	return p.fakePort.Close()
+}
+
+// The port is closed when the device is gone at Close, and when O fails.
+func TestCANUSBClosesPortOnWriteError(t *testing.T) {
+	fp := &failPort{fakePort: newFakePort(true)}
+	bus := openCANUSB(t, fp)
+	fp.fail.Store(true)
+	if err := bus.Close(); err == nil || !fp.closed.Load() {
+		t.Fatalf("Close: err %v, port closed %v", err, fp.closed.Load())
+	}
+
+	fp = &failPort{fakePort: newFakePort(true), failOn: "O\r"}
+	a, err := New(gocan.Config{CANRate: 500})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.(*CANUSB).port = fp
+	if _, err := gocan.OpenAdapter(context.Background(), a); err == nil || !fp.closed.Load() {
+		t.Fatalf("Open: err %v, port closed %v", err, fp.closed.Load())
 	}
 }
