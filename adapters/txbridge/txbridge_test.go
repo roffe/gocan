@@ -215,3 +215,15 @@ func BenchmarkTxbridgeReceive(b *testing.B) {
 		<-sub
 	}
 }
+
+func TestCloseRace(t *testing.T) {
+	for range 200 {
+		tx := &Txbridge{port: chanPort{rx: make(chan []byte)}, subs: make(map[*commandSub]struct{})}
+		bus, err := gocan.OpenAdapter(context.Background(), tx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		go tx.Send(context.Background(), gocan.NewFrame(0x220, nil))
+		bus.Close()
+	}
+}

@@ -65,7 +65,7 @@ func New(cfg gocan.Config) (gocan.Adapter, error) {
 func (tx *Txbridge) Open(ctx context.Context, bus *gocan.Bus) error {
 	tx.bus = bus
 	if tx.port != nil { // pre-set by tests
-		go tx.readLoop(ctx)
+		go tx.readLoop(ctx, tx.port)
 		return nil
 	}
 	address := "192.168.4.1:1337"
@@ -100,11 +100,13 @@ func (tx *Txbridge) Open(ctx context.Context, bus *gocan.Bus) error {
 		return err
 	}
 
-	go tx.readLoop(ctx)
+	go tx.readLoop(ctx, tx.port)
 	return nil
 }
 
 func (tx *Txbridge) Close() error {
+	tx.writeMu.Lock()
+	defer tx.writeMu.Unlock()
 	if tx.port == nil {
 		return nil
 	}
@@ -257,7 +259,7 @@ func (tx *Txbridge) checkVersion(minVersion string) error {
 	return nil
 }
 
-func (tx *Txbridge) readLoop(ctx context.Context) {
+func (tx *Txbridge) readLoop(ctx context.Context, port io.Reader) {
 	var (
 		parsingCommand  bool
 		haveLength      bool // length byte read? zero is a legitimate size
@@ -267,7 +269,6 @@ func (tx *Txbridge) readLoop(ctx context.Context) {
 		cmdbuffPtr      uint8
 	)
 	cmdbuff := make([]byte, 256)
-	port := tx.port // Close nils tx.port while this loop may still be reading
 	readbuf := make([]byte, 4096)
 
 	reset := func() {
