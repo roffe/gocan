@@ -50,6 +50,9 @@ type RCan struct {
 	handle *libusb.DeviceHandle
 
 	closeOnce sync.Once
+	readDone  chan struct{} // closed when readLoop returns
+	mu        sync.Mutex    // no transfer starts on a handle Close released
+	closed    bool
 
 	txBuf [4 + 8]byte // Send's packet, reused; the Bus serializes Send
 }
@@ -78,8 +81,6 @@ func (r *RCan) Open(ctx context.Context, bus *gocan.Bus) error {
 	}
 	r.usbCtx, r.dev, r.handle = usbCtx, dev, handle
 
-	go r.readLoop(ctx)
-
 	// close (reset), set speed, open — mirrors the v1 bring-up.
 	if _, err := r.bulkOut([]byte{cmdClose}, 200); err != nil {
 		r.closeUSB()
@@ -95,6 +96,8 @@ func (r *RCan) Open(ctx context.Context, bus *gocan.Bus) error {
 		r.closeUSB()
 		return err
 	}
+	r.readDone = make(chan struct{})
+	go r.readLoop(ctx)
 	return nil
 }
 
@@ -103,6 +106,12 @@ func (r *RCan) Close() error {
 		if r.handle != nil {
 			r.bulkOut([]byte{cmdClose}, 40) // best-effort channel close
 			time.Sleep(20 * time.Millisecond)
+		}
+		r.mu.Lock()
+		r.closed = true
+		r.mu.Unlock()
+		if r.readDone != nil {
+			<-r.readDone // the Bus cancelled ctx first: one bulkIn timeout at most
 		}
 		r.closeUSB()
 	})
@@ -123,6 +132,11 @@ func (r *RCan) closeUSB() {
 }
 
 func (r *RCan) bulkOut(data []byte, timeoutMs int) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		return 0, gocan.ErrClosed
+	}
 	return r.handle.BulkTransferOut(usbOutEndpointNum, data, timeoutMs)
 }
 
@@ -152,6 +166,7 @@ func encode(b []byte, f gocan.Frame) []byte {
 }
 
 func (r *RCan) readLoop(ctx context.Context) {
+	defer close(r.readDone)
 	const canHeaderSize = 3
 	readBuf := make([]byte, maxCommandSize)
 	commandBuff := make([]byte, maxCommandSize)
