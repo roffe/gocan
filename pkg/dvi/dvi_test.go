@@ -20,3 +20,19 @@ func TestParseLengthBounds(t *testing.T) {
 		t.Fatal("short input accepted")
 	}
 }
+
+func FuzzParse(f *testing.F) {
+	f.Add(New(CMD_SEND_TO_NETWORK_NORMAL, []byte{0, 0, 2, 0x58, 1, 2}).Bytes())
+	f.Add([]byte{0x08, 0x0C, 0x00})
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if cmd, err := Parse(data); err == nil && !bytes.Equal(cmd.Bytes(), data[:3+cmd.Length()]) {
+			t.Fatalf("Parse(% X) re-encodes as % X", data, cmd.Bytes())
+		}
+		p := NewCommandParser(func(*Command) {})
+		for rest := data; len(rest) > 0; {
+			n := min(len(rest), 1+int(rest[0])%16)
+			p.AddData(rest[:n])
+			rest = rest[n:]
+		}
+	})
+}

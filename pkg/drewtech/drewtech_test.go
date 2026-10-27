@@ -236,18 +236,21 @@ func TestWriteMsgsWaitsForQueued(t *testing.T) {
 	}
 }
 
+// rxCapture is a real RX push (id 0x7E8, data 01 50) from a Windows USB capture.
+var rxCapture = []byte{
+	0x1e, 0x00, 0xf8, 0x51, 0x00, 0x00, 0x01, 0x05,
+	0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x48, 0x0b,
+	0x00, 0x00, 0x00, 0x00, 0xfc, 0x37, 0x0d, 0x00,
+	0x06, 0x00, 0x06, 0x00, 0x00, 0x00, 0x07, 0xe8,
+	0x01, 0x50,
+}
+
 // TestReadPathAllocs runs RX pushes through what readLoop does per read: the
 // only allocations left are the CANFrame handed to the callback and queues.
 func TestReadPathAllocs(t *testing.T) {
 	var got CANFrame
 	d := New(WithCANFrameHandler(func(f *CANFrame) { got = *f }))
-	rx := []byte{
-		0x1e, 0x00, 0xf8, 0x51, 0x00, 0x00, 0x01, 0x05,
-		0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x48, 0x0b,
-		0x00, 0x00, 0x00, 0x00, 0xfc, 0x37, 0x0d, 0x00,
-		0x06, 0x00, 0x06, 0x00, 0x00, 0x00, 0x07, 0xe8,
-		0x01, 0x50,
-	}
+	rx := rxCapture
 	var packets []Packet
 	n := testing.AllocsPerRun(1000, func() {
 		var err error
@@ -371,4 +374,22 @@ func TestSeqWrapsLikeTheDLL(t *testing.T) {
 			t.Fatalf("call %d: seq %d, want %d", want, got, want%255+1)
 		}
 	}
+}
+
+// Whatever the port delivers, parsing and handling it must not panic, and a
+// frame never carries more than 8 bytes.
+func FuzzReadPath(f *testing.F) {
+	f.Add(rxCapture)
+	f.Add(append(bytes.Clone(rxCapture[:20]), rxCapture...))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		d := New(WithCANFrameHandler(func(fr *CANFrame) {
+			if fr.DLC > 8 || len(fr.Data) != fr.DLC {
+				t.Fatalf("frame %v from % X", fr, data)
+			}
+		}))
+		packets, _ := d.parser.parse(data, nil)
+		for i := range packets {
+			d.handlePacket(&packets[i])
+		}
+	})
 }

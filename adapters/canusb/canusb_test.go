@@ -393,3 +393,28 @@ func TestCANUSBClosesPortOnWriteError(t *testing.T) {
 		t.Fatalf("Open: err %v, port closed %v", err, fp.closed.Load())
 	}
 }
+
+func FuzzParse(f *testing.F) {
+	f.Add([]byte("t25881122334455667788\r"))
+	f.Add([]byte("T18DAF1103ABCDEF\rz\rF04\r\aV1011\r"))
+	bus, err := gocan.OpenAdapter(context.Background(), &gocan.Loopback{})
+	if err != nil {
+		f.Fatal(err)
+	}
+	f.Cleanup(func() { bus.Close() })
+	frames := bus.SubscribeN(context.Background(), 4096)
+	f.Fuzz(func(t *testing.T, data []byte) {
+		a, err := New(gocan.Config{CANRate: 500})
+		if err != nil {
+			t.Fatal(err)
+		}
+		cu := a.(*CANUSB)
+		cu.bus = bus
+		cu.parse(data)
+		for len(frames) > 0 {
+			if fr := <-frames; fr.Length > 8 {
+				t.Fatalf("frame with %d data bytes from %q", fr.Length, data)
+			}
+		}
+	})
+}

@@ -227,3 +227,36 @@ func TestCloseRace(t *testing.T) {
 		bus.Close()
 	}
 }
+
+func FuzzReadLoop(f *testing.F) {
+	f.Add(dongleFrame(f, 0x258, []byte{1, 2, 3}))
+	f.Add([]byte("t\x00\x00e\x02\x01\x02\x03"))
+	bus, err := gocan.OpenAdapter(context.Background(), &gocan.Loopback{})
+	if err != nil {
+		f.Fatal(err)
+	}
+	f.Cleanup(func() { bus.Close() })
+	frames := bus.SubscribeN(context.Background(), 4096)
+	f.Fuzz(func(t *testing.T, data []byte) {
+		tx := &Txbridge{bus: bus, subs: make(map[*commandSub]struct{})}
+		tx.readLoop(context.Background(), &chunkReader{data: data})
+		for len(frames) > 0 {
+			if fr := <-frames; fr.Length > 8 {
+				t.Fatalf("frame with %d data bytes from %q", fr.Length, data)
+			}
+		}
+	})
+}
+
+// chunkReader hands out data in reads of up to 7 bytes, then reports a
+// closed connection, which ends readLoop without a Fatal.
+type chunkReader struct{ data []byte }
+
+func (r *chunkReader) Read(b []byte) (int, error) {
+	if len(r.data) == 0 {
+		return 0, net.ErrClosed
+	}
+	n := copy(b[:min(len(b), 7)], r.data)
+	r.data = r.data[n:]
+	return n, nil
+}

@@ -24,3 +24,17 @@ func TestRoundTrip(t *testing.T) {
 		t.Fatal("short input accepted")
 	}
 }
+
+func FuzzUnmarshalBinary(f *testing.F) {
+	b, _ := (&SerialCommand{Command: 'R', Data: []byte{1, 2, 3}}).MarshalBinary()
+	f.Add(b)
+	f.Fuzz(func(t *testing.T, data []byte) {
+		var sc SerialCommand
+		if sc.UnmarshalBinary(data) != nil {
+			return
+		}
+		if b, err := sc.MarshalBinary(); err != nil || !bytes.Equal(b, data) {
+			t.Fatalf("% X re-encodes as % X, %v", data, b, err)
+		}
+	})
+}

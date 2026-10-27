@@ -157,3 +157,23 @@ func BenchmarkELM327Send(b *testing.B) {
 		}
 	})
 }
+
+func FuzzSendReply(f *testing.F) {
+	f.Add([]byte("7E8064100BE3FA813\r7E810\r\r"))
+	f.Add([]byte("NO DATA\r?\rSTOPPED\r7E\r"))
+	bus, err := gocan.OpenAdapter(context.Background(), &gocan.Loopback{})
+	if err != nil {
+		f.Fatal(err)
+	}
+	f.Cleanup(func() { bus.Close() })
+	frames := bus.SubscribeN(context.Background(), 4096)
+	f.Fuzz(func(t *testing.T, data []byte) {
+		el := &ELM327{bus: bus, port: &elmPort{frameReply: append(bytes.Clone(data), '>')}}
+		el.Send(context.Background(), gocan.NewFrame(0x7E0, []byte{0x01}))
+		for len(frames) > 0 {
+			if fr := <-frames; fr.Length > 8 {
+				t.Fatalf("frame with %d data bytes from %q", fr.Length, data)
+			}
+		}
+	})
+}

@@ -87,3 +87,21 @@ func BenchmarkSLCanParse(b *testing.B) {
 		sl.parse(data)
 	}
 }
+
+func FuzzParse(f *testing.F) {
+	f.Add([]byte("z\rt25883F81112233445566\r\a"))
+	bus, err := gocan.OpenAdapter(context.Background(), &gocan.Loopback{})
+	if err != nil {
+		f.Fatal(err)
+	}
+	f.Cleanup(func() { bus.Close() })
+	frames := bus.SubscribeN(context.Background(), 4096)
+	f.Fuzz(func(t *testing.T, data []byte) {
+		(&SLCan{bus: bus}).parse(data)
+		for len(frames) > 0 {
+			if fr := <-frames; fr.Length > 8 {
+				t.Fatalf("frame with %d data bytes from %q", fr.Length, data)
+			}
+		}
+	})
+}

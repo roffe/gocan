@@ -70,3 +70,21 @@ func BenchmarkYACAParse(b *testing.B) {
 		ya.parse(data)
 	}
 }
+
+func FuzzParse(f *testing.F) {
+	f.Add([]byte("t2588112233445566778\nF01\n\a\n"))
+	bus, err := gocan.OpenAdapter(context.Background(), &gocan.Loopback{})
+	if err != nil {
+		f.Fatal(err)
+	}
+	f.Cleanup(func() { bus.Close() })
+	frames := bus.SubscribeN(context.Background(), 4096)
+	f.Fuzz(func(t *testing.T, data []byte) {
+		(&YACA{bus: bus}).parse(data)
+		for len(frames) > 0 {
+			if fr := <-frames; fr.Length > 8 {
+				t.Fatalf("frame with %d data bytes from %q", fr.Length, data)
+			}
+		}
+	})
+}
