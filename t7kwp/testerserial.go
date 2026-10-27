@@ -2,23 +2,14 @@ package t7kwp
 
 // Trionic 7 tester-serial kill-list.
 //
-// XEolprg.c, END_EOL state, writeDataByLocalIdentifier 0x98:
+// At the end of EOL programming the ECU checks the tester serial written as
+// PI-area field 0x98 against a list. A serial on the list makes it erase the
+// whole flash and jump to address 0, recoverable only over BDM.
 //
-//	else if( CheckTesterSerialNumber( &p_recBuffer[3] ) )
-//	{
-//	   FlashErase(0);            // wipe the whole chip
-//	   TurnOffSystem = 0;
-//	   TurnOffSystem();          // jump to address 0
-//	}
-//
-// CheckTesterSerialNumber lives in TESTLIM.OBJ (Build/TESTLIM.OBJ in the
-// eu03_erik_org tree). Its 68k code packs Name[9..11] into a 16-bit code and
-// compares it against a 26-entry table: a MATCH bricks the ECU, everything else
-// is accepted. So this is a block-list, not an allow-list.
-//
-// Verified against the object file: the table sits at TESTLIM.OBJ+0xD18 and the
-// routine at +0xD88 (link a6,#-0x68 / 26× move.l (a1)+,(a0)+ / the three
-// cmpi.b #0x20 branches below / dbf-style scan / moveq #1 on match).
+// The check packs Name[9..11] into a 16-bit code and compares it against a
+// 26-entry table: a match bricks the ECU, everything else is accepted. So this
+// is a block-list, not an allow-list. Table and packing are read from the
+// ECU's 68k code: the three space checks below, then a scan of the table.
 var testerSerialKillList = [26]uint16{
 	0x4232, 0x4235, 0x4236, 0x4340, 0x4342, 0x4349, 0x4353, 0x4365, 0x4376,
 	0x4381, 0x4392, 0x43A1, 0x6553, 0x6557, 0x6561, 0x65A9, 0x65B2, 0x65B4,

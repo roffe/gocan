@@ -5,9 +5,7 @@ import (
 	"testing"
 )
 
-// Cases carried over from the reference reimplementation
-// (~/devel/t7diss/checktesterserial.c --selftest), which was derived from
-// TESTLIM.OBJ.
+// Cases carried over from a reference reimplementation of the ECU's check.
 func TestTesterSerialBlocked(t *testing.T) {
 	for _, tt := range []struct {
 		serial  string

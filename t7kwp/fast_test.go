@@ -8,9 +8,9 @@ import (
 	"github.com/roffe/gocan/v2"
 )
 
-// fastECU models the firmware side of the fast transfer (YDiaga.c, X_can.c,
-// XEolprg.c): KWP reassembly on 0x240, responses on 0x258 in ack mode, the
-// upload stream on 0x7C1 and armed download blocks on 0x7C0.
+// fastECU models the ECU side of the fast transfer: KWP reassembly on 0x240,
+// responses on 0x258 in ack mode, the upload stream on 0x7C1 and armed
+// download blocks on 0x7C0.
 type fastECU struct {
 	bus   *gocan.Bus
 	stock bool   // answer the probe like SAAB firmware

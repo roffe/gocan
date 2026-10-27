@@ -384,9 +384,9 @@ const (
 
 // retryOnBusy resends while the ECU answers busyRepeatRequest (NRC 0x21). That
 // code is not a failure — it is the T7 saying "my background flash programmer is
-// still writing the previous block, send it again", and both the spec and
-// XEolprg.c's `eol.u8_command == PROGRAM` branches expect the tester to do
-// exactly that. requestDownload and requestTransferExit are the two that hit it,
+// still writing the previous block, send it again", and both the spec and the
+// ECU's EOL programming state expect the tester to do exactly that.
+// requestDownload and requestTransferExit are the two that hit it,
 // because both immediately follow a transferData whose block is still being
 // programmed. Both are idempotent, so resending is safe. transferData hits it
 // too — see TransferDataBlock.
@@ -507,7 +507,7 @@ func (t *Client) transferDataBlock(ctx context.Context, frames [][8]byte) error 
 }
 
 func (t *Client) ClearDynamicallyDefineLocalId(ctx context.Context) error {
-	// Message is [0x2C, 0xF0, DM_CDDLI, pad]: SetupDynamicRegister (YDiagb.c)
+	// Message is [0x2C, 0xF0, DM_CDDLI, pad]: SetupDynamicRegister
 	// requires the register ID 0xF0 after the SID, and the pad byte makes
 	// NoOfBytes (= len-3) 1 so the DM_CDDLI entry loop actually runs and
 	// clears all NREG register slots. Malformed variants of this message get
@@ -1142,7 +1142,7 @@ type DTC struct {
 
 // ReadDTCByStatus reads stored DTCs (service 0x18). It is a plain read, so a
 // timed-out exchange is simply requested again: the ECU drops an unacked reply
-// after 400 ms (T1_TIMEOUT, Vios.77 VBUS.H), and a fresh request resets its
+// after 400 ms (its T1 timeout), and a fresh request resets its
 // transmit state anyway. One lost or late frame no longer fails the read.
 func (t *Client) ReadDTCByStatus(ctx context.Context, status byte) ([]DTC, error) {
 	var err error
