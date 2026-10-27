@@ -58,7 +58,7 @@ func TestSLCanParse(t *testing.T) {
 	bus := newBus(t)
 	frames := bus.SubscribeN(context.Background(), 4)
 	sl := &SLCan{bus: bus}
-	sl.parse([]byte("z\rt25883F81112233445566\r"))
+	sl.parse([]byte("z\r\at25883F81112233445566\r"))
 	if got, want := <-frames, gocan.NewFrame(0x258, []byte{0x3F, 0x81, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66}); got != want {
 		t.Fatalf("decoded %s, want %s", got, want)
 	}
