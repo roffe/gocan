@@ -2,11 +2,11 @@ package t7kwp
 
 import (
 	"bytes"
-	"context"
 	"slices"
 	"testing"
 
 	"github.com/roffe/gocan/v2"
+	"github.com/roffe/gocan/v2/gocantest"
 )
 
 // payloadBytes is how many of a frame's 8 bytes the ECU actually consumes: it
@@ -126,93 +126,58 @@ func TestRequestDownloadFraming(t *testing.T) {
 	}
 }
 
-// busyOnceECU answers the first transferData with busyRepeatRequest, the way a
-// T7 does while it is still programming the previous block, and records the
-// SID of every request it receives.
-type busyOnceECU struct {
-	bus  *gocan.Bus
-	sids []byte
-}
-
-func (e *busyOnceECU) Open(_ context.Context, b *gocan.Bus) error { e.bus = b; return nil }
-func (e *busyOnceECU) Close() error                               { return nil }
-
-func (e *busyOnceECU) Send(_ context.Context, f gocan.Frame) error {
-	if f.ID != REQ_MSG_ID {
-		return nil // acks
-	}
-	if f.Data[0]&0x40 != 0 { // first frame carries the SID
-		e.sids = append(e.sids, f.Data[3])
-	}
-	if f.Data[0]&0x3F != 0 {
-		return nil // answered on the last frame, whose counter is 0
-	}
-	sid := e.sids[len(e.sids)-1]
-	if len(e.sids) == 1 {
-		e.bus.Deliver(frame(3, 0x7F, sid, BUSY_REPEAT_REQUEST))
-		return nil
-	}
-	e.bus.Deliver(frame(1, sid|0x40))
-	return nil
-}
-
 // A busy transferData must be resent as-is. Re-anchoring with requestDownload
 // makes the ECU read the download address out of the refused block's data.
+// The ECU answers the first transferData with busyRepeatRequest, the way a T7
+// does while it is still programming the previous block.
 func TestTransferDataBlockResendsOnBusy(t *testing.T) {
-	ecu := &busyOnceECU{}
-	bus, err := gocan.OpenAdapter(t.Context(), ecu)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer bus.Close()
-	c := New(bus)
-	c.SetResponseID(0x258)
+	var sids []byte // SID of every request, from its first frame
+	c := newClient(t, &gocantest.Node{Reply: func(f gocan.Frame) []gocan.Frame {
+		if f.ID != REQ_MSG_ID {
+			return nil // acks
+		}
+		if f.Data[0]&0x40 != 0 {
+			sids = append(sids, f.Data[3])
+		}
+		if f.Data[0]&0x3F != 0 {
+			return nil // answered on the last frame, whose counter is 0
+		}
+		sid := sids[len(sids)-1]
+		if len(sids) == 1 {
+			return []gocan.Frame{frame(3, 0x7F, sid, BUSY_REPEAT_REQUEST)}
+		}
+		return []gocan.Frame{frame(1, sid|0x40)}
+	}})
 
 	if err := c.TransferDataBlock(t.Context(), []byte{0x39, 0x38, 0x39, 0x36}); err != nil {
 		t.Fatalf("TransferDataBlock: %v", err)
 	}
-	if !bytes.Equal(ecu.sids, []byte{TRANSFER_DATA, TRANSFER_DATA}) {
-		t.Fatalf("requests % 02X, want the transferData sent twice", ecu.sids)
+	if !bytes.Equal(sids, []byte{TRANSFER_DATA, TRANSFER_DATA}) {
+		t.Fatalf("requests % 02X, want the transferData sent twice", sids)
 	}
 }
 
-// dropAckECU answers readDTCByStatus with a two-frame reply, but ignores the
-// first ack of the first attempt, as if it or the next frame was lost.
-type dropAckECU struct {
-	bus      *gocan.Bus
-	requests int
-}
-
-func (e *dropAckECU) Open(_ context.Context, b *gocan.Bus) error { e.bus = b; return nil }
-func (e *dropAckECU) Close() error                               { return nil }
-
-func (e *dropAckECU) Send(_ context.Context, f gocan.Frame) error {
-	switch {
-	case f.ID == REQ_MSG_ID && f.Data[3] == READ_DTC_BY_STATUS:
-		e.requests++
-		e.bus.Deliver(gocan.NewFrame(0x258, []byte{0xC1, 0xA1, 11, 0x58, 3, 0x01, 0x05, 0x60}))
-	case f.ID == RESP_CHUNK_CONF_ID && f.Data[3] == 0x81 && e.requests > 1:
-		e.bus.Deliver(gocan.NewFrame(0x258, []byte{0x80, 0xA1, 0x04, 0x20, 0x21, 0x13, 0x35, 0x42}))
-	}
-	return nil
-}
-
+// The ECU answers readDTCByStatus with a two-frame reply but ignores the first
+// ack of the first attempt, as if it or the next frame was lost.
 func TestReadDTCByStatusRetriesLostChunk(t *testing.T) {
-	ecu := &dropAckECU{}
-	bus, err := gocan.OpenAdapter(t.Context(), ecu)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer bus.Close()
-	c := New(bus)
-	c.SetResponseID(0x258)
+	requests := 0
+	c := newClient(t, &gocantest.Node{Reply: func(f gocan.Frame) []gocan.Frame {
+		switch {
+		case f.ID == REQ_MSG_ID && f.Data[3] == READ_DTC_BY_STATUS:
+			requests++
+			return []gocan.Frame{gocan.NewFrame(0x258, []byte{0xC1, 0xA1, 11, 0x58, 3, 0x01, 0x05, 0x60})}
+		case f.ID == RESP_CHUNK_CONF_ID && f.Data[3] == 0x81 && requests > 1:
+			return []gocan.Frame{gocan.NewFrame(0x258, []byte{0x80, 0xA1, 0x04, 0x20, 0x21, 0x13, 0x35, 0x42})}
+		}
+		return nil
+	}})
 
 	dtcs, err := c.ReadDTCByStatus(t.Context(), 0x02)
 	if err != nil {
 		t.Fatalf("ReadDTCByStatus: %v", err)
 	}
 	want := []DTC{{"P0105", 0x60}, {"P0420", 0x21}, {"P1335", 0x42}}
-	if !slices.Equal(dtcs, want) || ecu.requests != 2 {
-		t.Fatalf("got %v after %d requests, want %v after 2", dtcs, ecu.requests, want)
+	if !slices.Equal(dtcs, want) || requests != 2 {
+		t.Fatalf("got %v after %d requests, want %v after 2", dtcs, requests, want)
 	}
 }

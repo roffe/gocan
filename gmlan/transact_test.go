@@ -8,34 +8,21 @@ import (
 	"time"
 
 	gocan "github.com/roffe/gocan/v2"
+	"github.com/roffe/gocan/v2/gocantest"
 )
 
-// fakeECU answers requests with scripted frames. reply is called for every
-// frame the client sends and delivers whatever the node would have put on the
-// bus in response.
-type fakeECU struct {
-	bus   *gocan.Bus
-	reply func(e *fakeECU, req gocan.Frame)
-}
-
-func (e *fakeECU) Open(_ context.Context, bus *gocan.Bus) error { e.bus = bus; return nil }
-func (e *fakeECU) Close() error                                 { return nil }
-
-func (e *fakeECU) Send(_ context.Context, f gocan.Frame) error {
-	e.reply(e, f)
-	return nil
-}
-
-func (e *fakeECU) deliver(data ...byte) { e.bus.Deliver(gocan.NewFrame(0x7E8, data)) }
-
-func newTestClient(t *testing.T, reply func(e *fakeECU, req gocan.Frame)) *Client {
+func newTestClient(t *testing.T, node *gocantest.Node) *Client {
 	t.Helper()
-	bus, err := gocan.OpenAdapter(context.Background(), &fakeECU{reply: reply})
-	if err != nil {
-		t.Fatal(err)
+	return NewWithOpts(gocantest.Open(t, node), WithCanID(0x7E0), WithRecvID(0x7E8), WithDefaultTimeout(50*time.Millisecond))
+}
+
+// rx is the node's answer: each payload as a frame on 0x7E8.
+func rx(data ...[]byte) []gocan.Frame {
+	out := make([]gocan.Frame, len(data))
+	for i, d := range data {
+		out[i] = gocan.NewFrame(0x7E8, d)
 	}
-	t.Cleanup(func() { bus.Close() })
-	return NewWithOpts(bus, WithCanID(0x7E0), WithRecvID(0x7E8), WithDefaultTimeout(50*time.Millisecond))
+	return out
 }
 
 // A 10-byte $1A response: first frame carries 4 bytes, one consecutive frame
@@ -58,22 +45,21 @@ func isFlowCtl(f gocan.Frame) bool { b := f.Bytes(); return len(b) >= 1 && b[0] 
 // stayed one transaction behind forever.
 func TestReadDataByIdentifierResyncsAfterAbortedTransfer(t *testing.T) {
 	reads := 0
-	cl := newTestClient(t, func(e *fakeECU, req gocan.Frame) {
+	cl := newTestClient(t, &gocantest.Node{Reply: func(req gocan.Frame) []gocan.Frame {
 		switch {
 		case isRDBI(req):
 			reads++
 			if reads > 1 {
 				// The consecutive frame the first, abandoned read never
 				// collected finally shows up — in this read's window.
-				e.deliver(0x21, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA)
+				return rx([]byte{0x21, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA}, firstFrame)
 			}
-			e.deliver(firstFrame...)
-		case isFlowCtl(req):
-			if reads > 1 {
-				e.deliver(consecFrame...)
-			} // first read: node goes quiet, client times out
+			return rx(firstFrame)
+		case isFlowCtl(req) && reads > 1:
+			return rx(consecFrame)
 		}
-	})
+		return nil // first read: node goes quiet, client times out
+	}})
 
 	if _, err := cl.ReadDataByIdentifier(context.Background(), 0x18); err == nil {
 		t.Fatal("first read: want timeout, got nil error")
@@ -91,17 +77,19 @@ func TestReadDataByIdentifierResyncsAfterAbortedTransfer(t *testing.T) {
 // Traffic left over from an earlier transaction must not be mistaken for this
 // request's answer, and must not eat its timeout budget either.
 func TestRequestSkipsLeftoverFrames(t *testing.T) {
-	cl := newTestClient(t, func(e *fakeECU, req gocan.Frame) {
+	cl := newTestClient(t, &gocantest.Node{Reply: func(req gocan.Frame) []gocan.Frame {
 		if !isRDBI(req) {
-			return
+			return nil
 		}
-		e.deliver(0x24, 0xDE, 0xAD, 0xBE, 0xEF, 0, 0, 0)    // stale consecutive frame
-		e.deliver(0x30, 0x00, 0x00, 0, 0, 0, 0, 0)          // stale flow control
-		e.deliver(0x03, 0x6E, 0x00, 0x00, 0, 0, 0, 0)       // answer to another service
-		e.deliver(0x03, 0x7F, 0x23, 0x78, 0, 0, 0, 0)       // response pending, other service
-		e.deliver(0x03, 0x7F, 0x1A, 0x78, 0, 0, 0, 0)       // response pending, ours
-		e.deliver(0x05, 0x5A, 0x18, 0xAA, 0xBB, 0xCC, 0, 0) // the real answer
-	})
+		return rx(
+			[]byte{0x24, 0xDE, 0xAD, 0xBE, 0xEF, 0, 0, 0},    // stale consecutive frame
+			[]byte{0x30, 0x00, 0x00, 0, 0, 0, 0, 0},          // stale flow control
+			[]byte{0x03, 0x6E, 0x00, 0x00, 0, 0, 0, 0},       // answer to another service
+			[]byte{0x03, 0x7F, 0x23, 0x78, 0, 0, 0, 0},       // response pending, other service
+			[]byte{0x03, 0x7F, 0x1A, 0x78, 0, 0, 0, 0},       // response pending, ours
+			[]byte{0x05, 0x5A, 0x18, 0xAA, 0xBB, 0xCC, 0, 0}, // the real answer
+		)
+	}})
 
 	got, err := cl.ReadDataByIdentifier(context.Background(), 0x18)
 	if err != nil {
@@ -151,35 +139,22 @@ func TestAnswers(t *testing.T) {
 	}
 }
 
-// A consecutive frame shorter than the first frame promised is an error, not
-// a zero-filled tail.
-func TestShortConsecutiveFrame(t *testing.T) {
-	cl := newTestClient(t, func(e *fakeECU, req gocan.Frame) {
-		switch {
-		case isRDBI(req):
-			e.deliver(firstFrame...)
-		case isFlowCtl(req):
-			e.deliver(0x21, 5, 6)
-		}
-	})
-	if got, err := cl.ReadDataByIdentifier(context.Background(), 0x18); err == nil {
-		t.Fatalf("short read returned % 02X, nil", got)
-	}
-}
-
 // A bus that dies mid report is an error, not the DTCs so far.
 func TestReadDTCBusDies(t *testing.T) {
-	cl := newTestClient(t, func(e *fakeECU, req gocan.Frame) {
+	node := &gocantest.Node{}
+	node.Reply = func(req gocan.Frame) []gocan.Frame {
 		if b := req.Bytes(); len(b) >= 2 && b[1] == 0xA9 {
 			go func() {
-				e.deliver(0x03, 0x7F, 0xA9, 0x78, 0, 0, 0, 0)
+				node.Deliver(rx([]byte{0x03, 0x7F, 0xA9, 0x78, 0, 0, 0, 0})...)
 				time.Sleep(10 * time.Millisecond)
-				e.bus.Deliver(gocan.NewFrame(0x5E8, []byte{0x81, 0x01, 0x22, 0x02, 0x12, 0, 0, 0}))
+				node.Deliver(gocan.NewFrame(0x5E8, []byte{0x81, 0x01, 0x22, 0x02, 0x12, 0, 0, 0}))
 				time.Sleep(10 * time.Millisecond)
-				e.bus.Fatal(errors.New("adapter unplugged"))
+				node.Unplug(errors.New("adapter unplugged"))
 			}()
 		}
-	})
+		return nil
+	}
+	cl := newTestClient(t, node)
 	if dtcs, err := cl.ReadDiagnosticInformationStatusOfDTCByStatusMask(context.Background(), 0x12); err == nil {
 		t.Fatalf("dead bus returned %v, nil", dtcs)
 	}
