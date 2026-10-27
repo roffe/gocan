@@ -3,10 +3,12 @@ package socketcan
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/roffe/gocan/v2"
 	"go.einride.tech/can/pkg/candevice"
@@ -86,6 +88,14 @@ func (a *SocketCAN) dial() (*os.File, error) {
 		err = unix.SetsockoptCanRawFilter(fd, unix.SOL_CAN_RAW, unix.CAN_RAW_FILTER, filters)
 	}
 	if err == nil {
+		// Frames stay charged to the send buffer until they are on the bus,
+		// so at the kernel's minimum (about half a dozen frames) write blocks
+		// while the bus catches up instead of a burst overrunning the
+		// interface queue: ENOBUFS on pfifo_fast, silent CoDel drops on
+		// fq_codel.
+		err = unix.SetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_SNDBUF, 0)
+	}
+	if err == nil {
 		err = unix.Bind(fd, &unix.SockaddrCAN{Ifindex: ifi.Index})
 	}
 	if err != nil {
@@ -163,10 +173,21 @@ func (a *SocketCAN) Send(ctx context.Context, f gocan.Frame) error {
 	binary.NativeEndian.PutUint32(buf[:], id)
 	buf[4] = min(f.Length, 8)
 	copy(buf[8:], f.Data[:buf[4]])
-	if _, err := a.f.Write(buf[:]); err != nil {
-		return fmt.Errorf("send error: %w", err)
+	for {
+		_, err := a.f.Write(buf[:])
+		if !errors.Is(err, unix.ENOBUFS) {
+			if err != nil {
+				return fmt.Errorf("send error: %w", err)
+			}
+			return nil
+		}
+		// The interface queue, shared with other sockets, is full.
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("send error: %w", context.Cause(ctx))
+		case <-time.After(time.Millisecond):
+		}
 	}
-	return nil
 }
 
 func (a *SocketCAN) readLoop(ctx context.Context) {
