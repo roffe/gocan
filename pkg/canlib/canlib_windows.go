@@ -5,6 +5,8 @@ import (
 	"sync"
 	"syscall"
 	"unsafe"
+
+	"github.com/roffe/gocan/v2/pkg/w32"
 )
 
 var (
@@ -44,7 +46,7 @@ var (
 
 func Init() error {
 	initOnce.Do(func() {
-		canlib32, err := syscall.LoadDLL("canlib32.dll")
+		canlib32, err := w32.LoadDLL("canlib32.dll")
 		if err != nil {
 			InitErr = err
 			return
@@ -483,11 +485,36 @@ const (
 
 type NotifyCallback func(hnd int32, ctx uintptr, event NotifyFlag) uintptr
 
+// Every handle shares one native callback that dispatches on the handle: Go
+// never frees the callbacks it creates and caps how many a process can have.
+var (
+	notifyMu  sync.RWMutex
+	notifyCBs = map[int32]NotifyCallback{}
+	notifyPtr = sync.OnceValue(func() uintptr {
+		return syscall.NewCallback(func(hnd int32, ctx uintptr, event NotifyFlag) uintptr {
+			notifyMu.RLock()
+			cb := notifyCBs[hnd]
+			notifyMu.RUnlock()
+			if cb == nil {
+				return 0
+			}
+			return cb(hnd, ctx, event)
+		})
+	})
+)
+
 func (hnd Handle) SetNotifyCallback(cb NotifyCallback, flags NotifyFlag) error {
-	if cb != nil {
-		return checkErr(prockvSetNotifyCallback.Call(uintptr(hnd), syscall.NewCallback(cb), 0, uintptr(flags)))
+	if cb == nil {
+		err := checkErr(prockvSetNotifyCallback.Call(uintptr(hnd), 0, 0, uintptr(flags)))
+		notifyMu.Lock()
+		delete(notifyCBs, int32(hnd))
+		notifyMu.Unlock()
+		return err
 	}
-	return checkErr(prockvSetNotifyCallback.Call(uintptr(hnd), 0, 0, uintptr(flags)))
+	notifyMu.Lock()
+	notifyCBs[int32(hnd)] = cb
+	notifyMu.Unlock()
+	return checkErr(prockvSetNotifyCallback.Call(uintptr(hnd), notifyPtr(), 0, uintptr(flags)))
 }
 
 func GetErrorText(status int) (string, error) {
