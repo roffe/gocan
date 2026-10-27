@@ -245,3 +245,64 @@ func TestSubscriptionBookkeeping(t *testing.T) {
 	default:
 	}
 }
+
+// stuckAdapter's Send blocks until release is closed.
+type stuckAdapter struct{ sending, release chan struct{} }
+
+func (a *stuckAdapter) Open(context.Context, *Bus) error { return nil }
+func (a *stuckAdapter) Close() error                     { return nil }
+func (a *stuckAdapter) Send(context.Context, Frame) error {
+	close(a.sending)
+	<-a.release
+	return nil
+}
+
+// A Send queued behind one stuck in the driver gives up with its context.
+func TestSendWaitEndsWithContext(t *testing.T) {
+	a := &stuckAdapter{sending: make(chan struct{}), release: make(chan struct{})}
+	bus, err := OpenAdapter(context.Background(), a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bus.Close()
+	defer close(a.release)
+	go bus.Send(context.Background(), NewFrame(1, nil))
+	<-a.sending
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if err := bus.Send(ctx, NewFrame(2, nil)); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("queued Send: %v, want DeadlineExceeded", err)
+	}
+}
+
+func TestDropWarningRateLimited(t *testing.T) {
+	bus := openLoopback(t)
+	warnings := 0
+	bus.OnEvent(func(e Event) {
+		if e.Type == EventTypeWarning {
+			warnings++
+		}
+	})
+	bus.SubscribeN(context.Background(), 1, 0x100)
+	for range 100 {
+		bus.Deliver(NewFrame(0x100, nil))
+	}
+	if warnings != 1 {
+		t.Fatalf("%d warnings for 99 dropped frames, want 1", warnings)
+	}
+}
+
+func TestFatalAfterClose(t *testing.T) {
+	bus := openLoopback(t)
+	fatal := 0
+	bus.OnEvent(func(e Event) {
+		if e.IsFatal() {
+			fatal++
+		}
+	})
+	bus.Close()
+	bus.Fatal(errors.New("read on a closed port"))
+	if fatal != 0 || bus.Err() != nil {
+		t.Fatalf("%d fatal events, Err %v after a clean Close", fatal, bus.Err())
+	}
+}

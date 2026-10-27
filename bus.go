@@ -49,11 +49,13 @@ type Bus struct {
 	ctx    context.Context
 	cancel context.CancelCauseFunc
 
-	sendMu sync.Mutex
+	sendSem chan struct{} // one Send at a time; a channel so a waiting Send can give up
 
 	subMu      sync.Mutex
 	submap     map[uint32][]*sub // entries are kept when emptied, so a repeated Request reuses the slice
 	globalSubs []*sub
+	dropped    int       // frames dropped since the last drop warning
+	dropWarned time.Time // when that warning went out
 
 	sinkMu sync.Mutex
 	sinks  []*eventSink
@@ -89,6 +91,7 @@ func open(ctx context.Context, name string, adapter Adapter, opts ...Option) (*B
 		name:    name,
 		ctx:     cctx,
 		cancel:  cancel,
+		sendSem: make(chan struct{}, 1),
 		submap:  make(map[uint32][]*sub),
 	}
 	for _, opt := range opts {
@@ -99,6 +102,7 @@ func open(ctx context.Context, name string, adapter Adapter, opts ...Option) (*B
 	context.AfterFunc(cctx, b.releaseAllSubs)
 	if err := adapter.Open(cctx, b); err != nil {
 		cancel(err)
+		adapterNames.Delete(adapter)
 		return nil, err
 	}
 	return b, nil
@@ -159,6 +163,7 @@ func (b *Bus) Close() (err error) {
 	b.closeOnce.Do(func() {
 		b.cancel(ErrClosed)
 		err = b.adapter.Close()
+		adapterNames.Delete(b.adapter)
 	})
 	return
 }
@@ -178,13 +183,25 @@ func (b *Bus) alive() error {
 
 // Send writes one frame to the bus, returning once the adapter has written
 // it (or ctx is done). Concurrent callers are serialized, giving natural
-// inter-frame pacing.
+// inter-frame pacing; a Send waiting for another one gives up when ctx is
+// done. An uncontended Send goes out even on a finished ctx, so cleanup
+// frames sent on a cancelled context still reach the bus.
 func (b *Bus) Send(ctx context.Context, f Frame) error {
+	select {
+	case b.sendSem <- struct{}{}:
+	default:
+		select {
+		case b.sendSem <- struct{}{}:
+		case <-ctx.Done():
+			return context.Cause(ctx)
+		case <-b.ctx.Done():
+			return b.alive()
+		}
+	}
+	defer func() { <-b.sendSem }()
 	if err := b.alive(); err != nil {
 		return err
 	}
-	b.sendMu.Lock()
-	defer b.sendMu.Unlock()
 	return b.adapter.Send(ctx, f)
 }
 
@@ -350,7 +367,7 @@ func (b *Bus) releaseAllSubs() {
 
 // Deliver hands an incoming frame from the adapter to every matching
 // subscriber. Delivery is non-blocking; subscribers that have fallen behind
-// lose the frame.
+// lose the frame, reported by a warning at most once a second.
 func (b *Bus) Deliver(f Frame) {
 	dropped := 0
 	b.subMu.Lock()
@@ -368,10 +385,18 @@ func (b *Bus) Deliver(f Frame) {
 			dropped++
 		}
 	}
+	if dropped > 0 {
+		b.dropped += dropped
+		if now := time.Now(); now.Sub(b.dropWarned) >= time.Second {
+			dropped, b.dropped, b.dropWarned = b.dropped, 0, now
+		} else {
+			dropped = 0
+		}
+	}
 	b.subMu.Unlock()
 	if dropped > 0 {
 		// Emitted outside subMu so a sink may subscribe without deadlocking.
-		b.Emit(Event{Type: EventTypeWarning, Details: fmt.Sprintf("dropped frame 0x%03X for %d slow subscriber(s)", f.ID, dropped)})
+		b.Emit(Event{Type: EventTypeWarning, Details: fmt.Sprintf("dropped %d frame(s) for slow subscribers, last 0x%03X", dropped, f.ID)})
 	}
 }
 
@@ -387,9 +412,10 @@ func (b *Bus) Emit(e Event) {
 }
 
 // Fatal reports an unrecoverable adapter failure: it emits a final fatal
-// event and terminates the bus with err as the cause.
+// event and terminates the bus with err as the cause. Once the bus is done,
+// closed or already failed, it does nothing.
 func (b *Bus) Fatal(err error) {
-	if err == nil {
+	if err == nil || b.ctx.Err() != nil {
 		return
 	}
 	b.Emit(Event{Type: EventTypeFatal, Details: err.Error(), Err: err})
