@@ -2,8 +2,11 @@ package w32
 
 import (
 	"fmt"
+	"path/filepath"
 	"syscall"
 	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
 
 var (
@@ -37,6 +40,22 @@ func init() {
 			panic(err)
 		}
 	}
+}
+
+// LoadDLL loads a driver DLL by name from the system directory or the
+// executable's, never from the working directory or PATH, where a planted
+// copy would be found first. An absolute path loads that file, and the DLLs it
+// imports are looked for in its own folder first.
+func LoadDLL(name string) (*syscall.DLL, error) {
+	flags := uintptr(windows.LOAD_LIBRARY_SEARCH_SYSTEM32 | windows.LOAD_LIBRARY_SEARCH_APPLICATION_DIR)
+	if filepath.IsAbs(name) {
+		flags = windows.LOAD_WITH_ALTERED_SEARCH_PATH
+	}
+	h, err := windows.LoadLibraryEx(name, 0, flags)
+	if err != nil {
+		return nil, &syscall.DLLError{Err: err, ObjName: name, Msg: "Failed to load " + name + ": " + err.Error()}
+	}
+	return &syscall.DLL{Name: name, Handle: syscall.Handle(h)}, nil
 }
 
 // CreateEvent creates or opens a named or unnamed event object.
