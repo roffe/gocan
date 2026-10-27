@@ -273,3 +273,9 @@ func BenchmarkScantoolSend(b *testing.B) {
 		st.Send(ctx, f)
 	}
 }
+
+func TestCANFilterEmptyAcceptsAll(t *testing.T) {
+	if f, m := canFilter(nil); f != "ATCF000" || m != "ATCM000" {
+		t.Fatalf("empty filter programs %s %s, want ATCF000 ATCM000", f, m)
+	}
+}

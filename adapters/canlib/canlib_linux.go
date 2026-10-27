@@ -99,13 +99,26 @@ func (k *CANlib) Open(ctx context.Context, bus *gocan.Bus) error {
 		return fmt.Errorf("setSpeed: %v, RH: %v WH: %v", err, err1, err2)
 	}
 
+	if err := k.busOn(); err != nil {
+		err1 := k.readHandle.Close()
+		err2 := k.writeHandle.Close()
+		return fmt.Errorf("BusOn: %v, RH: %v WH: %v", err, err1, err2)
+	}
+
 	k.readDone = make(chan struct{})
 	go k.readLoop(ctx)
+	return nil
+}
 
+func (k *CANlib) busOn() error {
 	if err := k.readHandle.BusOn(); err != nil {
 		return err
 	}
-	return k.writeHandle.BusOn()
+	if err := k.writeHandle.BusOn(); err != nil {
+		k.readHandle.BusOff()
+		return err
+	}
+	return nil
 }
 
 func (k *CANlib) Close() error {
@@ -217,10 +230,10 @@ func (k *CANlib) readLoop(ctx context.Context) {
 			if err == canlib.ErrNoMsg || err == canlib.ErrTimeout {
 				continue
 			}
-			if ctx.Err() == nil {
-				k.bus.Emit(gocan.Event{Type: gocan.EventTypeError, Details: fmt.Sprintf("recv error: %v", err), Err: err})
+			if ctx.Err() == nil { // unplugged (canERR_HARDWARE) or a dead handle: retrying spins
+				k.bus.Fatal(fmt.Errorf("recv error: %w", err))
 			}
-			continue
+			return
 		}
 		if err := k.deliver(&k.rx); err != nil {
 			k.bus.Emit(gocan.Event{Type: gocan.EventTypeError, Details: err.Error(), Err: err})
@@ -229,6 +242,11 @@ func (k *CANlib) readLoop(ctx context.Context) {
 }
 
 func (k *CANlib) deliver(msg *canlib.CANMessage) error {
+	// Error frames carry no frame, and LOCAL_TXACK marks what the write
+	// handle sent, echoed to the read handle on the same channel.
+	if msg.Flags&uint32(canlib.MSG_ERROR_FRAME|canlib.MSG_LOCAL_TXACK) != 0 {
+		return nil
+	}
 	if msg.DLC > 8 {
 		return errors.New("readLoop invalid data length")
 	}

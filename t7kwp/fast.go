@@ -10,11 +10,10 @@ import (
 	"github.com/roffe/gocan/v2"
 )
 
-// Fast raw transfer: a firmware extension (T7 eu03_erik_org_modified, not in
-// any SAAB release; ECU side documented in Vios.77/Source/DIA_VBUS.H). Data
-// frames carry 8 raw bytes with no KWP framing and no per-frame ack, so a
-// transfer costs ~1/8 frame per byte instead of a round trip per 6 bytes. The
-// old services are untouched; FastInfo tells whether an ECU has it.
+// Fast raw transfer: an extension in a modified T7 firmware, not in any SAAB
+// release. Data frames carry 8 raw bytes with no KWP framing and no per-frame
+// ack, so a transfer costs ~1/8 frame per byte instead of a round trip per 6
+// bytes. The old services are untouched; FastInfo tells whether an ECU has it.
 const (
 	FAST_DOWN_ID uint32 = 0x7C0 // tester -> ECU data frames (EOL download)
 	FAST_UP_ID   uint32 = 0x7C1 // ECU -> tester data frames (upload)

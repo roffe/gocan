@@ -2,6 +2,7 @@ package drewtech
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"time"
@@ -38,6 +39,10 @@ func (a *Drewtech) Open(ctx context.Context, bus *gocan.Bus) error {
 	a.dev = drewtech.New(
 		drewtech.WithCANFrameHandler(a.recvFrame),
 		drewtech.WithErrorHandler(func(err error) {
+			if errors.Is(err, drewtech.ErrDeviceGone) {
+				bus.Fatal(err)
+				return
+			}
 			bus.Emit(gocan.Event{Type: gocan.EventTypeError, Details: err.Error(), Err: err})
 		}),
 	)
@@ -56,7 +61,12 @@ func (a *Drewtech) Open(ctx context.Context, bus *gocan.Bus) error {
 		a.dev.Close()
 		return fmt.Errorf("PassThruConnect failed: %w", err)
 	}
-	return a.SetFilter(a.cfg.CANFilter)
+	if err := a.SetFilter(a.cfg.CANFilter); err != nil {
+		a.dev.PassThruDisconnect()
+		a.dev.PassThruClose()
+		return err
+	}
+	return nil
 }
 
 func (a *Drewtech) recvFrame(f *drewtech.CANFrame) {
@@ -95,6 +105,9 @@ func (a *Drewtech) SetFilter(filters []uint32) error {
 }
 
 func (a *Drewtech) Send(ctx context.Context, f gocan.Frame) error {
+	if f.Extended {
+		return errors.New("drewtech: 29-bit frames are not supported")
+	}
 	return a.dev.PassThruWriteMsgs(f.ID, f.Bytes())
 }
 

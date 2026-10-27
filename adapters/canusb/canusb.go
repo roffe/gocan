@@ -33,6 +33,7 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	gocan "github.com/roffe/gocan/v2"
@@ -107,12 +108,13 @@ type CANUSB struct {
 	canRate    string // S/s command for the configured bit-rate
 	code, mask string // M acceptance-code / m acceptance-mask commands
 
-	sendSem chan struct{} // outstanding-command credits, released by the z/Z/F/BELL reply
-	bitTime time.Duration // one bit at cfg.CANRate
-	txFree  time.Time     // when the frames sent so far are on the wire; Send-only
-	writeMu sync.Mutex    // serializes port writes (Send vs status poll vs SetFilter)
-	line    []byte        // reply parser accumulator
-	txBuf   [27]byte      // longest transmit command (T + 8 id + dlc + 16 data + CR); Send-only, which the Bus serializes
+	sendSem  chan struct{} // outstanding-command credits, released by the z/Z/F/BELL reply
+	lostAcks atomic.Bool   // F went out without a credit; its reply frees them all
+	bitTime  time.Duration // one bit at cfg.CANRate
+	txFree   time.Time     // when the frames sent so far are on the wire; Send-only
+	writeMu  sync.Mutex    // serializes port writes (Send vs status poll vs SetFilter)
+	line     []byte        // reply parser accumulator
+	txBuf    [27]byte      // longest transmit command (T + 8 id + dlc + 16 data + CR); Send-only, which the Bus serializes
 }
 
 func New(cfg gocan.Config) (gocan.Adapter, error) {
@@ -177,10 +179,11 @@ func (cu *CANUSB) Open(ctx context.Context, bus *gocan.Bus) error {
 	}
 	cu.port.SetReadTimeout(4 * time.Millisecond)
 
-	// Setup sequence per manual §1.5: flush stale queue, probe version, force
-	// timestamp off, set bit-rate, set acceptance filters. Channel stays
-	// closed until we send O below (filters require closed-but-initiated).
-	for _, c := range []string{"", "", "", "V", "N", "Z0", cu.canRate, cu.code, cu.mask} {
+	// Setup sequence per manual §1.5: flush stale queue, close a channel left
+	// open by a previous session (S/M/m only work on a closed one), probe
+	// version, force timestamp off, set bit-rate, set acceptance filters.
+	// Channel stays closed until we send O below.
+	for _, c := range []string{"", "", "", "C", "V", "N", "Z0", cu.canRate, cu.code, cu.mask} {
 		if _, err := cu.port.Write(append([]byte(c), cr)); err != nil {
 			cu.port.Close()
 			return fmt.Errorf("canusb setup write failed: %w", err)
@@ -189,11 +192,13 @@ func (cu *CANUSB) Open(ctx context.Context, bus *gocan.Bus) error {
 	}
 	cu.port.ResetInputBuffer()
 
+	if _, err := cu.port.Write([]byte{'O', cr}); err != nil {
+		cu.port.Close()
+		return fmt.Errorf("canusb open write failed: %w", err)
+	}
 	go cu.readLoop(ctx)
 	go cu.statusPoll(ctx)
-
-	// Open the CAN channel.
-	return cu.write([]byte{'O', cr})
+	return nil
 }
 
 // Close shuts the CAN channel and the port. cu.port is written once in Open
@@ -203,16 +208,20 @@ func (cu *CANUSB) Close() error {
 	if cu.port == nil { // Open never ran or failed before assigning
 		return nil
 	}
-	if _, err := cu.port.Write([]byte{'C', cr}); err != nil {
-		return fmt.Errorf("canusb close write failed: %w", err)
+	cu.writeMu.Lock()
+	_, err := cu.port.Write([]byte{'C', cr})
+	cu.writeMu.Unlock()
+	if err == nil {
+		time.Sleep(100 * time.Millisecond)
+		cu.port.ResetInputBuffer()
+		cu.port.ResetOutputBuffer()
+	} else {
+		err = fmt.Errorf("canusb close write failed: %w", err)
 	}
-	time.Sleep(100 * time.Millisecond)
-	cu.port.ResetInputBuffer()
-	cu.port.ResetOutputBuffer()
-	if err := cu.port.Close(); err != nil {
-		return fmt.Errorf("failed to close com port: %w", err)
+	if cerr := cu.port.Close(); cerr != nil {
+		err = errors.Join(err, fmt.Errorf("failed to close com port: %w", cerr))
 	}
-	return nil
+	return err
 }
 
 // Send encodes and writes one frame, blocking while the transmit window is
@@ -299,7 +308,9 @@ func (cu *CANUSB) write(b []byte) error {
 }
 
 // statusPoll asks for the status flags every second (manual §1.5 recommends
-// 500-1000ms). The F reply also acks, recovering a lost transmit ack.
+// 500-1000ms). F takes a credit like any command. When none comes free for a
+// whole interval the acks holding them were lost: F goes out without one, and
+// since the device answers in order its reply frees every credit.
 func (cu *CANUSB) statusPoll(ctx context.Context) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
@@ -310,6 +321,8 @@ func (cu *CANUSB) statusPoll(ctx context.Context) {
 		case <-ticker.C:
 			select {
 			case cu.sendSem <- struct{}{}:
+			case <-ticker.C:
+				cu.lostAcks.Store(true)
 			case <-ctx.Done():
 				return
 			}
@@ -367,7 +380,13 @@ func (cu *CANUSB) dispatch(line []byte) {
 	case 'z', 'Z': // transmit ack
 		cu.ack()
 	case 'F': // status reply (also a command ack)
-		cu.ack()
+		if cu.lostAcks.Swap(false) {
+			for len(cu.sendSem) > 0 {
+				cu.ack()
+			}
+		} else {
+			cu.ack()
+		}
 		if err := decodeStatus(line[1:]); err != nil {
 			cu.error(fmt.Errorf("CAN status error: %w", err))
 		}

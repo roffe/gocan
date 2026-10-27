@@ -65,7 +65,7 @@ func New(cfg gocan.Config) (gocan.Adapter, error) {
 func (tx *Txbridge) Open(ctx context.Context, bus *gocan.Bus) error {
 	tx.bus = bus
 	if tx.port != nil { // pre-set by tests
-		go tx.readLoop(ctx)
+		go tx.readLoop(ctx, tx.port)
 		return nil
 	}
 	address := "192.168.4.1:1337"
@@ -76,13 +76,14 @@ func (tx *Txbridge) Open(ctx context.Context, bus *gocan.Bus) error {
 		address += ":1337"
 	}
 	d := net.Dialer{Timeout: 2 * time.Second}
-	port, err := d.Dial("tcp", address)
+	port, err := d.DialContext(ctx, "tcp", address)
 	if err != nil {
 		return err
 	}
 	if t, ok := port.(*net.TCPConn); ok {
 		t.SetNoDelay(true) // low latency for small log messages
 	}
+	port.SetDeadline(time.Now().Add(5 * time.Second)) // a dongle that never answers the setup fails Open
 	tx.port = port
 
 	tx.port.Write([]byte("ccc"))
@@ -99,16 +100,19 @@ func (tx *Txbridge) Open(ctx context.Context, bus *gocan.Bus) error {
 		tx.port.Close()
 		return err
 	}
+	port.SetDeadline(time.Time{})
 
-	go tx.readLoop(ctx)
+	go tx.readLoop(ctx, tx.port)
 	return nil
 }
 
 func (tx *Txbridge) Close() error {
+	tx.writeMu.Lock()
+	defer tx.writeMu.Unlock()
 	if tx.port == nil {
 		return nil
 	}
-	tx.port.Write([]byte("c")) // best-effort channel close
+	tx.write([]byte("c")) // best-effort channel close
 	err := tx.port.Close()
 	tx.port = nil
 	return err
@@ -117,6 +121,9 @@ func (tx *Txbridge) Close() error {
 // Send serializes and writes a single CAN frame; the write completing is the
 // confirmation.
 func (tx *Txbridge) Send(ctx context.Context, f gocan.Frame) error {
+	if f.Extended {
+		return errors.New("txbridge: 29-bit frames are not supported")
+	}
 	return tx.Raw(encode(tx.txBuf[:0], f))
 }
 
@@ -149,11 +156,20 @@ func (tx *Txbridge) Raw(data []byte) error {
 	if tx.port == nil {
 		return errors.New("txbridge port not open")
 	}
-	n, err := tx.port.Write(data)
+	n, err := tx.write(data)
 	if tx.cfg.Debug {
 		tx.bus.Emit(gocan.Event{Type: gocan.EventTypeDebug, Details: fmt.Sprintf("tx>> % X (wrote %d/%d, err=%v)", data, n, len(data), err)})
 	}
 	return err
+}
+
+// write is bounded on a network port, so a dead link cannot hold writeMu
+// (and with it Close) for good.
+func (tx *Txbridge) write(b []byte) (int, error) {
+	if c, ok := tx.port.(net.Conn); ok {
+		c.SetWriteDeadline(time.Now().Add(time.Second))
+	}
+	return tx.port.Write(b)
 }
 
 // Subscribe delivers dongle commands carrying one of the given command bytes
@@ -257,7 +273,7 @@ func (tx *Txbridge) checkVersion(minVersion string) error {
 	return nil
 }
 
-func (tx *Txbridge) readLoop(ctx context.Context) {
+func (tx *Txbridge) readLoop(ctx context.Context, port io.Reader) {
 	var (
 		parsingCommand  bool
 		haveLength      bool // length byte read? zero is a legitimate size
@@ -267,7 +283,6 @@ func (tx *Txbridge) readLoop(ctx context.Context) {
 		cmdbuffPtr      uint8
 	)
 	cmdbuff := make([]byte, 256)
-	port := tx.port // Close nils tx.port while this loop may still be reading
 	readbuf := make([]byte, 4096)
 
 	reset := func() {

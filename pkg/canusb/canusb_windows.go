@@ -2,10 +2,13 @@ package canusb
 
 import (
 	"fmt"
-	"log"
+	"slices"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"unsafe"
+
+	"github.com/roffe/gocan/v2/pkg/w32"
 )
 
 var InitErr error
@@ -49,7 +52,7 @@ var (
 
 func Init() error {
 	initOnce.Do(func() {
-		canusb, err := syscall.LoadDLL(dllName)
+		canusb, err := w32.LoadDLL(dllName)
 		if err != nil {
 			InitErr = err
 			return
@@ -260,48 +263,44 @@ func (ch *CANHANDLE) SetTimeouts(receiveTimeout, sendTimeout uint32) error {
 // buffer, so a frame costs no allocation: msg is only valid until fn
 // returns, copy what you keep.
 func (ch *CANHANDLE) SetReceiveCallback(fn CallbackFunc) error {
+	rxMu.Lock()
+	defer rxMu.Unlock()
+	slot := slices.Index(rxOwner[:], ch.h)
 	if fn == nil {
-		return checkErr(procSetReceiveCallBack.Call(uintptr(ch.h), 0))
+		err := checkErr(procSetReceiveCallBack.Call(uintptr(ch.h), 0))
+		if slot >= 0 {
+			rxFns[slot].Store(nil)
+			rxOwner[slot] = 0
+		}
+		return err
 	}
-	return checkErr(procSetReceiveCallBack.Call(uintptr(ch.h), syscall.NewCallback(fn)))
-}
-
-// Set a receive callback function. Set the callback to nil to reset it.
-// the callback will be called in a separate go routine to prevent blocking the receive loop if your callback takes long to execute.
-// this will allow the receive loop to continue receiving messages while the callback is processing the message.
-func (ch *CANHANDLE) SetAsyncReceiveCallback(fn CallbackFunc) error {
-	if fn == nil {
-		return checkErr(procSetReceiveCallBack.Call(uintptr(ch.h), 0))
+	if slot < 0 {
+		if slot = slices.Index(rxOwner[:], 0); slot < 0 {
+			return fmt.Errorf("canusb: more than %d channels with a receive callback", len(rxOwner))
+		}
 	}
-	return checkErr(procSetReceiveCallBack.Call(uintptr(ch.h), syscall.NewCallback(createAsyncWrapper(fn))))
-}
-
-func createAsyncWrapper(fn CallbackFunc) func(cbmsg *CANMsg) uintptr {
-	asyncMsg := make(chan *CANMsg, 128)
-	go func() {
-		for {
-			for msg := range asyncMsg {
-				fn(msg)
+	rxOwner[slot] = ch.h
+	rxFns[slot].Store(&fn)
+	if rxPtrs[slot] == 0 {
+		rxPtrs[slot] = syscall.NewCallback(func(msg *CANMsg) uintptr {
+			if fn := rxFns[slot].Load(); fn != nil {
+				return (*fn)(msg)
 			}
-		}
-	}()
-	return func(canMsg *CANMsg) uintptr {
-		msg := &CANMsg{
-			ID:        canMsg.ID,
-			Timestamp: canMsg.Timestamp,
-			Flags:     canMsg.Flags,
-			Len:       canMsg.Len,
-		}
-		copy(msg.Data[:], canMsg.Data[:])
-		select {
-		case asyncMsg <- msg:
-		default:
-			// Drop message if channel is full
-			log.Printf("async handler channel full, dropped message %3X", msg.ID)
-		}
-		return 1
+			return 0
+		})
 	}
+	return checkErr(procSetReceiveCallBack.Call(uintptr(ch.h), rxPtrs[slot]))
 }
+
+// The DLL's receive callback carries no context, so each channel needs a
+// native callback of its own. Go never frees those and caps how many a
+// process can have, so a fixed set is handed out and reused.
+var (
+	rxMu    sync.Mutex
+	rxOwner [8]int32 // handle using each slot, 0 = free
+	rxFns   [8]atomic.Pointer[CallbackFunc]
+	rxPtrs  [8]uintptr
+)
 
 // Get all found adapters that is connected to this machine.
 func GetAdapters() (adapters []string, err error) {

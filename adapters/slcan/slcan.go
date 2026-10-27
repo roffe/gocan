@@ -10,6 +10,7 @@ package slcan
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -65,11 +66,16 @@ func (sl *SLCan) Open(ctx context.Context, bus *gocan.Bus) error {
 		p.Close()
 		return err
 	}
-	if _, err := p.Write([]byte(rate + "\r")); err != nil {
-		p.Close()
-		return err
+	// C first: S only works on a closed channel, and one left open by an
+	// earlier session would keep its old rate. Its BELL is flushed below.
+	for _, c := range []string{"C\r", rate + "\r"} {
+		if _, err := p.Write([]byte(c)); err != nil {
+			p.Close()
+			return err
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
-	time.Sleep(10 * time.Millisecond)
+	p.ResetInputBuffer()
 	if _, err := p.Write([]byte("O\r")); err != nil {
 		p.Close()
 		return err
@@ -90,6 +96,9 @@ func (sl *SLCan) Close() error {
 }
 
 func (sl *SLCan) Send(ctx context.Context, f gocan.Frame) error {
+	if f.Extended {
+		return errors.New("slcan: 29-bit frames are not supported")
+	}
 	buf := append(sl.txBuf[:0], 't')
 	id := f.ID & 0x7FF
 	buf = append(buf, nybbleToHex(byte(id>>8)), nybbleToHex(byte(id>>4)&0xF), nybbleToHex(byte(id)&0xF))
@@ -129,6 +138,10 @@ func (sl *SLCan) readLoop(ctx context.Context) {
 
 func (sl *SLCan) parse(data []byte) {
 	for _, b := range data {
+		if b == 0x07 { // a command's error reply, in place of its CR
+			sl.bus.Emit(gocan.Event{Type: gocan.EventTypeWarning, Details: "command error (BELL)"})
+			continue
+		}
 		if b != '\r' {
 			sl.line = append(sl.line, b)
 			continue

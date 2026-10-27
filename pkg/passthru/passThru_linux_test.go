@@ -71,6 +71,9 @@ func TestFakeLibrary(t *testing.T) {
 	if _, err := pt.PassThruReadMsg(9, &msg, 0); !errors.Is(err, ErrBufferEmpty) {
 		t.Fatalf("ReadMsg empty: %v", err)
 	}
+	if n, err := pt.PassThruReadMsg(9, &msg, 0); n != 1 || !errors.Is(err, ErrBufferOverflow) {
+		t.Fatalf("ReadMsg overflow: n=%d err=%v, want the frame and ErrBufferOverflow", n, err)
+	}
 
 	tx := PassThruMsg{ProtocolID: CAN, TxFlags: CAN_29BIT_ID, DataSize: 5, ExtraDataIndex: 5}
 	binary.BigEndian.PutUint32(tx.Data[:], 0x258)
@@ -135,7 +138,7 @@ func TestHotPathAllocs(t *testing.T) {
 	tx.Data[4] = 0x42
 	n := testing.AllocsPerRun(100, func() {
 		*num = 1
-		if err := pt.PassThruReadMsgs(9, rx, num, 0); err != nil && !errors.Is(err, ErrBufferEmpty) {
+		if err := pt.PassThruReadMsgs(9, rx, num, 0); err != nil && !errors.Is(err, ErrBufferEmpty) && !errors.Is(err, ErrBufferOverflow) {
 			t.Fatal(err)
 		}
 		*num = 1

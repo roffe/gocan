@@ -281,6 +281,8 @@ func (el *ELM327) sendCommand(cmd string) ([]byte, error) {
 // the next command.
 func (el *ELM327) exchange() ([]byte, error) {
 	el.cmd = append(el.cmd, '\r')
+	// Whatever a timed-out command left behind is not this command's reply.
+	el.port.ResetInputBuffer()
 	if err := el.writePort(el.cmd); err != nil {
 		return nil, err
 	}

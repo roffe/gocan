@@ -25,14 +25,15 @@ func Parse(data []byte) (*Command, error) {
 
 // decode fills c from one encoded command; c.data aliases data.
 func (c *Command) decode(data []byte) error {
-	if len(data) < 3 {
+	if len(data) < 3 || len(data) < 3+int(data[1]) {
 		return fmt.Errorf("data too short")
 	}
+	n := int(data[1])
 	*c = Command{
 		command:  data[0],
 		length:   data[1],
-		data:     data[2 : 2+data[1]],
-		checksum: data[2+data[1]],
+		data:     data[2 : 2+n],
+		checksum: data[2+n],
 	}
 
 	//	log.Printf("data: %X", c.data)

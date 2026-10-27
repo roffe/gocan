@@ -20,6 +20,7 @@ type elmPort struct {
 	pos        int
 	writes     []string // recorded while record is set
 	record     bool
+	stale      []byte // read before any reply until the input is flushed
 }
 
 func (p *elmPort) Write(b []byte) (int, error) {
@@ -33,7 +34,17 @@ func (p *elmPort) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
+func (p *elmPort) ResetInputBuffer() error {
+	p.stale = nil
+	return nil
+}
+
 func (p *elmPort) Read(b []byte) (int, error) {
+	if len(p.stale) > 0 {
+		n := copy(b, p.stale)
+		p.stale = p.stale[n:]
+		return n, nil
+	}
 	n := copy(b, p.reply[p.pos:])
 	p.pos += n
 	return n, nil
@@ -91,6 +102,20 @@ func TestELM327Send(t *testing.T) {
 		if got := <-frames; got != w {
 			t.Fatalf("delivered %s, want %s", got, w)
 		}
+	}
+}
+
+// A reply left over from a command that timed out is flushed, not taken as
+// the next command's reply.
+func TestELM327FlushesStaleReply(t *testing.T) {
+	fp := &elmPort{frameReply: []byte("7E8021100\r\r>"), stale: []byte("7E80241AA\r\r>")}
+	el, bus := newELM(t, fp)
+	frames := bus.SubscribeN(context.Background(), 8)
+	if err := el.Send(gocan.WithExpectedResponses(context.Background(), 1), gocan.NewFrame(0x7E0, []byte{0x01, 0x11})); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := <-frames, gocan.NewFrame(0x7E8, []byte{0x02, 0x11, 0x00}); got != want {
+		t.Fatalf("delivered %s, want %s", got, want)
 	}
 }
 

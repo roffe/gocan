@@ -17,7 +17,7 @@ require (
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/mdlayher/netlink v1.8.0 // indirect
 	github.com/mdlayher/socket v0.5.1 // indirect
-	golang.org/x/net v0.54.0 // indirect
+	golang.org/x/net v0.60.0 // indirect
 )
 
 replace go.einride.tech/can => github.com/samuelbrian/can-go v0.0.2

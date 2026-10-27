@@ -9,6 +9,8 @@ import (
 	"sync"
 	"syscall"
 	"unsafe"
+
+	"github.com/roffe/gocan/v2/pkg/w32"
 )
 
 var (
@@ -69,7 +71,7 @@ var (
 
 func Init() error {
 	initOnce.Do(func() {
-		d2xx, err := syscall.LoadDLL("ftd2xx.dll")
+		d2xx, err := w32.LoadDLL("ftd2xx.dll")
 		if err != nil {
 			InitErr = err
 			return

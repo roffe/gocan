@@ -58,6 +58,8 @@ func (ya *YACA) Open(ctx context.Context, bus *gocan.Bus) error {
 	p.ResetOutputBuffer()
 	p.ResetInputBuffer()
 
+	p.Write([]byte("C\r")) // S/M/m only work on a closed channel
+	time.Sleep(5 * time.Millisecond)
 	switch ya.cfg.CANRate {
 	case 33.3:
 		p.Write([]byte("S0\r"))
@@ -67,6 +69,9 @@ func (ya *YACA) Open(ctx context.Context, bus *gocan.Bus) error {
 		p.Write([]byte("S2\r"))
 	case 615.384:
 		p.Write([]byte("S3\r"))
+	default:
+		p.Close()
+		return fmt.Errorf("unsupported CAN rate: %g kbit/s", ya.cfg.CANRate)
 	}
 	time.Sleep(5 * time.Millisecond)
 
@@ -75,6 +80,7 @@ func (ya *YACA) Open(ctx context.Context, bus *gocan.Bus) error {
 	time.Sleep(5 * time.Millisecond)
 	p.Write([]byte(mask + "\r"))
 	time.Sleep(5 * time.Millisecond)
+	p.ResetInputBuffer() // the BELL C answers on a closed channel
 	p.Write([]byte("O\r"))
 
 	go ya.readLoop(ctx)
@@ -92,6 +98,9 @@ func (ya *YACA) Close() error {
 }
 
 func (ya *YACA) Send(ctx context.Context, f gocan.Frame) error {
+	if f.Extended {
+		return errors.New("yaca: 29-bit frames are not supported")
+	}
 	out := encode(ya.txBuf[:0], f)
 	if _, err := ya.port.Write(out); err != nil {
 		return fmt.Errorf("failed to write to com port: %s, %w", out, err)

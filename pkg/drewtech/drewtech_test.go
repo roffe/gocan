@@ -3,7 +3,10 @@ package drewtech
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	"go.bug.st/serial"
 )
@@ -34,20 +37,17 @@ func TestParseCANFrame(t *testing.T) {
 }
 
 func TestIsCANRx(t *testing.T) {
-	cases := []struct {
-		length uint16
-		op     uint8
-		want   bool
+	for _, c := range []struct {
+		cmd  []byte
+		want bool
 	}{
-		{0x1e, SubCmdCANRx, true},  // real 2-byte-data frame
-		{0x24, SubCmdCANRx, true},  // max
-		{0x2c, SubCmdCANRx, false}, // device-info reply also uses op 0x09
-		{0x24, SubCmdCANTx, false}, // tx echo
-	}
-	for _, c := range cases {
-		p := &Packet{Length: c.length, Payload: []byte{c.op}}
+		{[]byte{SubCmdCANRx, 0}, true},                  // RX push, 0x0009
+		{[]byte{SubCmdCANRx, FlagResponse}, false},      // board-info reply, 0x8109
+		{[]byte{SubCmdCANTx, FlagResponseFinal}, false}, // transmit reply, 0x8008
+	} {
+		p := &Packet{Payload: c.cmd}
 		if got := p.IsCANRx(); got != c.want {
-			t.Errorf("len=%02X op=%02X: IsCANRx=%v want %v", c.length, c.op, got, c.want)
+			t.Errorf("command % X: IsCANRx=%v want %v", c.cmd, got, c.want)
 		}
 	}
 }
@@ -163,24 +163,44 @@ func TestExtractVersionsShortInput(t *testing.T) {
 	}
 }
 
-// lastWrite records the most recent write; the embedded nil Port panics on
-// anything else.
+// lastWrite records the most recent write and answers it with the device's
+// 0x08 reply: the next of codes, then txQueued. The embedded nil Port panics
+// on anything else.
 type lastWrite struct {
 	serial.Port
-	b []byte
+	d       *Device
+	b       []byte
+	codes   []uint32
+	reply   Packet
+	payload [12]byte
 }
 
 func (w *lastWrite) Write(p []byte) (int, error) {
 	w.b = append(w.b[:0], p...)
+	code := txQueued
+	if len(w.codes) > 0 {
+		code, w.codes = w.codes[0], w.codes[1:]
+	}
+	w.payload[0] = SubCmdCANTx
+	w.payload[1] = FlagResponseFinal
+	copy(w.payload[2:4], p[10:12]) // the Tx seq
+	binary.LittleEndian.PutUint32(w.payload[8:12], code)
+	w.reply = Packet{Direction: DirectionIn, Payload: w.payload[:]}
+	w.d.handlePacket(&w.reply)
 	return len(p), nil
+}
+
+func newWriteDevice(codes ...uint32) (*Device, *lastWrite) {
+	d := New()
+	w := &lastWrite{d: d, codes: codes}
+	d.port = w
+	return d, w
 }
 
 // TestWriteMsgsInPlace checks the frame built in the reused buffer is the
 // one cmd+ToBytes produced, and that sending it allocates nothing.
 func TestWriteMsgsInPlace(t *testing.T) {
-	w := &lastWrite{}
-	d := New()
-	d.port = w
+	d, w := newWriteDevice()
 	data := []byte{0x40, 0xA1, 0x02, 0x1A, 0x90}
 	if err := d.PassThruWriteMsgs(0x7E0, data); err != nil {
 		t.Fatal(err)
@@ -198,6 +218,21 @@ func TestWriteMsgsInPlace(t *testing.T) {
 	}
 	if n := testing.AllocsPerRun(100, func() { d.PassThruWriteMsgs(0x7E0, data) }); n != 0 {
 		t.Errorf("PassThruWriteMsgs allocates %v times per frame, want 0", n)
+	}
+}
+
+// A full device queue is retried; a refused frame is an error.
+func TestWriteMsgsWaitsForQueued(t *testing.T) {
+	d, w := newWriteDevice(txQueueFull, txQueueFull)
+	if err := d.PassThruWriteMsgs(0x7E0, []byte{1}); err != nil {
+		t.Fatal(err)
+	}
+	if seq := binary.LittleEndian.Uint16(w.b[10:12]); seq != 3 {
+		t.Fatalf("queued by write %d, want 3", seq)
+	}
+	w.codes = []uint32{0x10C}
+	if err := d.PassThruWriteMsgs(0x7E0, []byte{1}); err == nil {
+		t.Fatal("a refused frame returned nil")
 	}
 }
 
@@ -229,5 +264,111 @@ func TestReadPathAllocs(t *testing.T) {
 	}
 	if q := len(d.rxQueue); q != 0 {
 		t.Errorf("%d frames queued for PassThruReadMsgs behind a handler", q)
+	}
+}
+
+// errPort fails every read, like an unplugged device.
+type errPort struct{ serial.Port }
+
+func (errPort) Read([]byte) (int, error) { return 0, errors.New("EIO") }
+
+func TestReadLoopStopsWhenDeviceGone(t *testing.T) {
+	var errs []error
+	d := New(WithErrorHandler(func(err error) { errs = append(errs, err) }))
+	d.port = errPort{}
+	d.running.Store(true)
+	d.wg.Add(1)
+	d.readLoop()
+	if len(errs) != 1 || !errors.Is(errs[0], ErrDeviceGone) {
+		t.Fatalf("errors %v, want one ErrDeviceGone", errs)
+	}
+}
+
+// handshakePort answers like a Mongoose whose firmware is already running: no
+// reply to the ECHO, a success reply to everything else unless status names
+// one, every reply carrying device handle 0x1234 at body[20:24].
+type handshakePort struct {
+	serial.Port
+	rx     chan []byte
+	status map[uint16]uint32 // reply status by command, body[4:6]
+	wrote  [][]byte
+}
+
+func (p *handshakePort) Write(b []byte) (int, error) {
+	p.wrote = append(p.wrote, bytes.Clone(b))
+	c := binary.LittleEndian.Uint16(b[8:10])
+	if c == 0x0100 { // ECHO
+		return len(b), nil
+	}
+	r := make([]byte, 8+24)
+	binary.LittleEndian.PutUint16(r[0:2], uint16(len(r)-4))
+	binary.LittleEndian.PutUint16(r[2:4], uint16(len(r)-4)^ChecksumWord)
+	r[6] = 0x01 // from board 1
+	binary.LittleEndian.PutUint16(r[8:10], c|0x8000)
+	copy(r[10:12], b[10:12])
+	binary.LittleEndian.PutUint32(r[16:20], p.status[c])
+	binary.LittleEndian.PutUint32(r[24:28], 0x1234)
+	p.rx <- r
+	return len(b), nil
+}
+
+func (p *handshakePort) Read(b []byte) (int, error) {
+	select {
+	case r := <-p.rx:
+		return copy(b, r), nil
+	case <-time.After(10 * time.Millisecond):
+		return 0, nil
+	}
+}
+
+func (p *handshakePort) Close() error { return nil }
+
+func newHandshakeDevice(t *testing.T, status map[uint16]uint32) (*Device, *handshakePort) {
+	p := &handshakePort{rx: make(chan []byte, 16), status: status}
+	d := New()
+	d.port = p
+	d.running.Store(true)
+	d.wg.Add(1)
+	go d.readLoop()
+	t.Cleanup(func() { d.Close() })
+	return d, p
+}
+
+func TestOpenWithoutEchoReply(t *testing.T) {
+	d, _ := newHandshakeDevice(t, nil)
+	if err := d.PassThruOpen(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestOpenWithoutBatteryVoltage(t *testing.T) {
+	d, _ := newHandshakeDevice(t, map[uint16]uint32{0x0003: stVBattLoss})
+	if err := d.PassThruOpen(); err == nil || !strings.Contains(err.Error(), "no voltage") {
+		t.Fatalf("err = %v, want no voltage on the vehicle connector", err)
+	}
+}
+
+// A filter is stopped with op 0x0E and the handle the device gave it.
+func TestFilterHandle(t *testing.T) {
+	d, p := newHandshakeDevice(t, nil)
+	id, err := d.PassThruStartMsgFilter(PASS_FILTER, 0x258, 0xFFFFFFFF)
+	if err != nil || id != 0x1234 {
+		t.Fatalf("filter id %#x, %v; want the device handle 0x1234", id, err)
+	}
+	if err := d.PassThruStopMsgFilter(id); err != nil {
+		t.Fatal(err)
+	}
+	w := p.wrote[len(p.wrote)-1]
+	if w[8] != SubCmdDeleteObject || binary.LittleEndian.Uint32(w[16:20]) != objPass || binary.LittleEndian.Uint32(w[20:24]) != 0x1234 {
+		t.Fatalf("stop sent % X", w)
+	}
+}
+
+func TestSeqWrapsLikeTheDLL(t *testing.T) {
+	d := New()
+	for want := range 600 {
+		if got := d.nextSeq(); got != uint16(want%255+1) {
+			t.Fatalf("call %d: seq %d, want %d", want, got, want%255+1)
+		}
 	}
 }

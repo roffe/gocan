@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/roffe/gocan/v2"
 )
@@ -173,5 +174,109 @@ func TestReadFlashShortReadFails(t *testing.T) {
 	}
 	if ecu.reads != 3 {
 		t.Fatalf("%d reads, want 3 attempts", ecu.reads)
+	}
+}
+
+// scriptECU answers each frame the client sends with onSend.
+type scriptECU struct {
+	bus    *gocan.Bus
+	onSend func(e *scriptECU, f gocan.Frame)
+}
+
+func (e *scriptECU) Open(_ context.Context, b *gocan.Bus) error { e.bus = b; return nil }
+func (e *scriptECU) Close() error                               { return nil }
+func (e *scriptECU) Send(_ context.Context, f gocan.Frame) error {
+	e.onSend(e, f)
+	return nil
+}
+
+func newScriptClient(t *testing.T, onSend func(e *scriptECU, f gocan.Frame)) *Client {
+	t.Helper()
+	bus, err := gocan.OpenAdapter(t.Context(), &scriptECU{onSend: onSend})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { bus.Close() })
+	c := New(bus)
+	c.SetResponseID(0x258)
+	return c
+}
+
+// A row received twice (a CAN double receive) is data once.
+func TestRecvDataRepeatedRow(t *testing.T) {
+	data := []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14}
+	c := newScriptClient(t, func(e *scriptECU, f gocan.Frame) {
+		switch {
+		case f.ID == REQ_MSG_ID && f.Data[3] == READ_DATA_BY_IDENTIFIER:
+			e.bus.Deliver(gocan.NewFrame(0x258, append([]byte{0xC2, 0xA1, 17, 0x61, 0xF0}, data[0:3]...)))
+		case f.ID == RESP_CHUNK_CONF_ID && f.Data[3] == 0x82:
+			row := gocan.NewFrame(0x258, append([]byte{0x81, 0xA1}, data[3:9]...))
+			e.bus.Deliver(row)
+			e.bus.Deliver(row)
+		case f.ID == RESP_CHUNK_CONF_ID && f.Data[3] == 0x81:
+			e.bus.Deliver(gocan.NewFrame(0x258, append([]byte{0x80, 0xA1}, data[9:15]...)))
+		}
+	})
+	got, err := c.recvData(t.Context(), len(data))
+	if err != nil || !bytes.Equal(got, data) {
+		t.Fatalf("got % 02X, %v, want % 02X", got, err, data)
+	}
+}
+
+// Late replies to other reads are skipped, not returned as this read's data.
+func TestReadMemoryByAddressSkipsOtherReplies(t *testing.T) {
+	c := newScriptClient(t, func(e *scriptECU, f gocan.Frame) {
+		if f.ID == REQ_MSG_ID && f.Data[3] == READ_MEMORY_BY_ADDRESS {
+			e.bus.Deliver(gocan.NewFrame(0x258, []byte{0xC0, 0xA1, 0x05, 0x61, 0xF0, 0x11, 0x22, 0x33})) // a logger row
+			e.bus.Deliver(gocan.NewFrame(0x258, []byte{0xC0, 0xA1, 0x05, 0x63, 0xF0, 0x20, 0x00, 0xBB})) // another address
+			e.bus.Deliver(gocan.NewFrame(0x258, []byte{0xC0, 0xA1, 0x05, 0x63, 0xF0, 0x10, 0x00, 0xAA}))
+		}
+	})
+	got, err := c.ReadMemoryByAddress(t.Context(), 0xF01000, 1)
+	if err != nil || !bytes.Equal(got, []byte{0xAA}) {
+		t.Fatalf("got % 02X, %v, want AA", got, err)
+	}
+}
+
+// A row counter that does not count down ends the read instead of acking forever.
+func TestRecvChunkedRowCountdown(t *testing.T) {
+	acks := 0
+	c := newScriptClient(t, func(e *scriptECU, f gocan.Frame) {
+		switch {
+		case f.ID == REQ_MSG_ID && f.Data[3] == READ_DATA_BY_IDENTIFIER:
+			e.bus.Deliver(gocan.NewFrame(0x258, []byte{0xC1, 0xA1, 0x08, 0x61, 0x10, 1, 2, 3}))
+		case f.ID == RESP_CHUNK_CONF_ID:
+			acks++
+			e.bus.Deliver(gocan.NewFrame(0x258, []byte{0x81, 0xA1, 4, 5, 6, 7, 8, 9}))
+		}
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	if _, err := c.ReadDataByIdentifier(ctx, 0x10); err == nil || acks != 1 {
+		t.Fatalf("err = %v after %d acks, want an error after 1", err, acks)
+	}
+}
+
+// The ECU's verdict on a definition is read: a rejected entry is an error.
+func TestSendDDLVerdict(t *testing.T) {
+	for _, tt := range []struct {
+		reply gocan.Frame
+		ok    bool
+	}{
+		{frame(2, DYNAMICALLY_DEFINE_IDENTIFIER|0x40, 0xF0), true},
+		{frame(3, 0x7F, DYNAMICALLY_DEFINE_IDENTIFIER, REQUEST_OUT_OF_RANGE), false},
+	} {
+		c := newScriptClient(t, func(e *scriptECU, f gocan.Frame) {
+			switch {
+			case f.ID != REQ_MSG_ID:
+			case f.Data[0]&0x80 != 0:
+				e.bus.Deliver(gocan.NewFrame(REQ_CHUNK_CONF_ID, []byte{0x40, 0xA1, 0x3F, 0x81, 0, 0, 0, 0}))
+			default:
+				e.bus.Deliver(tt.reply)
+			}
+		})
+		if err := c.DynamicallyDefineLocalIdBySymbolNumber(t.Context(), 0, 0x1234); (err == nil) != tt.ok {
+			t.Errorf("reply %s: err %v", tt.reply, err)
+		}
 	}
 }

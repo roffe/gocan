@@ -49,37 +49,28 @@ type VersionInfo struct {
 
 // -------- 1. PassThruOpen --------
 
-// PassThruOpen runs the full device initialization handshake (matching the
-// DLL's open sequence) and caches firmware/serial info for PassThruReadVersion.
+// PassThruOpen runs the DLL's device handshake and caches firmware/serial info
+// for PassThruReadVersion. Like the DLL it only requires the board info, the
+// jump to firmware and the open; the other answers go unused.
 func (d *Device) PassThruOpen() error {
-	if err := d.init(); err != nil {
-		return fmt.Errorf("init: %w", err)
-	}
-	info, err := d.getDeviceInfo(0x003C)
+	d.init()
+	info, err := d.getDeviceInfo()
 	if err != nil {
 		return fmt.Errorf("get device info: %w", err)
 	}
 	d.info = info
-	if err := d.getConfig(0x2F); err != nil {
-		return fmt.Errorf("get config: %w", err)
-	}
-	if err := d.getStatus(); err != nil {
-		return fmt.Errorf("get status: %w", err)
+	d.getConfig(0x2F)
+	if fw := info.FW; uint32(fw.Major)<<24|uint32(fw.Minor)<<16|uint32(fw.Patch)<<8|uint32(fw.Build) >= 0x01010400 {
+		d.getStatus()
 	}
 	if _, err := d.getFirmwareVersion(); err != nil {
 		return fmt.Errorf("get firmware: %w", err)
 	}
-	if err := d.sendMagic(); err != nil {
-		return fmt.Errorf("send magic: %w", err)
+	if err := d.openDevice(); err != nil {
+		return fmt.Errorf("open device: %w", err)
 	}
-	if _, err := d.getDeviceInfo(0xFFFF); err != nil {
-		return fmt.Errorf("get device info ffff: %w", err)
-	}
-	serial, err := d.getSerial()
-	if err != nil {
-		return fmt.Errorf("get serial: %w", err)
-	}
-	d.serial = serial
+	d.getDeviceInfo()
+	d.serial, _ = d.getSerial()
 	return nil
 }
 
@@ -91,7 +82,6 @@ func (d *Device) PassThruClose() error {
 	payload[0] = SubCmdClose
 	payload[1] = FlagRequestFinal
 	binary.LittleEndian.PutUint16(payload[2:4], d.nextSeq())
-	binary.LittleEndian.PutUint16(payload[6:8], 0x4C49)
 	// Best-effort: even if the device doesn't ack, still close the port.
 	_, werr := d.sendAndWait(cmd(0, payload), time.Second)
 	cerr := d.Close()
@@ -113,7 +103,7 @@ func (d *Device) PassThruConnect(baudRate uint32) error {
 	payload[1] = FlagRequestFinal
 	binary.LittleEndian.PutUint16(payload[2:4], d.nextSeq())
 	binary.LittleEndian.PutUint32(payload[12:16], baudRate)
-	if _, err := d.sendAndWait(cmd(d.channel, payload), 2*time.Second); err != nil {
+	if _, err := d.do(cmd(d.channel, payload)); err != nil {
 		return err
 	}
 
@@ -125,7 +115,7 @@ func (d *Device) PassThruConnect(baudRate uint32) error {
 	binary.LittleEndian.PutUint32(p2[8:12], 0x01)
 	binary.LittleEndian.PutUint32(p2[12:16], ProtocolCAN)
 	binary.LittleEndian.PutUint32(p2[16:20], 0x0E)
-	_, err := d.sendAndWait(cmd(d.channel, p2), 2*time.Second)
+	_, err := d.do(cmd(d.channel, p2))
 	return err
 }
 
@@ -138,7 +128,7 @@ func (d *Device) PassThruDisconnect() error {
 	payload[0] = SubCmdDisconnect
 	payload[1] = FlagRequestFinal
 	binary.LittleEndian.PutUint16(payload[2:4], d.nextSeq())
-	_, err := d.sendAndWait(cmd(d.channel, payload), 2*time.Second)
+	_, err := d.do(cmd(d.channel, payload))
 	return err
 }
 
@@ -183,10 +173,11 @@ func (d *Device) PassThruReadMsgs(max int, timeout time.Duration) ([]*CANFrame, 
 
 // -------- 6. PassThruWriteMsgs --------
 
-// PassThruWriteMsgs transmits a CAN frame (fire-and-forget; the device replies
-// with 0x08/0x0A confirmations that the read loop consumes). The wire frame is
-// the fixed-size 0x24 layout the DLL sends: payload padded to 32 bytes, actual
-// data length carried at [16:18].
+// PassThruWriteMsgs queues a CAN frame on the device, returning once the
+// device has queued it, as the DLL does with a zero timeout. A full device
+// queue is retried for up to a second. The wire frame is the fixed-size 0x24
+// layout the DLL sends: payload padded to 32 bytes, actual data length carried
+// at [16:18].
 func (d *Device) PassThruWriteMsgs(canID uint32, data []byte) error {
 	if len(data) > 8 {
 		return fmt.Errorf("invalid message: %d data bytes, CAN max is 8", len(data))
@@ -195,20 +186,64 @@ func (d *Device) PassThruWriteMsgs(canID uint32, data []byte) error {
 	// per frame.
 	d.txMu.Lock()
 	defer d.txMu.Unlock()
-	buf := d.txBuf[:]
-	clear(buf)
-	payload := buf[8:]
-	payload[0] = SubCmdCANTx
-	payload[1] = FlagRequestFinal
-	binary.LittleEndian.PutUint16(payload[2:4], d.nextSeq())
-	binary.LittleEndian.PutUint16(payload[4:6], 0x0001)
-	binary.LittleEndian.PutUint16(payload[16:18], uint16(4+len(data))) // id + data
-	binary.BigEndian.PutUint32(payload[20:24], canID)
-	copy(payload[24:], data)
-	hdr := Packet{Length: uint16(len(payload) + 4), Direction: DirectionOut, Channel: d.channel}
-	hdr.putHeader(buf)
-	_, err := d.port.Write(buf)
-	return err
+	deadline := time.Now().Add(time.Second)
+	for {
+		buf := d.txBuf[:]
+		clear(buf)
+		payload := buf[8:]
+		payload[0] = SubCmdCANTx
+		payload[1] = FlagRequestFinal
+		seq := d.nextSeq()
+		binary.LittleEndian.PutUint16(payload[2:4], seq)
+		binary.LittleEndian.PutUint16(payload[4:6], 0x0001)
+		binary.LittleEndian.PutUint16(payload[16:18], uint16(4+len(data))) // id + data
+		binary.BigEndian.PutUint32(payload[20:24], canID)
+		copy(payload[24:], data)
+		hdr := Packet{Length: uint16(len(payload) + 4), Direction: DirectionOut, Channel: d.channel}
+		hdr.putHeader(buf)
+		if _, err := d.port.Write(buf); err != nil {
+			return err
+		}
+		code, err := d.waitTx(seq)
+		if err != nil {
+			return err
+		}
+		switch code {
+		case txQueued:
+			return nil
+		case txQueueFull:
+			if time.Now().After(deadline) {
+				return errors.New("tx: device queue full")
+			}
+			time.Sleep(time.Millisecond)
+		default:
+			return fmt.Errorf("tx refused: status 0x%X", code)
+		}
+	}
+}
+
+// waitTx returns the device's 0x08 reply code for Tx seq. Bus faults are
+// reported and waited out, as the DLL does.
+func (d *Device) waitTx(seq uint16) (uint32, error) {
+	d.txTimer.Reset(time.Second)
+	defer d.txTimer.Stop()
+	for {
+		select {
+		case r := <-d.txReply:
+			if r.seq != seq {
+				continue // the late reply to a Tx that timed out
+			}
+			if r.code == txBusFault {
+				d.handleError(errors.New("tx: bus fault"))
+				continue
+			}
+			return r.code, nil
+		case <-d.txTimer.C:
+			return 0, fmt.Errorf("tx: no reply from the device for seq %d", seq)
+		case <-d.closeCh:
+			return 0, errors.New("device closed")
+		}
+	}
 }
 
 // -------- 7 & 8. Periodic messages (host-side) --------
@@ -308,14 +343,14 @@ func (d *Device) PassThruStartMsgFilter(filterType, pattern, mask uint32) (uint3
 	payload[15] = 0x04 // pattern length (4 for CAN)
 	binary.BigEndian.PutUint32(payload[16:20], mask)
 	binary.BigEndian.PutUint32(payload[20:24], pattern)
-	resp, err := d.sendAndWait(cmd(d.channel, payload), 2*time.Second)
+	resp, err := d.do(cmd(d.channel, payload))
 	if err != nil {
 		return 0, err
 	}
-	id := uint32(0)
-	if len(resp.Payload) >= 16 {
-		id = binary.LittleEndian.Uint32(resp.Payload[12:16])
+	if len(resp.Payload) < 20 {
+		return 0, errors.New("short filter reply")
 	}
+	id := binary.LittleEndian.Uint32(resp.Payload[16:20]) // the device's handle for the filter
 	d.mu.Lock()
 	d.filters = append(d.filters, id)
 	d.mu.Unlock()
@@ -324,14 +359,16 @@ func (d *Device) PassThruStartMsgFilter(filterType, pattern, mask uint32) (uint3
 
 // -------- 10. PassThruStopMsgFilter --------
 
-// PassThruStopMsgFilter removes a filter by id.
+// PassThruStopMsgFilter removes a pass filter by the id PassThruStartMsgFilter
+// returned.
 func (d *Device) PassThruStopMsgFilter(filterID uint32) error {
-	payload := make([]byte, 12)
-	payload[0] = SubCmdClearFilters
+	payload := make([]byte, 16)
+	payload[0] = SubCmdDeleteObject
 	payload[1] = FlagRequestFinal
 	binary.LittleEndian.PutUint16(payload[2:4], d.nextSeq())
-	binary.LittleEndian.PutUint16(payload[6:8], uint16(filterID&0xFFFF))
-	if _, err := d.sendAndWait(cmd(d.channel, payload), 2*time.Second); err != nil {
+	binary.LittleEndian.PutUint32(payload[8:12], objPass)
+	binary.LittleEndian.PutUint32(payload[12:16], filterID)
+	if _, err := d.do(cmd(d.channel, payload)); err != nil {
 		return err
 	}
 	d.mu.Lock()
@@ -465,15 +502,18 @@ func (d *Device) GetChannelConfig(param uint32) (uint32, error) {
 	return 0, nil
 }
 
-// ClearMsgFilters removes all installed filters (wire op 0x10 subtype 2).
+// ClearMsgFilters removes all pass and block filters, one wire op 0x10 per
+// object type.
 func (d *Device) ClearMsgFilters() error {
-	payload := make([]byte, 12)
-	payload[0] = SubCmdClearFilters
-	payload[1] = FlagRequestFinal
-	binary.LittleEndian.PutUint16(payload[2:4], d.nextSeq())
-	binary.LittleEndian.PutUint32(payload[8:12], filClearAll)
-	if _, err := d.sendAndWait(cmd(d.channel, payload), 2*time.Second); err != nil {
-		return err
+	for _, typ := range []uint32{objPass, objBlock} {
+		payload := make([]byte, 12)
+		payload[0] = SubCmdClearFilters
+		payload[1] = FlagRequestFinal
+		binary.LittleEndian.PutUint16(payload[2:4], d.nextSeq())
+		binary.LittleEndian.PutUint32(payload[8:12], typ)
+		if _, err := d.do(cmd(d.channel, payload)); err != nil {
+			return err
+		}
 	}
 	d.mu.Lock()
 	d.filters = nil

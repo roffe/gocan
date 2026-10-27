@@ -1,6 +1,7 @@
 package gmlan
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"time"
@@ -126,10 +127,25 @@ func answers(req, resp []byte) bool {
 	if resp[1] == 0x7F {
 		return len(resp) >= 3 && resp[2] == service
 	}
+	off := 1
 	if resp[0]>>4 == 1 { // first frame: [10][len][SID+0x40]...
-		return len(resp) >= 3 && resp[2] == service+0x40
+		off = 2
 	}
-	return resp[1] == service+0x40
+	// A late reply for another DID or address of the same service is not ours.
+	echo := req[2:min(len(req), 2+echoLen(service))]
+	return len(resp) >= off+1+len(echo) && resp[off] == service+0x40 && bytes.Equal(resp[off+1:off+1+len(echo)], echo)
+}
+
+// echoLen is how many request bytes after the service byte its positive
+// response repeats.
+func echoLen(service byte) int {
+	switch service {
+	case READ_DATA_BY_IDENTIFIER, WRITE_DATA_BY_IDENTIFIER:
+		return 1
+	case READ_MEMORY_BY_ADDRESS:
+		return 3
+	}
+	return 0
 }
 
 // isResponsePending reports a negative response with code $78, which means

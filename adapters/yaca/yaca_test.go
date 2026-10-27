@@ -30,7 +30,6 @@ func TestYACASend(t *testing.T) {
 		{gocan.NewFrame(0x7, nil), "t0070\r"},
 		{gocan.NewFrame(0x240, []byte{0x3F, 0x81}), "t24023f81\r"},
 		{gocan.NewFrame(0xFFFF, []byte{1, 2, 3, 4, 5, 6, 7, 8}), "tfff80102030405060708\r"}, // masked to 12 bits
-		{gocan.NewExtendedFrame(0x18DAF110, []byte{0xAB}), "t1101ab\r"},                     // no extended support
 	} {
 		if err := ya.Send(ctx, tt.f); err != nil {
 			t.Fatal(err)
@@ -38,6 +37,9 @@ func TestYACASend(t *testing.T) {
 		if got := string(p.wrote); got != tt.want {
 			t.Errorf("Send(%s) wrote %q, want %q", tt.f, got, tt.want)
 		}
+	}
+	if err := ya.Send(ctx, gocan.NewExtendedFrame(0x18DAF110, []byte{0xAB})); err == nil {
+		t.Error("29-bit frame sent with an 11-bit id")
 	}
 	f := gocan.NewFrame(0x258, []byte{1, 2, 3, 4, 5, 6, 7, 8})
 	if n := testing.AllocsPerRun(100, func() { ya.Send(ctx, f) }); n != 0 {

@@ -3,6 +3,7 @@ package gmlan
 import (
 	"bytes"
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -113,6 +114,7 @@ func TestRequestSkipsLeftoverFrames(t *testing.T) {
 
 func TestAnswers(t *testing.T) {
 	rdbi := []byte{0x02, 0x1A, 0x18}
+	rmba := []byte{0x06, 0x23, 0x10, 0x20, 0x30, 0x00, 0x02}
 	for _, tt := range []struct {
 		name string
 		req  []byte
@@ -128,6 +130,13 @@ func TestAnswers(t *testing.T) {
 		{"another service's answer", rdbi, []byte{0x03, 0x63, 0x00, 0x00}, false},
 		{"another service's rejection", rdbi, []byte{0x03, 0x7F, 0x23, 0x31}, false},
 		{"echo of our own request", rdbi, []byte{0x02, 0x1A, 0x18}, false},
+		{"late answer for another DID", rdbi, []byte{0x05, 0x5A, 0x19, 1, 2, 3}, false},
+		{"late first frame for another DID", rdbi, []byte{0x10, 0x0C, 0x5A, 0x19, 1, 2, 3, 4}, false},
+		{"memory read answer", rmba, []byte{0x07, 0x63, 0x10, 0x20, 0x30, 1, 2}, true},
+		{"memory read first frame", rmba, []byte{0x10, 0x0C, 0x63, 0x10, 0x20, 0x30, 1, 2}, true},
+		{"late memory read of another address", rmba, []byte{0x07, 0x63, 0x10, 0x20, 0x40, 1, 2}, false},
+		{"write answer", []byte{0x03, 0x3B, 0x18, 1}, []byte{0x02, 0x7B, 0x18}, true},
+		{"late write answer for another DID", []byte{0x03, 0x3B, 0x18, 1}, []byte{0x02, 0x7B, 0x19}, false},
 		// A first frame we sent is answered with flow control, not a service.
 		{"flow control for our first frame", []byte{0x10, 0x0C, 0x3B, 0x18}, []byte{0x30, 0x00, 0x00}, true},
 		{"stale answer during our first frame", []byte{0x10, 0x0C, 0x3B, 0x18}, []byte{0x03, 0x5A, 0x18, 0}, false},
@@ -139,5 +148,39 @@ func TestAnswers(t *testing.T) {
 		if got := answers(tt.req, tt.resp); got != tt.want {
 			t.Errorf("%s: answers(% 02X, % 02X) = %v, want %v", tt.name, tt.req, tt.resp, got, tt.want)
 		}
+	}
+}
+
+// A consecutive frame shorter than the first frame promised is an error, not
+// a zero-filled tail.
+func TestShortConsecutiveFrame(t *testing.T) {
+	cl := newTestClient(t, func(e *fakeECU, req gocan.Frame) {
+		switch {
+		case isRDBI(req):
+			e.deliver(firstFrame...)
+		case isFlowCtl(req):
+			e.deliver(0x21, 5, 6)
+		}
+	})
+	if got, err := cl.ReadDataByIdentifier(context.Background(), 0x18); err == nil {
+		t.Fatalf("short read returned % 02X, nil", got)
+	}
+}
+
+// A bus that dies mid report is an error, not the DTCs so far.
+func TestReadDTCBusDies(t *testing.T) {
+	cl := newTestClient(t, func(e *fakeECU, req gocan.Frame) {
+		if b := req.Bytes(); len(b) >= 2 && b[1] == 0xA9 {
+			go func() {
+				e.deliver(0x03, 0x7F, 0xA9, 0x78, 0, 0, 0, 0)
+				time.Sleep(10 * time.Millisecond)
+				e.bus.Deliver(gocan.NewFrame(0x5E8, []byte{0x81, 0x01, 0x22, 0x02, 0x12, 0, 0, 0}))
+				time.Sleep(10 * time.Millisecond)
+				e.bus.Fatal(errors.New("adapter unplugged"))
+			}()
+		}
+	})
+	if dtcs, err := cl.ReadDiagnosticInformationStatusOfDTCByStatusMask(context.Background(), 0x12); err == nil {
+		t.Fatalf("dead bus returned %v, nil", dtcs)
 	}
 }

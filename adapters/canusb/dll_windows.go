@@ -102,8 +102,10 @@ func (d *DLL) Open(ctx context.Context, bus *gocan.Bus) error {
 	return nil
 }
 
-// Close empties the receive queue, waits out the transmit queue and releases
-// the handle. Guarded for the Bus.Close and failed-Open double call.
+// Close empties both queues and releases the handle. Every Send already
+// waited for the transmit queue, so only a Send stuck on a dead bus leaves
+// frames there, and waiting for those would hang Close. Guarded for the
+// Bus.Close and failed-Open double call.
 func (d *DLL) Close() error {
 	if d.h == nil { // Open never ran or failed
 		return nil
@@ -117,7 +119,7 @@ func (d *DLL) Close() error {
 		if cerr := d.h.SetReceiveCallback(nil); cerr != nil {
 			d.error(fmt.Errorf("clear callback failed: %w", cerr))
 		}
-		if ferr := d.h.Flush(dll.FLUSH_EMPTY_INQUEUE | dll.FLUSH_WAIT); ferr != nil {
+		if ferr := d.h.Flush(dll.FLUSH_EMPTY_INQUEUE | dll.FLUSH_DONTWAIT); ferr != nil {
 			d.error(fmt.Errorf("flush failed: %w", ferr))
 		}
 		err = d.h.Close()

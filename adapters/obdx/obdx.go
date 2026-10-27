@@ -48,10 +48,11 @@ func (a *OBDXProWifi) Open(ctx context.Context, bus *gocan.Bus) error {
 	a.bus = bus
 	d := net.Dialer{Timeout: 5 * time.Second}
 	var err error
-	a.conn, err = d.Dial("tcp", "192.168.4.1:23")
+	a.conn, err = d.DialContext(ctx, "tcp", "192.168.4.1:23")
 	if err != nil {
 		return err
 	}
+	a.conn.SetDeadline(time.Now().Add(5 * time.Second)) // a device that never answers the setup fails Open
 
 	a.conn.Write([]byte("ATAR\r"))
 	time.Sleep(20 * time.Millisecond)
@@ -95,6 +96,7 @@ func (a *OBDXProWifi) Open(ctx context.Context, bus *gocan.Bus) error {
 		a.conn.Close()
 		return fmt.Errorf("failed to enable networking: %w", err)
 	}
+	a.conn.SetDeadline(time.Time{})
 
 	go a.readLoop(ctx)
 	return nil
@@ -106,6 +108,7 @@ func (a *OBDXProWifi) Close() error {
 			return
 		}
 		time.Sleep(80 * time.Millisecond)
+		a.conn.SetWriteDeadline(time.Now().Add(time.Second)) // a dead link must not hang Close
 		cmds := []*dvi.Command{
 			dvi.New(0x31, []byte{0x02, 0x00}), // disable networking
 			dvi.New(0x25, []byte{}),           // reset

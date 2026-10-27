@@ -3,6 +3,7 @@
 package passthru
 
 import (
+	"errors"
 	"fmt"
 	"unsafe"
 
@@ -103,13 +104,15 @@ func (j *PassThru) PassThruDisconnect(channelID uint32) error {
 }
 
 // PassThruReadMsg reads a single message into pMsg and returns how many
-// messages (0 or 1) the library actually delivered.
+// messages (0 or 1) the library actually delivered. With ErrBufferOverflow
+// the message read is valid; earlier ones were lost.
 func (j *PassThru) PassThruReadMsg(channelID uint32, pMsg *PassThruMsg, timeout uint32) (uint32, error) {
 	pNumMsgs := uint32(1)
-	if err := j.PassThruReadMsgs(channelID, pMsg, &pNumMsgs, timeout); err != nil {
+	err := j.PassThruReadMsgs(channelID, pMsg, &pNumMsgs, timeout)
+	if err != nil && !errors.Is(err, ErrBufferOverflow) {
 		return 0, err
 	}
-	return pNumMsgs, nil
+	return pNumMsgs, err
 }
 
 // PassThruReadMsgs reads up to *pNumMsgs messages into the contiguous array

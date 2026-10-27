@@ -1,6 +1,7 @@
 package pcan
 
 import (
+	"errors"
 	"fmt"
 	"syscall"
 	"unsafe"
@@ -52,7 +53,7 @@ func SetReceiveEvent(channel TPCANHandle) (*ReceiveEvent, error) {
 	if err := CAN_SetValue(
 		channel,
 		PCAN_RECEIVE_EVENT,
-		uintptr(unsafe.Pointer(&eventVal32)),
+		unsafe.Pointer(&eventVal32),
 		4, // sizeof(DWORD)
 	); err != nil {
 		// important: close handle if we fail to register it
@@ -72,22 +73,24 @@ func (re *ReceiveEvent) ClearReceiveEvent(channel TPCANHandle) error {
 
 	// Tell driver to stop signaling any event:
 	var zero uint32 = 0
-	if err := CAN_SetValue(
+	err := CAN_SetValue(
 		channel,
 		PCAN_RECEIVE_EVENT,
-		uintptr(unsafe.Pointer(&zero)),
+		unsafe.Pointer(&zero),
 		4,
-	); err != nil {
-		return fmt.Errorf("CAN_SetValue(PCAN_RECEIVE_EVENT=0) failed: %w", err)
+	)
+	if err != nil {
+		err = fmt.Errorf("CAN_SetValue(PCAN_RECEIVE_EVENT=0) failed: %w", err)
 	}
 
-	// Close our side of the handle
-	if err := w32.CloseHandle(re.Handle); err != nil {
-		return fmt.Errorf("CloseHandle failed: %w", err)
+	// Close our side of the handle, also when the channel is already
+	// uninitialized and the driver refused the reset above.
+	if cerr := w32.CloseHandle(re.Handle); cerr != nil {
+		err = errors.Join(err, fmt.Errorf("CloseHandle failed: %w", cerr))
 	}
 
 	re.Handle = 0
-	return nil
+	return err
 }
 
 // Wait blocks until the PCAN driver signals that there is at least one CAN

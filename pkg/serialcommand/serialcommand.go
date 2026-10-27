@@ -35,17 +35,11 @@ func (sc *SerialCommand) MarshalBinary() ([]byte, error) {
 }
 
 func (sc *SerialCommand) UnmarshalBinary(data []byte) error {
-	if len(data) < 3 {
-		return nil
-	}
-	sc.Command = data[0]
-
-	commandSize := data[1]
-	if len(data) != int(commandSize)+3 {
+	if len(data) < 3 || len(data) != int(data[1])+3 {
 		return fmt.Errorf("invalid command size")
 	}
-
-	sc.Data = data[2 : 2+commandSize]
+	sc.Command = data[0]
+	sc.Data = data[2 : len(data)-1]
 
 	checksum := data[len(data)-1]
 	if checksum != sc.Checksum() {
