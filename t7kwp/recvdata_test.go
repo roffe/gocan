@@ -256,3 +256,27 @@ func TestRecvChunkedRowCountdown(t *testing.T) {
 		t.Fatalf("err = %v after %d acks, want an error after 1", err, acks)
 	}
 }
+
+// The ECU's verdict on a definition is read: a rejected entry is an error.
+func TestSendDDLVerdict(t *testing.T) {
+	for _, tt := range []struct {
+		reply gocan.Frame
+		ok    bool
+	}{
+		{frame(2, DYNAMICALLY_DEFINE_IDENTIFIER|0x40, 0xF0), true},
+		{frame(3, 0x7F, DYNAMICALLY_DEFINE_IDENTIFIER, REQUEST_OUT_OF_RANGE), false},
+	} {
+		c := newScriptClient(t, func(e *scriptECU, f gocan.Frame) {
+			switch {
+			case f.ID != REQ_MSG_ID:
+			case f.Data[0]&0x80 != 0:
+				e.bus.Deliver(gocan.NewFrame(REQ_CHUNK_CONF_ID, []byte{0x40, 0xA1, 0x3F, 0x81, 0, 0, 0, 0}))
+			default:
+				e.bus.Deliver(tt.reply)
+			}
+		})
+		if err := c.DynamicallyDefineLocalIdBySymbolNumber(t.Context(), 0, 0x1234); (err == nil) != tt.ok {
+			t.Errorf("reply %s: err %v", tt.reply, err)
+		}
+	}
+}

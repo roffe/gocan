@@ -58,19 +58,20 @@ func (t *Client) request(ctx context.Context, id uint32, payload []byte, timeout
 	return t.c.Request(rctx, newFrame(id, payload), replyID)
 }
 
-// requestReply sends payload on REQ_MSG_ID and returns the first frame of its
-// reply, skipping frames that answer anything else, such as a late reply to an
-// earlier request. echo is what the positive reply repeats after the SID.
-func (t *Client) requestReply(ctx context.Context, payload []byte, echo ...byte) (gocan.Frame, error) {
+// requestReply sends f, the request's last frame, and returns the first frame
+// of the reply to service, skipping frames that answer anything else, such as
+// a late reply to an earlier request. echo is what the positive reply repeats
+// after the SID.
+func (t *Client) requestReply(ctx context.Context, f gocan.Frame, service byte, echo ...byte) (gocan.Frame, error) {
 	rctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
 	defer cancel()
 	ch := t.c.Subscribe(rctx, t.responseID)
-	if err := t.c.Send(gocan.WithResponseTimeout(gocan.WithExpectedResponses(rctx, 1), DefaultTimeout), newFrame(REQ_MSG_ID, payload)); err != nil {
+	if err := t.c.Send(gocan.WithResponseTimeout(gocan.WithExpectedResponses(rctx, 1), DefaultTimeout), f); err != nil {
 		return gocan.Frame{}, err
 	}
-	for f := range ch {
-		if answers(f, payload[3], echo...) {
-			return f, nil
+	for r := range ch {
+		if answers(r, service, echo...) {
+			return r, nil
 		}
 	}
 	if err := context.Cause(t.c.Context()); err != nil {
@@ -538,25 +539,27 @@ func (t *Client) DynamicallyDefineLocalIdByLocID(ctx context.Context, index int,
 	return t.sendDDL(ctx, []byte{0x06, DYNAMICALLY_DEFINE_IDENTIFIER, 0xF0, DM_DBLI, byte(index), 0x00, byte(locID), 0x00})
 }
 
+// sendDDL sends one definition and returns the ECU's verdict on it: a
+// rejected entry would shift every value after it in the F0 rows.
 func (t *Client) sendDDL(ctx context.Context, payload []byte) error {
-	for _, msg := range t.splitRequest(payload, false) {
-		if !msg.rr {
-			if err := t.c.Send(ctx, msg.frame); err != nil {
-				return fmt.Errorf("DynamicallyDefineLocalIdRequest[1]: %w", err)
-			}
-		} else {
-			rctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
-			resp, err := t.c.Request(rctx, msg.frame, REQ_CHUNK_CONF_ID)
-			cancel()
-			if err != nil {
-				return fmt.Errorf("DynamicallyDefineLocalIdRequest[2]: %w", err)
-			}
-			if err := TranslateErrorCode(resp.Data[3+2]); err != nil {
-				return fmt.Errorf("DynamicallyDefineLocalIdRequest[3]: %w", err)
-			}
+	msgs := t.splitRequest(payload, false)
+	for _, msg := range msgs[:len(msgs)-1] {
+		rctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
+		resp, err := t.c.Request(rctx, msg.frame, REQ_CHUNK_CONF_ID)
+		cancel()
+		if err != nil {
+			return fmt.Errorf("DynamicallyDefineLocalIdRequest[2]: %w", err)
+		}
+		if err := TranslateErrorCode(resp.Data[3+2]); err != nil {
+			return fmt.Errorf("DynamicallyDefineLocalIdRequest[3]: %w", err)
 		}
 	}
-	return nil
+	resp, err := t.requestReply(ctx, msgs[len(msgs)-1].frame, DYNAMICALLY_DEFINE_IDENTIFIER, 0xF0)
+	if err != nil {
+		return fmt.Errorf("DynamicallyDefineLocalIdRequest[4]: %w", err)
+	}
+	_ = t.Ack(ctx, resp.Data[0], false)
+	return checkErr(resp)
 }
 
 // SeedKey is a securityAccess (service 0x27) algorithm: key = ((seed<<2) ^ XOR) - Sub.
@@ -864,11 +867,11 @@ func (t *Client) ReadMemoryByAddress(ctx context.Context, address, length int) (
 // readMemoryByAddressInto reads up to 'length' bytes starting at 'address' directly into dst.
 // It returns the number of bytes written into dst.
 func (t *Client) readMemoryByAddressInto(ctx context.Context, address int, length byte, dst []byte) (int, error) {
-	resp, err := t.requestReply(ctx, []byte{
+	resp, err := t.requestReply(ctx, newFrame(REQ_MSG_ID, []byte{
 		0x40, 0xA1, 0x05, READ_MEMORY_BY_ADDRESS,
 		byte(address >> 16), byte(address >> 8), byte(address),
 		length,
-	}, byte(address>>16), byte(address>>8), byte(address))
+	}), READ_MEMORY_BY_ADDRESS, byte(address>>16), byte(address>>8), byte(address))
 	if err != nil {
 		return 0, fmt.Errorf("ReadDataByAddress[1]: %w", err)
 	}
@@ -1009,42 +1012,6 @@ func (t *Client) SaveRAM(ctx context.Context, address uint32, data []byte) error
 		return err
 	}
 	return nil
-}
-
-func (t *Client) SaveROM(ctx context.Context, address uint32, data []byte) error {
-	start := time.Now()
-
-	if err := t.RequestDownload(ctx, address, uint32(len(data))); err != nil {
-		return err
-	}
-
-	defer func(t time.Time) {
-		log.Println("saveROM took:", time.Since(t))
-	}(start)
-
-	msgs := t.splitRequest2(append([]byte{byte(len(data) + 1), TRANSFER_DATA}, data...))
-	for _, msg := range msgs {
-		log.Println(msg.frame.String())
-		if !msg.rr {
-			if err := t.c.Send(ctx, msg.frame); err != nil {
-				return fmt.Errorf("%s1: %w", getFunctionName(), err)
-			}
-		} else {
-			rctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
-			resp, err := t.c.Request(rctx, msg.frame, REQ_CHUNK_CONF_ID)
-			cancel()
-			if err != nil {
-				return fmt.Errorf("%s2: %w", getFunctionName(), err)
-			}
-			log.Println(resp.String())
-			if err := checkErr(resp); err != nil {
-				return err
-			}
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
-	return nil
-	// return t.writeRange(ctx, int(address), int(address)+len(data), data)
 }
 
 func (t *Client) splitRequest2(payload []byte) []kwpFrame {
