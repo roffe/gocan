@@ -268,13 +268,13 @@ func (ma *J2534) open(baudRate uint32, swcan bool) error {
 		return fmt.Errorf("PassThruIoctl clear rx buffer: %w", err)
 	}
 
+	setup := ma.allowAll
 	if len(ma.filters) > 0 {
-		if err := ma.setupFilters(); err != nil {
-			ma.teardown()
-			return err
-		}
-	} else {
-		ma.allowAll()
+		setup = ma.setupFilters
+	}
+	if err := setup(); err != nil {
+		ma.teardown()
+		return err
 	}
 	return nil
 }
@@ -285,6 +285,10 @@ func (ma *J2534) open(baudRate uint32, swcan bool) error {
 func (ma *J2534) pump() (got bool, err error) {
 	ma.rx.ProtocolID = ma.protocol
 	n, err := ma.h.PassThruReadMsg(ma.channelID, &ma.rx, 0)
+	if errors.Is(err, passthru.ErrBufferOverflow) {
+		ma.emit(gocan.EventTypeWarning, err.Error()) // earlier frames were lost, this one is good
+		err = nil
+	}
 	if err != nil {
 		// The spec lists both for an empty read and DLLs disagree on which
 		// they return: Tactrix/DrewTech/MDI answer ERR_TIMEOUT once the
@@ -452,14 +456,14 @@ func (ma *J2534) SetFilter(filters []uint32) error {
 			err = ma.setupFilters()
 			return
 		}
-		ma.allowAll()
+		err = ma.allowAll()
 	}); derr != nil {
 		return derr
 	}
 	return err
 }
 
-func (ma *J2534) allowAll() {
+func (ma *J2534) allowAll() error {
 	filterID := uint32(0)
 	var txflags uint32
 	if ma.cfg.UseExtendedID {
@@ -478,8 +482,9 @@ func (ma *J2534) allowAll() {
 		TxFlags:        txflags,
 	}
 	if err := ma.h.PassThruStartMsgFilter(ma.channelID, passthru.PASS_FILTER, maskMsg, patternMsg, nil, &filterID); err != nil {
-		ma.emit(gocan.EventTypeError, fmt.Sprintf("PassThruStartMsgFilter: %v", err))
+		return fmt.Errorf("PassThruStartMsgFilter: %w", err)
 	}
+	return nil
 }
 
 func (ma *J2534) setupFilters() error {
