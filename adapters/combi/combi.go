@@ -95,6 +95,9 @@ type Combi struct {
 	inMPS  int  // IN endpoint wMaxPacketSize; readLoop reads exactly this much
 
 	closeOnce sync.Once
+	readDone  chan struct{} // closed when readLoop returns
+	mu        sync.Mutex    // no transfer starts on a handle Close released
+	closed    bool
 
 	txAck     chan bool // firmware per-frame cmdCanTxFrame reply: true ack, false nak
 	filterAck chan struct{}
@@ -167,6 +170,7 @@ func (ca *Combi) Open(ctx context.Context, bus *gocan.Bus) error {
 		return fmt.Errorf("failed to open canbus: %w", err)
 	}
 
+	ca.readDone = make(chan struct{})
 	go ca.readLoop(ctx)
 
 	// Install the firmware acceptance filter only AFTER the read loop is
@@ -186,6 +190,12 @@ func (ca *Combi) Close() error {
 	ca.closeOnce.Do(func() {
 		_ = ca.canCtrl(0) // best-effort close CAN
 		time.Sleep(20 * time.Millisecond)
+		ca.mu.Lock()
+		ca.closed = true
+		ca.mu.Unlock()
+		if ca.readDone != nil {
+			<-ca.readDone // the Bus cancelled ctx first: one bulkIn timeout at most
+		}
 		ca.closeUSB()
 	})
 	return nil
@@ -303,6 +313,11 @@ func (ca *Combi) GetADCValue(ctx context.Context, channel int) (float64, error) 
 // =====================
 
 func (ca *Combi) bulkOut(data []byte, timeoutMs int) (int, error) {
+	ca.mu.Lock()
+	defer ca.mu.Unlock()
+	if ca.closed {
+		return 0, gocan.ErrClosed
+	}
 	if ca.useEP2 {
 		return ca.handle.BulkTransferOut(combiOutE2, data, timeoutMs)
 	}
@@ -426,6 +441,7 @@ const (
 )
 
 func (ca *Combi) readLoop(ctx context.Context) {
+	defer close(ca.readDone)
 	var (
 		// Exactly one packet per transfer. The firmware (LPCUSB serial
 		// stack) never sends a ZLP, so a larger transfer whose data ends on
