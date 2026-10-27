@@ -207,6 +207,9 @@ func (t *Client) recvChunked(ctx context.Context, resp gocan.Frame, firstOffset 
 	remaining := max(0, int(resp.Data[2])-(firstOffset-3))
 	out := make([]byte, 0, remaining)
 	n := min(remaining, 8-firstOffset)
+	if int(resp.Length) < firstOffset+n {
+		return nil, fmt.Errorf("short first frame %s", resp.String())
+	}
 	out = append(out, resp.Data[firstOffset:firstOffset+n]...)
 	remaining -= n
 
@@ -221,6 +224,9 @@ func (t *Client) recvChunked(ctx context.Context, resp gocan.Frame, firstOffset 
 			return nil, fmt.Errorf("row %02X does not follow row %d", resp.Data[0], row)
 		}
 		n := min(remaining, 6)
+		if int(resp.Length) < 2+n {
+			return nil, fmt.Errorf("short row %s", resp.String())
+		}
 		out = append(out, resp.Data[2:2+n]...)
 		remaining -= n
 	}
@@ -797,6 +803,9 @@ func (t *Client) recvData(ctx context.Context, length int) ([]byte, error) {
 				// Calculate remaining payload excluding non-payload bytes
 				payloadLeft = int(frame.Data[2]) - 2
 				for i := 5; i < 8 && payloadLeft > 0 && receivedBytes < length; i++ {
+					if i >= int(frame.Length) {
+						return nil, fmt.Errorf("recvData: short first frame %s", frame.String())
+					}
 					out.WriteByte(frame.Data[i])
 					receivedBytes++
 					payloadLeft--
@@ -807,6 +816,9 @@ func (t *Client) recvData(ctx context.Context, length int) ([]byte, error) {
 				}
 				next--
 				for i, max := 0, 6; i < max && receivedBytes < length; i++ {
+					if 2+i >= int(frame.Length) {
+						return nil, fmt.Errorf("recvData: short row %s", frame.String())
+					}
 					out.WriteByte(frame.Data[2+i])
 					receivedBytes++
 					payloadLeft--
