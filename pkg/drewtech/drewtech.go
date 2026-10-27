@@ -2,14 +2,19 @@
 // Mongoose Pro GM II. It speaks the Mongoose wire protocol directly over the
 // device's virtual COM port at 115200 baud.
 //
-// PROTOCOL.md (in devel/drewtech) for the full derivation; the notable facts:
+// The wire protocol is decoded from the Windows DLL in devel/drewtech
+// (re/*.md; PROTOCOL.md there predates it and is wrong about 0x10). The
+// libj2534_mongoose C driver implements the same protocol in full and is the
+// reference when the two disagree. The notable facts:
 //   - framing check word is length^0x51E6 (LE), not a constant magic byte
-//   - RX arrives as unsolicited 0x09 pushes; there is no "read messages" command
+//   - replies carry the command with 0x8000 set and echo the request's
+//     sequence, a 1..255 byte counter; status is a u32 at body[12:16]
+//   - RX arrives as unsolicited 0x0009 pushes; there is no "read messages" command
 //   - 0x08/0x0A are Tx confirmations carrying the Tx sequence, not RX
-//   - a pass filter (0x0D) per CAN id is required or you receive nothing
+//   - a pass filter (0x0D) per CAN id is required or you receive nothing;
+//     0x0E removes one by the handle the 0x0D reply gave, 0x10 all of a type
 //   - 0x11 is a multiplexed control op (subtype at payload[8:12]):
 //     GetStatus, clear-TX=2, clear-RX=3, become-master=4
-//   - 0x10 clears filters (subtype 2 = clear all)
 //
 // This file is the wire layer (framing + device transport + CAN data path).
 // The J2534 API facade lives in j2534.go.
@@ -18,6 +23,7 @@ package drewtech
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -47,7 +53,8 @@ const (
 	SubCmdCANTx          uint8 = 0x08
 	SubCmdCANRx          uint8 = 0x09
 	SubCmdTxStatus       uint8 = 0x0A // device->host Tx completion status
-	SubCmdClearFilters   uint8 = 0x10 // also single stop-filter
+	SubCmdDeleteObject   uint8 = 0x0E // remove one filter or periodic: type, device handle
+	SubCmdClearFilters   uint8 = 0x10 // remove every object of one type
 	SubCmdGetConfig      uint8 = 0x0C // get config (there is no runtime set)
 	SubCmdStartMsgFilter uint8 = 0x0D
 	SubCmdControl        uint8 = 0x11 // multiplexed: status / clear buffers / master
@@ -58,8 +65,11 @@ const (
 	ctlClearTxBuffer uint32 = 2
 	ctlClearRxBuffer uint32 = 3
 	ctlBecomeMaster  uint32 = 4
-	// SubCmdClearFilters (0x10) subtype for "clear all".
-	filClearAll uint32 = 2
+	// Object types for SubCmdStartMsgFilter / SubCmdDeleteObject / SubCmdClearFilters.
+	objPass  uint32 = 0
+	objBlock uint32 = 1
+
+	stVBattLoss uint32 = 0x20A // OPEN_DEVICE status: no battery voltage on pin 16
 
 	ProtocolCAN uint32 = 6
 
@@ -122,11 +132,10 @@ func (p *Packet) Sequence() uint16 {
 	return 0
 }
 
-// IsCANRx reports whether this is an unsolicited 0x09 RX push. Real frames vary
-// in length (a 2-byte-data frame is 0x1e); GetDeviceInfo replies also use op
-// 0x09 but are much longer, so gate on the RX length window.
+// IsCANRx reports whether this is an unsolicited RX push, command 0x0009.
+// Board-info replies share the opcode but carry the reply flag (0x8109).
 func (p *Packet) IsCANRx() bool {
-	return p.Length >= 0x1b && p.Length < 0x25 && p.SubCommand() == SubCmdCANRx
+	return len(p.Payload) >= 2 && p.Payload[0] == SubCmdCANRx && p.Payload[1] == 0
 }
 
 func (p *Packet) ParseCANFrame() (*CANFrame, error) {
@@ -198,10 +207,10 @@ func (p *Parser) parse(data []byte, dst []Packet) ([]Packet, error) {
 
 		// Validate the full check word (length^0x51E6, PROTOCOL.md §2) so
 		// >=256B frames pass too; the high byte only looks like a constant
-		// 0x51 below 256B. length < 8 cannot hold the wire[4:8] header, so
-		// treat it as garbage. On any mismatch drop one byte and rescan —
+		// 0x51 below 256B. Every real body is at least 12 bytes, so a shorter
+		// one is garbage. On any mismatch drop one byte and rescan —
 		// always makes progress, never wedges on a corrupt stream.
-		if check != length^ChecksumWord || length < 8 {
+		if check != length^ChecksumWord || length < 12 {
 			p.off++
 			dropped++
 			continue
@@ -339,6 +348,7 @@ func (d *Device) Open(portName string) error {
 	}
 	d.port = port
 	d.port.SetReadTimeout(50 * time.Millisecond)
+	d.port.ResetInputBuffer() // what an earlier session left unread would start the parse out of sync
 
 	d.running.Store(true)
 	d.wg.Add(1)
@@ -361,6 +371,10 @@ func (d *Device) Close() error {
 	return nil
 }
 
+// ErrDeviceGone is reported to the error handler when reading the port fails,
+// which ends the read loop: the device was unplugged or the port broke.
+var ErrDeviceGone = errors.New("drewtech: device gone")
+
 func (d *Device) readLoop() {
 	defer d.wg.Done()
 	buf := make([]byte, 1024)
@@ -369,9 +383,9 @@ func (d *Device) readLoop() {
 		n, err := d.port.Read(buf)
 		if err != nil {
 			if d.running.Load() {
-				d.handleError(fmt.Errorf("read error: %w", err))
+				d.handleError(fmt.Errorf("%w: %w", ErrDeviceGone, err))
 			}
-			continue
+			return
 		}
 		if n == 0 {
 			continue
@@ -477,8 +491,9 @@ func (d *Device) handleError(err error) {
 	}
 }
 
+// nextSeq counts 1..255 like the DLL, which compares the sequence as a byte.
 func (d *Device) nextSeq() uint16 {
-	return uint16(atomic.AddUint32(&d.seq, 1))
+	return uint16((atomic.AddUint32(&d.seq, 1)-1)%255 + 1)
 }
 
 // cmd builds an outbound command packet, deriving Length from the payload.
@@ -494,6 +509,35 @@ func cmd(channel uint8, payload []byte) *Packet {
 func (d *Device) send(pkt *Packet) error {
 	_, err := d.port.Write(pkt.ToBytes())
 	return err
+}
+
+// do sends pkt and returns its reply, failing on a non-zero device status.
+func (d *Device) do(pkt *Packet) (*Packet, error) {
+	resp, err := d.sendAndWait(pkt, 2*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	return resp, statusErr(resp)
+}
+
+// statusErr reports the status a reply carries at body[12:16], with the
+// firmware's error text after it.
+func statusErr(resp *Packet) error {
+	if len(resp.Payload) < 12 {
+		return nil
+	}
+	st := binary.LittleEndian.Uint32(resp.Payload[8:12])
+	if st == 0 {
+		return nil
+	}
+	var text []byte
+	if len(resp.Payload) > 16 {
+		text = resp.Payload[16:]
+		if i := bytes.IndexByte(text, 0); i >= 0 {
+			text = text[:i]
+		}
+	}
+	return fmt.Errorf("device: %s (0x%X)", text, st)
 }
 
 func (d *Device) sendAndWait(pkt *Packet, timeout time.Duration) (*Packet, error) {
@@ -524,22 +568,22 @@ func (d *Device) sendAndWait(pkt *Packet, timeout time.Duration) (*Packet, error
 
 // --- Wire commands (low level) ---
 
-func (d *Device) init() error {
+// init is the ECHO the open sequence starts with. Like the DLL it waits 250 ms
+// and ignores the result: a device whose firmware is already running, after
+// an earlier session, doesn't answer it.
+func (d *Device) init() {
 	payload := make([]byte, 8)
 	payload[0] = SubCmdInit
 	payload[1] = FlagRequest
 	binary.LittleEndian.PutUint16(payload[2:4], d.nextSeq())
-	binary.LittleEndian.PutUint16(payload[6:8], 0x0B48)
-	_, err := d.sendAndWait(cmd(0, payload), 2*time.Second)
-	return err
+	d.sendAndWait(cmd(0, payload), 250*time.Millisecond)
 }
 
-func (d *Device) getDeviceInfo(param uint16) (FirmwareInfo, error) {
+func (d *Device) getDeviceInfo() (FirmwareInfo, error) {
 	payload := make([]byte, 8)
 	payload[0] = SubCmdCANRx
 	payload[1] = FlagRequest
 	binary.LittleEndian.PutUint16(payload[2:4], d.nextSeq())
-	binary.LittleEndian.PutUint16(payload[6:8], param)
 	resp, err := d.sendAndWait(cmd(0, payload), 2*time.Second)
 	if err != nil {
 		return FirmwareInfo{}, err
@@ -590,15 +634,21 @@ func (d *Device) getFirmwareVersion() (string, error) {
 	return "", nil
 }
 
-// sendMagic is an opaque handshake step observed in the DLL open sequence.
-func (d *Device) sendMagic() error {
+// openDevice is the DLL's OPEN_DEVICE, which fails without battery voltage on
+// the vehicle connector.
+func (d *Device) openDevice() error {
 	payload := make([]byte, 8)
 	payload[0] = SubCmdGetVersion
 	payload[1] = FlagRequestFinal
 	binary.LittleEndian.PutUint16(payload[2:4], d.nextSeq())
-	binary.LittleEndian.PutUint16(payload[6:8], 0x6ADB)
-	_, err := d.sendAndWait(cmd(0, payload), 2*time.Second)
-	return err
+	resp, err := d.sendAndWait(cmd(0, payload), 2*time.Second)
+	if err != nil {
+		return err
+	}
+	if len(resp.Payload) >= 12 && binary.LittleEndian.Uint32(resp.Payload[8:12]) == stVBattLoss {
+		return errors.New("no voltage on the vehicle connector")
+	}
+	return statusErr(resp)
 }
 
 func (d *Device) getSerial() (string, error) {
@@ -610,16 +660,14 @@ func (d *Device) getSerial() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// String starts at the offset named by payload[0] (PROTOCOL.md §5 step 8),
-	// NUL-terminated. Bounds-check: a short reply must not panic.
-	if off := int(resp.Payload[0]); off < len(resp.Payload) {
-		s := resp.Payload[off:]
-		if i := bytes.IndexByte(s, 0); i >= 0 {
-			s = s[:i]
-		}
-		return string(s), nil
+	if len(resp.Payload) <= 20 {
+		return "", nil
 	}
-	return "", nil
+	s := resp.Payload[20:] // NUL-terminated, after the status
+	if i := bytes.IndexByte(s, 0); i >= 0 {
+		s = s[:i]
+	}
+	return string(s), nil
 }
 
 // control issues an 0x11 control command with the given subtype and optional
