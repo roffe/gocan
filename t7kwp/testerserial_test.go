@@ -1,6 +1,9 @@
 package t7kwp
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 // Cases carried over from the reference reimplementation
 // (~/devel/t7diss/checktesterserial.c --selftest), which was derived from
@@ -26,5 +29,9 @@ func TestTesterSerialBlocked(t *testing.T) {
 
 	if !TesterSerialBlocked([]byte("short")) {
 		t.Error("a serial too short to reach offset 11 must be refused")
+	}
+
+	if err := new(Client).WriteDataByLocalIdentifier(context.Background(), 0x98, PadTesterSerial("PPCAN Nr 2")); err == nil {
+		t.Error("WriteDataByLocalIdentifier sent a kill-listed tester serial")
 	}
 }
