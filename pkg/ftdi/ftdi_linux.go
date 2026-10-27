@@ -114,7 +114,13 @@ func Open(di DeviceInfo, pid int) (d *Device, e error) {
 
 func (d *Device) Close() (e error) {
 	defer d.lockAll()()
-	defer C.ftdi_free(d.ctx)
+	if d.ctx == nil {
+		return nil
+	}
+	defer func() {
+		C.ftdi_free(d.ctx)
+		d.ctx = nil
+	}()
 	d.open = false
 	if ret := C.ftdi_usb_close(d.ctx); ret != 0 {
 		return getErr(d.ctx)
