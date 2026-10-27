@@ -233,6 +233,9 @@ func (st *Scantool) Close() error {
 // frames ride in the command response (there is no monitor mode), so they are
 // delivered to the bus here before Send returns.
 func (st *Scantool) Send(ctx context.Context, f gocan.Frame) error {
+	if f.Extended {
+		return errors.New("scantool: 29-bit frames are not supported")
+	}
 	// Appended by hand into a reused buffer: fmt boxes every argument and
 	// this runs once per frame.
 	const hexdig = "0123456789abcdef"
@@ -564,9 +567,8 @@ func canFilter(ids []uint32) (filter, mask string) {
 		m |= id
 	}
 	m = (^m & 0x7FF) | filt
-	if len(ids) == 0 {
-		filt = 0
-		m = 0x7FF
+	if len(ids) == 0 { // a zero mask compares no bits: accept everything
+		filt, m = 0, 0
 	}
 	return fmt.Sprintf("ATCF%03X", filt), fmt.Sprintf("ATCM%03X", m)
 }
