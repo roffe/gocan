@@ -1,11 +1,20 @@
 package gocan
 
 import (
+	"maps"
 	"slices"
 	"testing"
 )
 
 func TestRescan(t *testing.T) {
+	adapterMu.Lock()
+	savedMap, savedScanners, savedScanned := maps.Clone(adapterMap), slices.Clone(scanners), maps.Clone(scannedNames)
+	adapterMu.Unlock()
+	t.Cleanup(func() {
+		adapterMu.Lock()
+		adapterMap, scanners, scannedNames = savedMap, savedScanners, savedScanned
+		adapterMu.Unlock()
+	})
 	mk := func(name string) AdapterInfo {
 		return AdapterInfo{Name: name, New: func(Config) (Adapter, error) { return &Loopback{}, nil }}
 	}
