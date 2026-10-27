@@ -183,10 +183,11 @@ func (d *Device) PassThruReadMsgs(max int, timeout time.Duration) ([]*CANFrame, 
 
 // -------- 6. PassThruWriteMsgs --------
 
-// PassThruWriteMsgs transmits a CAN frame (fire-and-forget; the device replies
-// with 0x08/0x0A confirmations that the read loop consumes). The wire frame is
-// the fixed-size 0x24 layout the DLL sends: payload padded to 32 bytes, actual
-// data length carried at [16:18].
+// PassThruWriteMsgs queues a CAN frame on the device, returning once the
+// device has queued it, as the DLL does with a zero timeout. A full device
+// queue is retried for up to a second. The wire frame is the fixed-size 0x24
+// layout the DLL sends: payload padded to 32 bytes, actual data length carried
+// at [16:18].
 func (d *Device) PassThruWriteMsgs(canID uint32, data []byte) error {
 	if len(data) > 8 {
 		return fmt.Errorf("invalid message: %d data bytes, CAN max is 8", len(data))
@@ -195,20 +196,64 @@ func (d *Device) PassThruWriteMsgs(canID uint32, data []byte) error {
 	// per frame.
 	d.txMu.Lock()
 	defer d.txMu.Unlock()
-	buf := d.txBuf[:]
-	clear(buf)
-	payload := buf[8:]
-	payload[0] = SubCmdCANTx
-	payload[1] = FlagRequestFinal
-	binary.LittleEndian.PutUint16(payload[2:4], d.nextSeq())
-	binary.LittleEndian.PutUint16(payload[4:6], 0x0001)
-	binary.LittleEndian.PutUint16(payload[16:18], uint16(4+len(data))) // id + data
-	binary.BigEndian.PutUint32(payload[20:24], canID)
-	copy(payload[24:], data)
-	hdr := Packet{Length: uint16(len(payload) + 4), Direction: DirectionOut, Channel: d.channel}
-	hdr.putHeader(buf)
-	_, err := d.port.Write(buf)
-	return err
+	deadline := time.Now().Add(time.Second)
+	for {
+		buf := d.txBuf[:]
+		clear(buf)
+		payload := buf[8:]
+		payload[0] = SubCmdCANTx
+		payload[1] = FlagRequestFinal
+		seq := d.nextSeq()
+		binary.LittleEndian.PutUint16(payload[2:4], seq)
+		binary.LittleEndian.PutUint16(payload[4:6], 0x0001)
+		binary.LittleEndian.PutUint16(payload[16:18], uint16(4+len(data))) // id + data
+		binary.BigEndian.PutUint32(payload[20:24], canID)
+		copy(payload[24:], data)
+		hdr := Packet{Length: uint16(len(payload) + 4), Direction: DirectionOut, Channel: d.channel}
+		hdr.putHeader(buf)
+		if _, err := d.port.Write(buf); err != nil {
+			return err
+		}
+		code, err := d.waitTx(seq)
+		if err != nil {
+			return err
+		}
+		switch code {
+		case txQueued:
+			return nil
+		case txQueueFull:
+			if time.Now().After(deadline) {
+				return errors.New("tx: device queue full")
+			}
+			time.Sleep(time.Millisecond)
+		default:
+			return fmt.Errorf("tx refused: status 0x%X", code)
+		}
+	}
+}
+
+// waitTx returns the device's 0x08 reply code for Tx seq. Bus faults are
+// reported and waited out, as the DLL does.
+func (d *Device) waitTx(seq uint16) (uint32, error) {
+	d.txTimer.Reset(time.Second)
+	defer d.txTimer.Stop()
+	for {
+		select {
+		case r := <-d.txReply:
+			if r.seq != seq {
+				continue // the late reply to a Tx that timed out
+			}
+			if r.code == txBusFault {
+				d.handleError(errors.New("tx: bus fault"))
+				continue
+			}
+			return r.code, nil
+		case <-d.txTimer.C:
+			return 0, fmt.Errorf("tx: no reply from the device for seq %d", seq)
+		case <-d.closeCh:
+			return 0, errors.New("device closed")
+		}
+	}
 }
 
 // -------- 7 & 8. Periodic messages (host-side) --------

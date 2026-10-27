@@ -274,9 +274,24 @@ type Device struct {
 
 	// PassThruWriteMsgs builds its wire frame here; txMu covers the periodic
 	// senders, which write concurrently with the caller.
-	txMu  sync.Mutex
-	txBuf [8 + 32]byte
+	txMu    sync.Mutex
+	txBuf   [8 + 32]byte
+	txReply chan txReply
+	txTimer *time.Timer
 }
+
+// txReply is the device's answer to a Tx: the 0x08 reply code and the Tx seq.
+type txReply struct {
+	seq  uint16
+	code uint32
+}
+
+// 0x08 reply codes, from the DLL's WriteMsgs state machine.
+const (
+	txQueued    uint32 = 0x100
+	txQueueFull uint32 = 0x101
+	txBusFault  uint32 = 0x105
+)
 
 // Option configures the device.
 type Option func(*Device)
@@ -306,7 +321,10 @@ func New(opts ...Option) *Device {
 		rxQueue:   make(chan *CANFrame, 8192),
 		closeCh:   make(chan struct{}),
 		channel:   canChannel,
+		txReply:   make(chan txReply, 8),
+		txTimer:   time.NewTimer(0),
 	}
+	d.txTimer.Stop()
 	for _, opt := range opts {
 		opt(d)
 	}
@@ -404,11 +422,16 @@ func (d *Device) handlePacket(pkt *Packet) {
 		return
 	}
 
-	// Tx confirmations for fire-and-forget writes: every 0x08 Tx gets a 0x08
-	// "queued" ack and a 0x0A "sent" status, both carrying the Tx seq. Nothing
-	// waits on a Tx seq, so consume them here and surface only genuine faults.
+	// Every 0x08 Tx gets a 0x08 "queued" reply, which PassThruWriteMsgs waits
+	// for, and a 0x0A "sent" status; both carry the Tx seq.
 	switch pkt.SubCommand() {
 	case SubCmdCANTx:
+		if len(pkt.Payload) >= 12 {
+			select {
+			case d.txReply <- txReply{pkt.Sequence(), binary.LittleEndian.Uint32(pkt.Payload[8:12])}:
+			default:
+			}
+		}
 		return
 	case SubCmdTxStatus:
 		if len(pkt.Payload) >= 12 {
@@ -441,7 +464,7 @@ func (d *Device) handlePacket(pkt *Packet) {
 // transmit (vs queued / sent OK). Codes from monpa432.dll.
 func txFault(status uint32) bool {
 	switch status {
-	case 0x105, 0x10C, 0x121: // bus off, no flow-control filter, no source address
+	case 0x102, 0x103, 0x104, 0x105, 0x10C, 0x10D, 0x112, 0x113, 0x114, 0x118, 0x11E, 0x11F, 0x120, 0x121:
 		return true
 	}
 	return false

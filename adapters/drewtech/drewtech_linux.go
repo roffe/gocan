@@ -2,6 +2,7 @@ package drewtech
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"time"
@@ -95,6 +96,9 @@ func (a *Drewtech) SetFilter(filters []uint32) error {
 }
 
 func (a *Drewtech) Send(ctx context.Context, f gocan.Frame) error {
+	if f.Extended {
+		return errors.New("drewtech: 29-bit frames are not supported")
+	}
 	return a.dev.PassThruWriteMsgs(f.ID, f.Bytes())
 }
 

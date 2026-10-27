@@ -163,24 +163,44 @@ func TestExtractVersionsShortInput(t *testing.T) {
 	}
 }
 
-// lastWrite records the most recent write; the embedded nil Port panics on
-// anything else.
+// lastWrite records the most recent write and answers it with the device's
+// 0x08 reply: the next of codes, then txQueued. The embedded nil Port panics
+// on anything else.
 type lastWrite struct {
 	serial.Port
-	b []byte
+	d       *Device
+	b       []byte
+	codes   []uint32
+	reply   Packet
+	payload [12]byte
 }
 
 func (w *lastWrite) Write(p []byte) (int, error) {
 	w.b = append(w.b[:0], p...)
+	code := txQueued
+	if len(w.codes) > 0 {
+		code, w.codes = w.codes[0], w.codes[1:]
+	}
+	w.payload[0] = SubCmdCANTx
+	w.payload[1] = FlagResponseFinal
+	copy(w.payload[2:4], p[10:12]) // the Tx seq
+	binary.LittleEndian.PutUint32(w.payload[8:12], code)
+	w.reply = Packet{Direction: DirectionIn, Payload: w.payload[:]}
+	w.d.handlePacket(&w.reply)
 	return len(p), nil
+}
+
+func newWriteDevice(codes ...uint32) (*Device, *lastWrite) {
+	d := New()
+	w := &lastWrite{d: d, codes: codes}
+	d.port = w
+	return d, w
 }
 
 // TestWriteMsgsInPlace checks the frame built in the reused buffer is the
 // one cmd+ToBytes produced, and that sending it allocates nothing.
 func TestWriteMsgsInPlace(t *testing.T) {
-	w := &lastWrite{}
-	d := New()
-	d.port = w
+	d, w := newWriteDevice()
 	data := []byte{0x40, 0xA1, 0x02, 0x1A, 0x90}
 	if err := d.PassThruWriteMsgs(0x7E0, data); err != nil {
 		t.Fatal(err)
@@ -198,6 +218,21 @@ func TestWriteMsgsInPlace(t *testing.T) {
 	}
 	if n := testing.AllocsPerRun(100, func() { d.PassThruWriteMsgs(0x7E0, data) }); n != 0 {
 		t.Errorf("PassThruWriteMsgs allocates %v times per frame, want 0", n)
+	}
+}
+
+// A full device queue is retried; a refused frame is an error.
+func TestWriteMsgsWaitsForQueued(t *testing.T) {
+	d, w := newWriteDevice(txQueueFull, txQueueFull)
+	if err := d.PassThruWriteMsgs(0x7E0, []byte{1}); err != nil {
+		t.Fatal(err)
+	}
+	if seq := binary.LittleEndian.Uint16(w.b[10:12]); seq != 3 {
+		t.Fatalf("queued by write %d, want 3", seq)
+	}
+	w.codes = []uint32{0x10C}
+	if err := d.PassThruWriteMsgs(0x7E0, []byte{1}); err == nil {
+		t.Fatal("a refused frame returned nil")
 	}
 }
 
