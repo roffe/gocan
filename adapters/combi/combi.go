@@ -106,6 +106,13 @@ type Combi struct {
 	// Send-only (the Bus serializes Send), reused so a frame costs no allocations.
 	txBuf   [19]byte
 	txTimer *time.Timer // TX ack timeout; Go >= 1.23 timers make Reset safe without draining
+
+	// readLoop-only packet parser state.
+	rxState int
+	rxCmd   byte
+	rxSize  uint16
+	rxPtr   uint16
+	rxData  [maxCommandSize]byte
 }
 
 func New(cfg gocan.Config) (gocan.Adapter, error) {
@@ -442,19 +449,11 @@ const (
 
 func (ca *Combi) readLoop(ctx context.Context) {
 	defer close(ca.readDone)
-	var (
-		// Exactly one packet per transfer. The firmware (LPCUSB serial
-		// stack) never sends a ZLP, so a larger transfer whose data ends on
-		// a full packet stays open until the timeout, and gotmc returns 0
-		// bytes on timeout: the frames/acks in it are silently lost.
-		readBuf = make([]byte, ca.inMPS)
-		state   = psCmd
-		cmd     byte
-		size    uint16
-		ptr     uint16
-		cdata   [maxCommandSize]byte
-	)
-
+	// Exactly one packet per transfer. The firmware (LPCUSB serial stack)
+	// never sends a ZLP, so a larger transfer whose data ends on a full packet
+	// stays open until the timeout, and gotmc returns 0 bytes on timeout: the
+	// frames/acks in it are silently lost.
+	readBuf := make([]byte, ca.inMPS)
 	for ctx.Err() == nil {
 		n, err := ca.bulkIn(readBuf, 100)
 		if err != nil {
@@ -466,58 +465,64 @@ func (ca *Combi) readLoop(ctx context.Context) {
 			}
 			return
 		}
-		for _, b := range readBuf[:n] {
-			switch state {
-			case psCmd:
-				if _, ok := validCommands[b]; !ok {
-					ca.errorf("invalid command: %02X", b)
-					continue
-				}
-				cmd = b
-				ptr, size = 0, 0
-				state = psSizeHigh
-			case psSizeHigh:
-				size = uint16(b) << 8
-				state = psSizeLow
-			case psSizeLow:
-				size |= uint16(b)
-				if size >= maxCommandSize {
-					ca.errorf("command size too large: %d", size)
-					state = psCmd
-					continue
-				}
-				if size == 0 {
-					state = psTerm
-				} else {
-					state = psData
-				}
-			case psData:
-				cdata[ptr] = b
-				ptr++
-				if ptr >= size {
-					state = psTerm
-				}
-			case psTerm:
-				state = psCmd
-				if b == termNak {
-					if cmd == cmdCanTxFrame { // TX buffer busy; Send retries
-						select {
-						case ca.txAck <- false:
-						default:
-						}
-						continue
-					}
-					ca.errorf("command %02X failed (NAK)", cmd)
-					continue
-				} else if b != termAck {
-					ca.errorf("unexpected termination byte: %02X, expected: %02X", b, termAck)
-					continue
-				}
-				if ca.cfg.Debug {
-					ca.emit(gocan.EventTypeDebug, fmt.Sprintf("recv cmd %02X: % 02X", cmd, cdata[:ptr]))
-				}
-				ca.processCommand(cmd, cdata[:ptr])
+		ca.parse(readBuf[:n])
+	}
+}
+
+// parse runs bytes from the IN endpoint through the packet state machine and
+// dispatches every complete packet. A packet may span calls.
+func (ca *Combi) parse(data []byte) {
+	for _, b := range data {
+		switch ca.rxState {
+		case psCmd:
+			if _, ok := validCommands[b]; !ok {
+				ca.errorf("invalid command: %02X", b)
+				continue
 			}
+			ca.rxCmd = b
+			ca.rxPtr, ca.rxSize = 0, 0
+			ca.rxState = psSizeHigh
+		case psSizeHigh:
+			ca.rxSize = uint16(b) << 8
+			ca.rxState = psSizeLow
+		case psSizeLow:
+			ca.rxSize |= uint16(b)
+			if ca.rxSize >= maxCommandSize {
+				ca.errorf("command size too large: %d", ca.rxSize)
+				ca.rxState = psCmd
+				continue
+			}
+			if ca.rxSize == 0 {
+				ca.rxState = psTerm
+			} else {
+				ca.rxState = psData
+			}
+		case psData:
+			ca.rxData[ca.rxPtr] = b
+			ca.rxPtr++
+			if ca.rxPtr >= ca.rxSize {
+				ca.rxState = psTerm
+			}
+		case psTerm:
+			ca.rxState = psCmd
+			if b == termNak {
+				if ca.rxCmd == cmdCanTxFrame { // TX buffer busy; Send retries
+					select {
+					case ca.txAck <- false:
+					default:
+					}
+					continue
+				}
+				ca.errorf("command %02X failed (NAK)", ca.rxCmd)
+				continue
+			} else if b != termAck {
+				ca.errorf("unexpected termination byte: %02X, expected: %02X", b, termAck)
+				continue
+			}
+			if ca.cfg.Debug {
+				ca.emit(gocan.EventTypeDebug, fmt.Sprintf("recv cmd %02X: % 02X", ca.rxCmd, ca.rxData[:ca.rxPtr]))
+			}
+			ca.processCommand(ca.rxCmd, ca.rxData[:ca.rxPtr])
 		}
 	}
 }
