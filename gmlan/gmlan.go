@@ -443,10 +443,14 @@ func (cl *Client) SecurityAccessRequestSeed(ctx context.Context, accessLevel byt
 	if err := CheckErr(resp); err != nil {
 		return nil, fmt.Errorf("SecurityAccessRequestSeed[2]: %w", err)
 	}
-	if resp.Data[1] != 0x67 || resp.Data[2] != accessLevel {
-		return nil, errors.New("SecurityAccessRequestSeed[3]: invalid response")
+	d := resp.Bytes()
+	if len(d) < 5 {
+		return nil, fmt.Errorf("SecurityAccessRequestSeed[3]: short response [% 02X]", d)
 	}
-	return []byte{resp.Data[3], resp.Data[4]}, nil
+	if d[1] != 0x67 || d[2] != accessLevel {
+		return nil, errors.New("SecurityAccessRequestSeed[4]: invalid response")
+	}
+	return []byte{d[3], d[4]}, nil
 }
 
 func (cl *Client) SecurityAccessSendKey(ctx context.Context, accessLevel, high, low byte) error {
@@ -475,11 +479,11 @@ func (cl *Client) RequestSecurityAccess(ctx context.Context, accesslevel byte, d
 		return nil
 	}
 
-	secondsToWait := delay.Milliseconds() / 1000
-	for secondsToWait > 0 {
-		time.Sleep(1 * time.Second)
+	for left := delay; left > 0; left -= time.Second {
+		if err := wait(ctx, min(left, time.Second)); err != nil {
+			return fmt.Errorf("RequestSecurityAccess: %w", err)
+		}
 		cl.TesterPresentNoResponseAllowed()
-		secondsToWait--
 	}
 
 	high, low := seedfunc(seed, accesslevel)
@@ -584,12 +588,10 @@ func (cl *Client) Execute(ctx context.Context, startAddress uint32) error {
 		byte(startAddress >> 8),
 		byte(startAddress),
 	}
-	ti := time.Now()
 	resp, err := cl.request(ctx, payload, cl.defaultTimeout*10)
 	if err != nil {
 		return fmt.Errorf("Execute[1]: %w", err)
 	}
-	log.Println("Execute took", time.Since(ti).Milliseconds())
 	return CheckErr(resp)
 }
 
@@ -681,7 +683,7 @@ func (cl *Client) WriteDataByAddress2(ctx context.Context, address uint32, data 
 func (cl *Client) TesterPresentResponseRequired(ctx context.Context) error {
 	resp, err := cl.request(ctx, []byte{0x01, 0x3E}, cl.defaultTimeout)
 	if err != nil {
-		return fmt.Errorf("TesterPresentResponseRequired: %v", err)
+		return fmt.Errorf("TesterPresentResponseRequired: %w", err)
 	}
 	return CheckErr(resp)
 }
@@ -703,10 +705,14 @@ func (cl *Client) ReportProgrammedState(ctx context.Context) (byte, error) {
 	if err := CheckErr(resp); err != nil {
 		return 0, fmt.Errorf("ReportProgrammedState[2]: %w", err)
 	}
-	if resp.Data[0] != 0x02 || resp.Data[1] != 0xE2 {
-		return 0, errors.New("ReportProgrammedState[3]: invalid response")
+	d := resp.Bytes()
+	if len(d) < 3 {
+		return 0, fmt.Errorf("ReportProgrammedState[3]: short response [% 02X]", d)
 	}
-	return resp.Data[2], nil
+	if d[0] != 0x02 || d[1] != 0xE2 {
+		return 0, errors.New("ReportProgrammedState[4]: invalid response")
+	}
+	return d[2], nil
 }
 
 func TranslateProgrammedState(state byte) string {
@@ -778,15 +784,18 @@ func (cl *Client) ProgrammingMode(ctx context.Context, subFunc byte) error {
 		if err != nil {
 			return fmt.Errorf("ProgrammingMode[1]: %X %w", subFunc, err)
 		}
+		if err := CheckErr(resp); err != nil {
+			return fmt.Errorf("ProgrammingMode[2]: %X %w", subFunc, err)
+		}
 		if resp.Data[0] != 0x01 || resp.Data[1] != 0xE5 {
-			return errors.New("ProgrammingMode[2]: invalid response")
+			return errors.New("ProgrammingMode[3]: invalid response")
 		}
 		return nil
 
 	case 0x03:
 		return cl.c.Send(ctx, gocan.NewFrame(cl.canID, payload))
 	default:
-		return errors.New("ProgrammingMode[3]: unknown subFunc")
+		return errors.New("ProgrammingMode[4]: unknown subFunc")
 	}
 }
 
@@ -938,8 +947,10 @@ func (cl *Client) ReadDataByPacketIdentifier(ctx context.Context, subFunc byte, 
 		return nil, fmt.Errorf("ReadDataByPacketIdentifier[1]: %w", err)
 	}
 
-	if err := CheckErr(resp); err != nil {
-		return nil, err
+	// The packet itself starts with its DPID, so only a frame naming this
+	// service after $7F is a negative response.
+	if resp.Data[1] == 0x7F && resp.Data[2] == READ_DATA_BY_PACKET_IDENTIFIER || isBusyReply(READ_DATA_BY_PACKET_IDENTIFIER, resp) {
+		return nil, CheckErr(resp)
 	}
 
 	return resp.Bytes(), nil
@@ -960,6 +971,9 @@ func (cl *Client) DeviceControl(ctx context.Context, command byte) error {
 }
 
 func (cl *Client) DeviceControlWithCode(ctx context.Context, command byte, code []byte) error {
+	if len(code) > 5 {
+		return fmt.Errorf("DeviceControlWithCode: %d control bytes, at most 5", len(code))
+	}
 	payload := []byte{0x02 + uint8(len(code)), DEVICE_CONTROL, command}
 	payload = append(payload, code...)
 	resp, err := cl.request(ctx, payload, cl.defaultTimeout)

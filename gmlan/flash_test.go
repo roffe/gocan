@@ -5,7 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
+	"log"
 	"slices"
 	"sync"
 	"testing"
@@ -110,36 +110,46 @@ func TestSecurityAccessReplyForAnotherLevel(t *testing.T) {
 	})
 }
 
-func TestRequestSecurityAccessKeepsTesterPresentDuringDelay(t *testing.T) {
-	t.Parallel()
-	e := &fakeECU{handle: securityECU(0x12, 0x34)}
-	cl, node := newECUClient(t, e)
-	start := time.Now()
-	if err := cl.RequestSecurityAccess(context.Background(), AccessLevel01, time.Second, testKey); err != nil {
-		t.Fatal(err)
-	}
-	if elapsed := time.Since(start); elapsed < time.Second {
-		t.Errorf("unlocked after %v, want the key sent after the 1s delay", elapsed)
-	}
-	var got []string
-	for _, f := range node.Sent() {
-		got = append(got, fmt.Sprintf("%03X % 02X", f.ID, f.Bytes()))
-	}
-	hi, lo := testKey([]byte{0x12, 0x34}, AccessLevel01)
-	want := []string{
-		"7E0 02 27 01",
-		"101 FE 01 3E",
-		fmt.Sprintf("7E0 04 27 02 %02X %02X", hi, lo),
-	}
-	if !slices.Equal(got, want) {
-		t.Errorf("sent %q, want %q", got, want)
+// The delay is sat out in pauses of at most a second, each followed by a
+// tester present, before the key goes out.
+func TestRequestSecurityAccessDelay(t *testing.T) {
+	const s = time.Second
+	for _, tc := range []struct {
+		delay  time.Duration
+		pauses []time.Duration
+	}{
+		{900 * time.Millisecond, []time.Duration{900 * time.Millisecond}},
+		{s, []time.Duration{s}},
+		{2500 * time.Millisecond, []time.Duration{s, s, 500 * time.Millisecond}},
+	} {
+		t.Run(tc.delay.String(), func(t *testing.T) {
+			pauses := recordWaits(t)
+			e := &fakeECU{handle: securityECU(0x12, 0x34)}
+			cl, node := newECUClient(t, e)
+			if err := cl.RequestSecurityAccess(context.Background(), AccessLevel01, tc.delay, testKey); err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(*pauses, tc.pauses) {
+				t.Errorf("paused %v, want %v", *pauses, tc.pauses)
+			}
+			var got []string
+			for _, f := range node.Sent() {
+				got = append(got, fmt.Sprintf("%03X % 02X", f.ID, f.Bytes()))
+			}
+			hi, lo := testKey([]byte{0x12, 0x34}, AccessLevel01)
+			want := []string{"7E0 02 27 01"}
+			for range tc.pauses {
+				want = append(want, "101 FE 01 3E")
+			}
+			want = append(want, fmt.Sprintf("7E0 04 27 02 %02X %02X", hi, lo))
+			if !slices.Equal(got, want) {
+				t.Errorf("sent %q, want %q", got, want)
+			}
+		})
 	}
 }
 
 func TestRequestSecurityAccessDelayEndsOnCancel(t *testing.T) {
-	if os.Getenv("GOCAN_BUG_TESTS") == "" {
-		t.Skip("BUG: RequestSecurityAccess sleeps out the whole delay after ctx is cancelled")
-	}
 	e := &fakeECU{handle: securityECU(0x12, 0x34)}
 	cl, _ := newECUClient(t, e)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -159,9 +169,6 @@ func TestRequestSecurityAccessDelayEndsOnCancel(t *testing.T) {
 // its end make a zero seed ("already unlocked") or half a seed, whose wrong
 // key burns one of the ECU's attempts.
 func TestSecurityAccessShortSeedReply(t *testing.T) {
-	if os.Getenv("GOCAN_BUG_TESTS") == "" {
-		t.Skip("BUG: SecurityAccessRequestSeed reads the seed past the end of a short reply, and RequestSecurityAccess then reports a locked ECU as unlocked")
-	}
 	short := func(t *testing.T, length uint8) *Client {
 		node := (&fakeECU{handle: securityECU(0x12, 0x34)}).node()
 		node.Fault = gocantest.Truncate(0, length)
@@ -182,9 +189,6 @@ func TestSecurityAccessShortSeedReply(t *testing.T) {
 }
 
 func TestReportProgrammedStateShortReply(t *testing.T) {
-	if os.Getenv("GOCAN_BUG_TESTS") == "" {
-		t.Skip("BUG: ReportProgrammedState reads the state past the end of a short reply and reports \"fully programmed\"")
-	}
 	node := (&fakeECU{handle: func([]byte) [][]byte { return [][]byte{{0xE2, 0x01}} }}).node()
 	node.Fault = gocantest.Truncate(0, 2)
 	if state, err := newTestClient(t, node).ReportProgrammedState(context.Background()); err == nil {
@@ -237,9 +241,6 @@ func TestProgrammingMode(t *testing.T) {
 }
 
 func TestProgrammingModeNegativeResponse(t *testing.T) {
-	if os.Getenv("GOCAN_BUG_TESTS") == "" {
-		t.Skip("BUG: ProgrammingMode never runs CheckErr, so a refusal comes back as \"invalid response\" without its NRC")
-	}
 	e := &fakeECU{handle: func([]byte) [][]byte { return [][]byte{negative(PROGRAMMING_MODE, 0x22)} }}
 	cl, _ := newECUClient(t, e)
 	wantNRC(t, cl.ProgrammingModeRequest(context.Background()), PROGRAMMING_MODE, 0x22)
@@ -652,6 +653,20 @@ func TestWriteDataByAddressShort(t *testing.T) {
 			t.Errorf("sent %v", sent)
 		}
 	})
+}
+
+func TestExecuteDoesNotLog(t *testing.T) {
+	var out bytes.Buffer
+	defer log.SetOutput(log.Writer())
+	log.SetOutput(&out)
+	e := &fakeECU{handle: func([]byte) [][]byte { return [][]byte{{0x76}} }}
+	cl, _ := newECUClient(t, e)
+	if err := cl.Execute(context.Background(), 0x102400); err != nil {
+		t.Fatal(err)
+	}
+	if out.Len() > 0 {
+		t.Errorf("logged %q", out.String())
+	}
 }
 
 // Every reply frame of a multi-frame write is dropped, duplicated and

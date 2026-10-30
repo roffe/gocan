@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"reflect"
 	"slices"
 	"testing"
@@ -402,9 +401,6 @@ func TestTesterPresentResponseRequired(t *testing.T) {
 }
 
 func TestTesterPresentResponseRequiredTimeout(t *testing.T) {
-	if os.Getenv("GOCAN_BUG_TESTS") == "" {
-		t.Skip("BUG: TesterPresentResponseRequired formats the request error with the v verb instead of w, so errors.Is cannot see the timeout")
-	}
 	cl, _ := newECUClient(t, &fakeECU{handle: silentECU})
 	if err := cl.TesterPresentResponseRequired(context.Background()); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("silent ECU: err = %v, want a timeout", err)
@@ -488,9 +484,6 @@ func TestReadDataByPacketIdentifierErrors(t *testing.T) {
 }
 
 func TestReadDataByPacketIdentifierDataByte7F(t *testing.T) {
-	if os.Getenv("GOCAN_BUG_TESTS") == "" {
-		t.Skip("BUG: ReadDataByPacketIdentifier runs CheckErr on the UUDT packet and reads a first data byte of $7F as a negative response")
-	}
 	packet := []byte{0x7A, 0x7F, 0x52, 0x00, 0x00, 0x00, 0xDC, 0x00}
 	cl, _ := newPacketClient(t, uudt(packet))
 	got, err := cl.ReadDataByPacketIdentifier(context.Background(), 0x01, 0x7A)
@@ -529,16 +522,12 @@ func TestDynamicallyDefineMessage(t *testing.T) {
 }
 
 func TestDeviceControlWithCodeTooLongForASingleFrame(t *testing.T) {
-	if os.Getenv("GOCAN_BUG_TESTS") == "" {
-		t.Skip("BUG: DeviceControlWithCode sends more than 5 code bytes as a single frame cut to 8 bytes with PCI 8")
+	cl, node := newECUClient(t, &fakeECU{handle: silentECU})
+	if err := cl.DeviceControlWithCode(context.Background(), 0x60, []byte{1, 2, 3, 4, 5, 6}); err == nil {
+		t.Fatal("six control bytes accepted")
 	}
-	code := []byte{1, 2, 3, 4, 5, 6}
-	e := &fakeECU{handle: func(req []byte) [][]byte { return [][]byte{{0xEE, req[1]}} }}
-	cl, _ := newECUClient(t, e)
-	err := cl.DeviceControlWithCode(context.Background(), 0x60, code)
-	e.noViolations(t)
-	if err == nil {
-		e.check(t, append([]byte{DEVICE_CONTROL, 0x60}, code...))
+	if sent := node.Sent(); len(sent) != 0 {
+		t.Errorf("sent %v", sent)
 	}
 }
 
