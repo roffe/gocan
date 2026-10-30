@@ -55,6 +55,10 @@ type RCan struct {
 	closed    bool
 
 	txBuf [4 + 8]byte // Send's packet, reused; the Bus serializes Send
+
+	// readLoop-only packet parser state.
+	rxBuf [maxCommandSize]byte
+	rxPtr int
 }
 
 func New(cfg gocan.Config) (gocan.Adapter, error) {
@@ -167,11 +171,7 @@ func encode(b []byte, f gocan.Frame) []byte {
 
 func (r *RCan) readLoop(ctx context.Context) {
 	defer close(r.readDone)
-	const canHeaderSize = 3
 	readBuf := make([]byte, maxCommandSize)
-	commandBuff := make([]byte, maxCommandSize)
-	var commandBuffPtr int
-
 	for ctx.Err() == nil {
 		n, err := r.bulkIn(readBuf, 100)
 		if err != nil {
@@ -183,35 +183,40 @@ func (r *RCan) readLoop(ctx context.Context) {
 			}
 			return
 		}
-		for i := range n {
-			if commandBuffPtr >= maxCommandSize {
-				commandBuffPtr = 0
+		r.parse(readBuf[:n])
+	}
+}
+
+// parse accumulates bytes from the IN endpoint into packets and delivers
+// every complete CAN frame. A packet may span calls.
+func (r *RCan) parse(data []byte) {
+	const canHeaderSize = 3
+	for _, b := range data {
+		if r.rxPtr >= maxCommandSize {
+			r.rxPtr = 0
+			continue
+		}
+		r.rxBuf[r.rxPtr] = b
+		r.rxPtr++
+		if r.rxPtr < canHeaderSize {
+			continue
+		}
+		switch r.rxBuf[0] {
+		case cmdCANFrame:
+			dlc := int(r.rxBuf[1] >> 4)
+			if dlc > 8 {
+				r.bus.Emit(gocan.Event{Type: gocan.EventTypeError, Details: fmt.Sprintf("invalid DLC: %d", dlc)})
+				r.rxPtr = 0
 				continue
 			}
-			commandBuff[commandBuffPtr] = readBuf[i]
-			commandBuffPtr++
-			if commandBuffPtr < canHeaderSize {
-				continue
+			if r.rxPtr == canHeaderSize+dlc {
+				r.deliver(r.rxBuf[:r.rxPtr])
+				r.rxPtr = 0
 			}
-			switch commandBuff[0] {
-			case cmdCANFrame:
-				dlc := int(commandBuff[1] >> 4)
-				if dlc > 8 {
-					r.bus.Emit(gocan.Event{Type: gocan.EventTypeError, Details: fmt.Sprintf("invalid DLC: %d", dlc)})
-					commandBuffPtr = 0
-					continue
-				}
-				if commandBuffPtr == canHeaderSize+dlc {
-					r.deliver(commandBuff[:commandBuffPtr])
-					commandBuffPtr = 0
-				}
-			default:
-				// unknown command byte: shift the buffer one byte and resync
-				commandBuffPtr--
-				if commandBuffPtr > 0 {
-					copy(commandBuff[0:], commandBuff[1:commandBuffPtr+1])
-				}
-			}
+		default:
+			// unknown command byte: shift the buffer one byte and resync
+			r.rxPtr--
+			copy(r.rxBuf[:r.rxPtr], r.rxBuf[1:])
 		}
 	}
 }
