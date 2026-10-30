@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -452,9 +451,6 @@ func TestTransferDataLostRow(t *testing.T) {
 }
 
 func TestTransferDataUnderFaults(t *testing.T) {
-	if os.Getenv("GOCAN_BUG_TESTS") == "" {
-		t.Skip("BUG: TransferData never checks the row counter or frame length, so a duplicated or truncated row comes back as data")
-	}
 	for k := 1; k <= 3; k++ {
 		for name, fault := range map[string]func(int, gocan.Frame) []gocan.Frame{
 			"duplicate": gocantest.Duplicate(k),
@@ -474,9 +470,6 @@ func TestTransferDataUnderFaults(t *testing.T) {
 }
 
 func TestTransferDataCancelled(t *testing.T) {
-	if os.Getenv("GOCAN_BUG_TESTS") == "" {
-		t.Skip("BUG: a context that ends between rows is reported as \"subscription closed\", not the context's error")
-	}
 	e, _ := uploadECU()
 	node := e.node()
 	node.Fault = gocantest.Drop(1)

@@ -314,20 +314,13 @@ outer:
 	for {
 		b, err := t.transferData(ctx)
 		if err != nil {
-			//if err.Error() == "incorrect byte count during block transfer" {
-			//	return buff.Bytes(), nil
-			//}
 			return nil, fmt.Errorf("TransferData[1]: %w", err)
 		}
 		if len(b) < 8 {
 			return nil, fmt.Errorf("TransferData[1]: short reply [% 02X]", b)
 		}
-		// C0 BF 04 76 31 50 7600
-		// log.Printf("transfer data: %X, size: %d", b, b[2])
-		// fmt.Printf("%X\n", b)
 
 		toRead := b[2]
-		//		log.Printf("toRead %d, %02X", toRead, b[0])
 		if toRead >= 5 {
 			buff.WriteByte(b[7])
 			toRead -= 5
@@ -340,6 +333,7 @@ outer:
 			break
 		}
 
+		next := b[0]&0x3F - 1
 		sctx, cancel := context.WithCancel(ctx)
 		ch := t.c.Subscribe(sctx, t.responseID)
 		if err := t.Ack(ctx, b[0], true); err != nil {
@@ -351,10 +345,24 @@ outer:
 			case f, ok := <-ch:
 				if !ok {
 					cancel()
-					return nil, fmt.Errorf("TransferData[4]: subscription closed")
+					err := context.Cause(ctx)
+					if err == nil {
+						err = context.Cause(t.c.Context())
+					}
+					if err == nil {
+						err = errors.New("subscription closed")
+					}
+					return nil, fmt.Errorf("TransferData[4]: %w", err)
 				}
-				// log.Printf("toRead %d, %X", toRead, d)
+				if f.Data[0]&0x40 != 0 || f.Data[0]&0x3F != next {
+					continue // a repeated or stale row; the ECU never retransmits
+				}
+				next--
 				readThis := int(min(6, toRead))
+				if int(f.Length) < 2+readThis {
+					cancel()
+					return nil, fmt.Errorf("TransferData[4]: short row %s", f.String())
+				}
 				buff.Write(f.Data[2 : 2+readThis])
 				toRead -= byte(readThis)
 				if f.Data[0] == 0x80 || f.Data[0] == 0xC0 {
