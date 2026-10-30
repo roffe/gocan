@@ -31,7 +31,9 @@ func TestRCanParse(t *testing.T) {
 		{"no data", rxFrame(empty), []gocan.Frame{empty}, 0},
 		{"two frames", slices.Concat(rxFrame(empty), rxFrame(full)), []gocan.Frame{empty, full}, 0},
 		{"garbage first", slices.Concat([]byte{0x55, 0x66}, rxFrame(full)), []gocan.Frame{full}, 0},
-		{"invalid dlc", slices.Concat([]byte{cmdCANFrame, 0x92, 0x58}, rxFrame(full)), []gocan.Frame{full}, 1},		{"incomplete", rxFrame(full)[:7], nil, 0},
+		{"invalid dlc", slices.Concat([]byte{cmdCANFrame, 0x92, 0x58}, rxFrame(full)), []gocan.Frame{full}, 1},
+		{"id past 11 bits", slices.Concat([]byte{cmdCANFrame, 0x38, 0x30, 1, 2, 3}, rxFrame(full)), []gocan.Frame{full}, 1},
+		{"incomplete", rxFrame(full)[:7], nil, 0},
 	} {
 		for split := range len(tt.in) {
 			bus, err := gocan.OpenAdapter(context.Background(), &gocan.Loopback{})

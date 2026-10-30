@@ -203,9 +203,9 @@ func (r *RCan) parse(data []byte) {
 		}
 		switch r.rxBuf[0] {
 		case cmdCANFrame:
-			dlc := int(r.rxBuf[1] >> 4)
-			if dlc > 8 {
-				r.bus.Emit(gocan.Event{Type: gocan.EventTypeError, Details: fmt.Sprintf("invalid DLC: %d", dlc)})
+			dlc, idHi := int(r.rxBuf[1]>>4), r.rxBuf[1]&0x0F
+			if dlc > 8 || idHi > 7 {
+				r.bus.Emit(gocan.Event{Type: gocan.EventTypeError, Details: fmt.Sprintf("invalid frame header: %02X", r.rxBuf[1])})
 				r.rxPtr = 0
 				continue
 			}
