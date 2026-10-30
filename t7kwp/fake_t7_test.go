@@ -1,6 +1,7 @@
 package t7kwp
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -338,6 +339,20 @@ func shortTimeout(t *testing.T) {
 	saved := DefaultTimeout
 	DefaultTimeout = 30 * time.Millisecond
 	t.Cleanup(func() { DefaultTimeout = saved })
+}
+
+// noWait skips the client's pauses between security access attempts and
+// records the ones it would have taken.
+func noWait(t *testing.T) *[]time.Duration {
+	t.Helper()
+	saved := wait
+	var waits []time.Duration
+	wait = func(ctx context.Context, d time.Duration) error {
+		waits = append(waits, d)
+		return ctx.Err()
+	}
+	t.Cleanup(func() { wait = saved })
+	return &waits
 }
 
 func answerWith(p ...byte) func([]byte) []byte {

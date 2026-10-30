@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"os"
+	"fmt"
 	"slices"
 	"testing"
 	"time"
@@ -224,9 +224,6 @@ func TestSecurityAccessLockedOut(t *testing.T) {
 // An unlocked ECU hands out seed 0000: access is already granted and no key
 // is sent.
 func TestSecurityAccessZeroSeed(t *testing.T) {
-	if os.Getenv("GOCAN_BUG_TESTS") == "" {
-		t.Skip("BUG: seed 0000 (already unlocked) is answered with a key, which the ECU rejects")
-	}
 	e := &fakeT7{pair: stockPair, access: DEVELOPMENT_PRIORITY, key: 0x1111}
 	c, node := newT7(t, e)
 	ok, err := c.SecurityAccess(t.Context(), DEVELOPMENT_PRIORITY, stockPair)
@@ -235,6 +232,9 @@ func TestSecurityAccessZeroSeed(t *testing.T) {
 	}
 	if got := sentOn(node, REQ_MSG_ID); len(got) != 1 {
 		t.Fatalf("sent %02X, want only the seed request", got)
+	}
+	if !c.gotSequrityAccess {
+		t.Fatal("grant not cached")
 	}
 }
 
@@ -320,12 +320,10 @@ func TestRequestSecurityAccess(t *testing.T) {
 	})
 }
 
-// A rejected custom pair falls back to the stock pairs. The client waits a
-// fixed 3 s after each failed exchange.
+// A rejected custom pair falls back to the stock pairs, with a 3 s pause
+// between the exchanges.
 func TestRequestSecurityAccessFallsBackToStock(t *testing.T) {
-	if testing.Short() {
-		t.Skip("waits out the client's 3 s retry delay")
-	}
+	waits := noWait(t)
 	e := &fakeT7{pair: stockPair, seed: 0x1234}
 	c, _ := newT7(t, e)
 	c.SetSeedKey(&SeedKey{XOR: 0x1111, Sub: 0x2222})
@@ -335,30 +333,68 @@ func TestRequestSecurityAccessFallsBackToStock(t *testing.T) {
 	if got := e.count(SECURITY_ACCESS); got != 4 {
 		t.Fatalf("%d securityAccess requests, want two exchanges", got)
 	}
+	if !slices.Equal(*waits, []time.Duration{3 * time.Second}) {
+		t.Fatalf("pauses %v, want one of 3s", *waits)
+	}
 }
 
-func TestRequestSecurityAccessKeepsNRC(t *testing.T) {
-	if os.Getenv("GOCAN_BUG_TESTS") == "" {
-		t.Skip("BUG: RequestSecurityAccess drops the ECU's NRC (lockout, timeout) and returns a bare \"security access denied\"")
+// Every pair is tried when the ECU rejects each key, and the error carries
+// the ECU's verdict on the last one.
+func TestRequestSecurityAccessAllRejected(t *testing.T) {
+	waits := noWait(t)
+	e := &fakeT7{pair: SeedKey{XOR: 0x1111, Sub: 0x2222}, seed: 0x1234}
+	c, _ := newT7(t, e)
+	if ok, err := c.RequestSecurityAccess(t.Context(), false); ok || !errors.Is(err, ErrSecurityAccessDeniedOrRequested) {
+		t.Fatalf("RequestSecurityAccess = %v, %v; want false, %v", ok, err, ErrSecurityAccessDeniedOrRequested)
 	}
-	c, _ := newT7(t, &fakeT7{pair: stockPair, locked: true})
-	if ok, err := c.RequestSecurityAccess(t.Context(), false); ok || !errors.Is(err, ErrRequiredTimeDelayNotExpired) {
-		t.Fatalf("RequestSecurityAccess = %v, %v; want false, %v", ok, err, ErrRequiredTimeDelayNotExpired)
+	if got, want := e.count(SECURITY_ACCESS), 2*len(KnownSeedKeys); got != want {
+		t.Fatalf("%d securityAccess requests, want %d", got, want)
+	}
+	if got := len(*waits); got != len(KnownSeedKeys)-1 {
+		t.Fatalf("%d pauses, want one between each pair", got)
+	}
+}
+
+// An ECU that refuses any attempt for now ends the search at once, and the
+// caller gets its NRC.
+func TestRequestSecurityAccessLockedOut(t *testing.T) {
+	for _, nrc := range []*Error{ErrRequiredTimeDelayNotExpired, ErrExceedNumberOfAttempts} {
+		t.Run(fmt.Sprintf("NRC %02X", nrc.Code), func(t *testing.T) {
+			waits := noWait(t)
+			e := &fakeT7{answer: map[byte]func([]byte) []byte{SECURITY_ACCESS: answerWith(0x7F, SECURITY_ACCESS, nrc.Code)}}
+			c, _ := newT7(t, e)
+			if ok, err := c.RequestSecurityAccess(t.Context(), false); ok || !errors.Is(err, nrc) {
+				t.Fatalf("RequestSecurityAccess = %v, %v; want false, %v", ok, err, nrc)
+			}
+			if got := len(e.requests); got != 1 || len(*waits) != 0 {
+				t.Fatalf("%d requests and %d pauses, want 1 request and none", got, len(*waits))
+			}
+		})
 	}
 }
 
 func TestRequestSecurityAccessHonoursCancel(t *testing.T) {
-	if os.Getenv("GOCAN_BUG_TESTS") == "" {
-		t.Skip("BUG: RequestSecurityAccess sleeps 3 s per pair with time.Sleep and ignores a cancelled context")
-	}
-	c, _ := newT7(t, &fakeT7{closed: true})
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	start := time.Now()
-	_, err := c.RequestSecurityAccess(ctx, false)
-	if !errors.Is(err, context.Canceled) || time.Since(start) > time.Second {
-		t.Fatalf("err = %v after %v, want context.Canceled at once", err, time.Since(start))
-	}
+	t.Run("cancelled before", func(t *testing.T) {
+		c, _ := newT7(t, &fakeT7{closed: true})
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		start := time.Now()
+		_, err := c.RequestSecurityAccess(ctx, false)
+		if !errors.Is(err, context.Canceled) || time.Since(start) > time.Second {
+			t.Fatalf("err = %v after %v, want context.Canceled at once", err, time.Since(start))
+		}
+	})
+
+	t.Run("deadline during the pause", func(t *testing.T) {
+		c, _ := newT7(t, &fakeT7{pair: SeedKey{XOR: 0x1111, Sub: 0x2222}, seed: 0x1234})
+		ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+		defer cancel()
+		start := time.Now()
+		_, err := c.RequestSecurityAccess(ctx, false)
+		if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) > time.Second {
+			t.Fatalf("err = %v after %v, want the deadline, well before the 3 s pause ends", err, time.Since(start))
+		}
+	})
 }
 
 // Security access does not outlive the session that earned it.

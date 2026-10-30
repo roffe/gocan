@@ -594,7 +594,19 @@ func calcKey(seed uint16, k SeedKey) uint16 {
 	return (seed<<2 ^ k.XOR) - k.Sub
 }
 
-// RequestSecurityAccess tries the stock seed/key pairs at development priority.
+// wait pauses for d or until ctx ends. Tests replace it to skip the delays.
+var wait = func(ctx context.Context, d time.Duration) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(d):
+		return nil
+	}
+}
+
+// RequestSecurityAccess tries the stock seed/key pairs at development priority,
+// pausing 3 s after each failed exchange. It stops early when the ECU refuses
+// any further attempt for now, and the error wraps the last exchange's error.
 func (t *Client) RequestSecurityAccess(ctx context.Context, force bool) (bool, error) {
 	if t.gotSequrityAccess && !force {
 		return true, nil
@@ -603,26 +615,36 @@ func (t *Client) RequestSecurityAccess(ctx context.Context, force bool) (bool, e
 	if t.seedKey != nil {
 		keys = append([]SeedKey{*t.seedKey}, KnownSeedKeys...) // custom pair first
 	}
-	for _, k := range keys {
-		ok, err := t.SecurityAccess(ctx, DEVELOPMENT_PRIORITY, k)
-		if err != nil {
-			time.Sleep(3 * time.Second)
-			continue
+	err := errors.New("no seed/key pair to try")
+	for i, k := range keys {
+		if i > 0 {
+			if werr := wait(ctx, 3*time.Second); werr != nil {
+				return false, fmt.Errorf("security access denied: %w", werr)
+			}
 		}
-		if ok {
+		var ok bool
+		if ok, err = t.SecurityAccess(ctx, DEVELOPMENT_PRIORITY, k); ok {
 			return true, nil
 		}
+		if ctx.Err() != nil || errors.Is(err, ErrRequiredTimeDelayNotExpired) || errors.Is(err, ErrExceedNumberOfAttempts) {
+			break
+		}
 	}
-	return false, fmt.Errorf("security access denied")
+	return false, fmt.Errorf("security access denied: %w", err)
 }
 
 // SecurityAccess runs one seed/key exchange at the given level (0x01/0x03/0x05;
 // 0x05 is what grants flash programming on a shipping T7). A rejected key is
-// returned as an error, not (false, nil).
+// returned as an error, not (false, nil). An ECU already unlocked at level
+// hands out seed 0000; that is reported as granted and no key is sent.
 func (t *Client) SecurityAccess(ctx context.Context, level byte, k SeedKey) (bool, error) {
 	seed, err := t.RequestSeed(ctx, level)
 	if err != nil {
 		return false, err
+	}
+	if seed == 0 {
+		t.gotSequrityAccess = true
+		return true, nil
 	}
 	key := calcKey(seed, k)
 
