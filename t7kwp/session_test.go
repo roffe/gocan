@@ -64,9 +64,6 @@ func TestStartSessionRejected(t *testing.T) {
 }
 
 func TestStartSessionShortReply(t *testing.T) {
-	if os.Getenv("GOCAN_BUG_TESTS") == "" {
-		t.Skip("BUG: a 0x238 reply too short to carry the response id is accepted and leaves the response id at 0x000")
-	}
 	e := &fakeT7{closed: true}
 	node := e.node()
 	node.Fault = gocantest.Truncate(0, 6)
@@ -90,6 +87,14 @@ func TestStopSession(t *testing.T) {
 	}
 	if !e.closed {
 		t.Fatal("ECU still holds the session")
+	}
+}
+
+// A reply to some other service does not end the session.
+func TestStopSessionOtherService(t *testing.T) {
+	c, _ := newT7(t, &fakeT7{answer: map[byte]func([]byte) []byte{STOP_COM_REQ: answerWith(TESTER_PRESENT | 0x40)}})
+	if err := c.StopSession(t.Context()); err == nil {
+		t.Fatal("StopSession accepted a 7E reply")
 	}
 }
 
@@ -143,9 +148,6 @@ func checkErrIs(t *testing.T, err, want error) {
 // A new session starts with no security access, so the cached grant must not
 // outlive the session that earned it.
 func TestNewSessionDropsSecurityAccess(t *testing.T) {
-	if os.Getenv("GOCAN_BUG_TESTS") == "" {
-		t.Skip("BUG: security access is cached across StopSession/StartSession, so the new session is never unlocked")
-	}
 	e := &fakeT7{closed: true, pair: stockPair, seed: 0x1234}
 	c := New(gocantest.Open(t, e.node()))
 	ctx := t.Context()
@@ -246,6 +248,7 @@ func TestRequestSeed(t *testing.T) {
 		{name: "positive", wantSeed: 0xBEEF},
 		{name: "negative", answer: answerWith(0x7F, SECURITY_ACCESS, SUBFUNCTION_NOT_SUPPORTED_OR_INVALID_FORMAT), wantErr: ErrSubFunctionNotSupportedOrInvalidFormat},
 		{name: "other service", answer: answerWith(TESTER_PRESENT | 0x40), wantErr: errAny},
+		{name: "no seed bytes", answer: answerWith(SECURITY_ACCESS|0x40, HIGH_PRIORITY), wantErr: errAny},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := &fakeT7{l3Seed: 0xBEEF}
@@ -269,9 +272,6 @@ func TestRequestSeed(t *testing.T) {
 }
 
 func TestRequestSeedShortReply(t *testing.T) {
-	if os.Getenv("GOCAN_BUG_TESTS") == "" {
-		t.Skip("BUG: a seed reply cut before the seed bytes is read as seed 0000")
-	}
 	e := &fakeT7{l3Seed: 0xBEEF}
 	node := e.node()
 	node.Fault = gocantest.Truncate(0, 5)
@@ -358,5 +358,30 @@ func TestRequestSecurityAccessHonoursCancel(t *testing.T) {
 	_, err := c.RequestSecurityAccess(ctx, false)
 	if !errors.Is(err, context.Canceled) || time.Since(start) > time.Second {
 		t.Fatalf("err = %v after %v, want context.Canceled at once", err, time.Since(start))
+	}
+}
+
+// Security access does not outlive the session that earned it.
+func TestSessionEndDropsSecurityAccess(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		closed bool
+		end    func(*Client, context.Context) error
+	}{
+		{"StopSession", false, (*Client).StopSession},
+		{"ResetECU", false, (*Client).ResetECU},
+		{"StartSession", true, func(c *Client, ctx context.Context) error { return c.StartSession(ctx, INIT_MSG_ID, INIT_RESP_ID) }},
+		{"StartSession2", true, func(c *Client, ctx context.Context) error { return c.StartSession2(ctx, INIT_MSG_ID, INIT_RESP_ID) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := newT7(t, &fakeT7{closed: tc.closed})
+			c.gotSequrityAccess = true
+			if err := tc.end(c, t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if c.gotSequrityAccess {
+				t.Fatal("security access still cached")
+			}
+		})
 	}
 }

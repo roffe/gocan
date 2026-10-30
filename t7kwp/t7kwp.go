@@ -103,40 +103,49 @@ func newFrame(id uint32, payload []byte) gocan.Frame {
 }
 
 func (t *Client) StartSession(ctx context.Context, id, responseID uint32) error {
-	resp, err := t.request(ctx, id, []byte{0x3F, START_COM_REQ, 0x00, 0x11, byte(REQ_MSG_ID >> 8), byte(REQ_MSG_ID & 0xFF)}, DefaultTimeout, responseID)
-	if err != nil {
-		return fmt.Errorf("StartSession[1]: %w", err)
-	}
-	if resp.Data[3] != START_COM_REQ|0x40 {
-		return fmt.Errorf("StartSession[2]: %w", TranslateErrorCode(GENERAL_REJECT))
-	}
-	t.responseID = uint32(resp.Data[6])<<8 | uint32(resp.Data[7])
-	// log.Printf("ECU ID: 0x%03X", t.responseID)
-	return nil
+	return t.startSession(ctx, id, responseID, REQ_MSG_ID)
 }
 
 func (t *Client) StartSession2(ctx context.Context, id, responseID uint32) error {
-	resp, err := t.request(ctx, id, []byte{0x3F, START_COM_REQ, 0x00, 0x11, byte(0x740 >> 8), byte(0x740 & 0xFF)}, DefaultTimeout, responseID)
+	return t.startSession(ctx, id, responseID, 0x740)
+}
+
+// startSession sends startCommunication naming requestID as the tester's
+// request channel. The reply carries the ECU's response id in bytes 6-7. A new
+// session starts without security access.
+func (t *Client) startSession(ctx context.Context, id, responseID, requestID uint32) error {
+	resp, err := t.request(ctx, id, []byte{0x3F, START_COM_REQ, 0x00, 0x11, byte(requestID >> 8), byte(requestID)}, DefaultTimeout, responseID)
 	if err != nil {
 		return fmt.Errorf("StartSession[1]: %w", err)
 	}
 	if resp.Data[3] != START_COM_REQ|0x40 {
 		return fmt.Errorf("StartSession[2]: %w", TranslateErrorCode(GENERAL_REJECT))
 	}
+	if resp.Length < 8 {
+		return fmt.Errorf("StartSession[3]: reply too short for a response id: %s", resp.String())
+	}
 	t.responseID = uint32(resp.Data[6])<<8 | uint32(resp.Data[7])
-	// log.Printf("ECU ID: 0x%03X", t.responseID)
+	t.gotSequrityAccess = false
 	return nil
 }
 
 // StopSession ends the diagnostic session (stopCommunication, service 0x82).
-// The KWP length is 1: the service has no parameters.
+// The KWP length is 1: the service has no parameters. Security access ends
+// with the session.
 func (t *Client) StopSession(ctx context.Context) error {
+	t.gotSequrityAccess = false
 	resp, err := t.request(ctx, REQ_MSG_ID, []byte{0x40, 0xA1, 0x01, STOP_COM_REQ}, DefaultTimeout, t.responseID)
 	if err != nil {
 		return fmt.Errorf("StopSession: %w", err)
 	}
 	_ = t.Ack(ctx, resp.Data[0], false)
-	return checkErr(resp)
+	if err := checkErr(resp); err != nil {
+		return err
+	}
+	if resp.Data[3] != STOP_COM_REQ|0x40 {
+		return fmt.Errorf("StopSession: unexpected response: %s", resp.String())
+	}
+	return nil
 }
 
 func (t *Client) TesterPresent(ctx context.Context) error {
@@ -646,6 +655,9 @@ func (t *Client) RequestSeed(ctx context.Context, level byte) (uint16, error) {
 	if resp.Data[3] != SECURITY_ACCESS|0x40 {
 		return 0, fmt.Errorf("unexpected seed response: %s", resp.String())
 	}
+	if resp.Length < 7 || resp.Data[2] < 4 {
+		return 0, fmt.Errorf("seed response too short: %s", resp.String())
+	}
 	return uint16(resp.Data[5])<<8 | uint16(resp.Data[6]), nil
 }
 
@@ -839,8 +851,10 @@ func (t *Client) recvData(ctx context.Context, length int) ([]byte, error) {
 	return out.Bytes(), nil
 }
 
-// Reset ECU
+// ResetECU asks for a power-on reset (service 0x11, 0x01). Security access does
+// not survive it.
 func (t *Client) ResetECU(ctx context.Context) error {
+	t.gotSequrityAccess = false
 	f, err := t.request(ctx, REQ_MSG_ID, []byte{0x40, 0xA1, 0x02, ECU_RESET, 0x01}, DefaultTimeout, t.responseID)
 	if err != nil {
 		return err
