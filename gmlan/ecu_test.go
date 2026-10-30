@@ -2,6 +2,7 @@ package gmlan
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"slices"
@@ -58,7 +59,8 @@ func (e *fakeECU) reply(f gocan.Frame) []gocan.Frame {
 		return e.complete(d[1 : 1+d[0]])
 	case 1:
 		n := int(d[0]&0x0F)<<8 | int(d[1])
-		if n <= 7 || len(d) != 8 {
+		// The T8 takes a first frame for 7 bytes too.
+		if n < 7 || len(d) != 8 {
 			e.violate("a malformed first frame [% 02X]", d)
 			return nil
 		}
@@ -162,6 +164,20 @@ func sf(payload ...byte) gocan.Frame {
 // later has the ECU send payload as a single frame after d.
 func later(node *gocantest.Node, d time.Duration, payload ...byte) {
 	time.AfterFunc(d, func() { node.Deliver(sf(payload...)) })
+}
+
+// recordWaits replaces wait for the rest of t with one that only records the
+// pauses asked for. A test that uses it cannot run in parallel.
+func recordWaits(t *testing.T) *[]time.Duration {
+	t.Helper()
+	var pauses []time.Duration
+	real := wait
+	wait = func(ctx context.Context, d time.Duration) error {
+		pauses = append(pauses, d)
+		return ctx.Err()
+	}
+	t.Cleanup(func() { wait = real })
+	return &pauses
 }
 
 func negative(service, code byte) []byte { return []byte{0x7F, service, code} }

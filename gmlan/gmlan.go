@@ -3,12 +3,10 @@
 package gmlan
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"strings"
 	"time"
@@ -93,6 +91,18 @@ const (
 	busyRetryDelay = 100 * time.Millisecond
 )
 
+// wait pauses for d or until ctx is done. Tests replace it.
+var wait = func(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return nil
+	case <-ctx.Done():
+		return context.Cause(ctx)
+	}
+}
+
 // newWindow is context.WithCancel behind a helper: the $A9 receive window
 // deliberately outlives its creating loop iteration (closed by a deferred
 // call or on busy-retry), which vet's lostcancel check cannot follow.
@@ -101,10 +111,16 @@ func newWindow(parent context.Context) (context.Context, context.CancelFunc) {
 }
 
 // request sends payload on the client canID and waits for a reply on the
-// recvIDs, bounded by timeout. A busyRepeatRequest reply is retried up to
-// busyRetries times.
+// recvIDs, bounded by timeout, or by P2* once the node answers
+// responsePending. A busyRepeatRequest reply to a single or first frame is
+// retried up to busyRetries times.
 func (cl *Client) request(ctx context.Context, payload []byte, timeout time.Duration) (gocan.Frame, error) {
-	resp, x, err := cl.requestMulti(ctx, payload, timeout, 1)
+	return cl.requestTo(ctx, cl.canID, payload, timeout)
+}
+
+// requestTo is request sent on id instead of the client's CAN ID.
+func (cl *Client) requestTo(ctx context.Context, id uint32, payload []byte, timeout time.Duration) (gocan.Frame, error) {
+	resp, x, err := cl.requestMulti(ctx, id, payload, timeout, 1)
 	x.close()
 	return resp, err
 }
@@ -112,10 +128,11 @@ func (cl *Client) request(ctx context.Context, payload []byte, timeout time.Dura
 // requestMulti is request for callers that must keep reading on the same
 // subscription — the consecutive frames of a multi-frame response. The caller
 // must close the returned exchange, which close accepts even when it is nil.
-func (cl *Client) requestMulti(ctx context.Context, payload []byte, timeout time.Duration, expectedResponses int) (gocan.Frame, *exchange, error) {
+func (cl *Client) requestMulti(ctx context.Context, id uint32, payload []byte, timeout time.Duration, expectedResponses int) (gocan.Frame, *exchange, error) {
+	service, repeatable := serviceOf(payload)
 	for attempt := 0; ; attempt++ {
-		resp, x, err := cl.attempt(ctx, payload, timeout, expectedResponses)
-		if err != nil || !isBusyReply(payload[1], resp) || attempt >= busyRetries {
+		resp, x, err := cl.attempt(ctx, id, payload, timeout, expectedResponses)
+		if err != nil || !repeatable || !isBusyReply(service, resp) || attempt >= busyRetries {
 			return resp, x, err
 		}
 		x.close()
@@ -129,24 +146,18 @@ func (cl *Client) requestMulti(ctx context.Context, payload []byte, timeout time
 
 // attempt is one send-and-wait cycle with the receive window opened before
 // the request goes out.
-func (cl *Client) attempt(ctx context.Context, payload []byte, timeout time.Duration, expectedResponses int) (gocan.Frame, *exchange, error) {
-	rctx, cancel := context.WithTimeout(ctx, timeout)
+func (cl *Client) attempt(ctx context.Context, id uint32, payload []byte, timeout time.Duration, expectedResponses int) (gocan.Frame, *exchange, error) {
+	sctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	// The exchange hangs off ctx, not rctx: it outlives this call whenever
-	// the response turns out to be the first frame of a multi-frame reply.
+	// The exchange hangs off ctx, not sctx: it outlives this call whenever
+	// the response turns out to be the first frame of a multi-frame reply,
+	// and a responsePending reply stretches the wait past timeout.
 	x := cl.begin(ctx, payload, timeout)
-	if err := cl.send(rctx, payload, timeout, expectedResponses); err != nil {
+	if err := cl.send(sctx, id, payload, timeout, expectedResponses); err != nil {
 		return gocan.Frame{}, x, err
 	}
-	resp, err := x.response(rctx)
+	resp, err := x.response(ctx)
 	return resp, x, err
-}
-
-// recv waits for a single reply on the recvIDs, bounded by timeout.
-func (cl *Client) recv(ctx context.Context, timeout time.Duration) (gocan.Frame, error) {
-	rctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	return cl.c.Recv(rctx, cl.recvID...)
 }
 
 /*
@@ -166,15 +177,7 @@ reporting service ($A9) followed by the remaining copy
 */
 
 func (cl *Client) ClearDiagnosticInformation(ctx context.Context, id uint32) error {
-	rctx, cancel := context.WithTimeout(ctx, cl.defaultTimeout)
-	defer cancel()
-	resp, err := cl.c.Request(rctx, gocan.NewFrame(id, []byte{0x01, 0x04}), cl.recvID...)
-	if err != nil {
-		return fmt.Errorf("ClearDiagnosticInformation[1]: %w", err)
-	}
-	if resp.Data[1] == 0x7F && resp.Data[2] == 0x04 && resp.Data[3] == 0x78 {
-		resp, err = cl.recv(ctx, time.Second*5)
-	}
+	resp, err := cl.requestTo(ctx, id, []byte{0x01, 0x04}, cl.defaultTimeout)
 	if err != nil {
 		return fmt.Errorf("ClearDiagnosticInformation[1]: %w", err)
 	}
@@ -259,7 +262,7 @@ func (cl *Client) ReadDataByIdentifier(ctx context.Context, pid byte) ([]byte, e
 }
 
 func (cl *Client) ReadDataByIdentifierFrame(ctx context.Context, frame gocan.Frame) ([]byte, error) {
-	resp, x, err := cl.requestMulti(ctx, frame.Bytes(), cl.defaultTimeout, 1)
+	resp, x, err := cl.requestMulti(ctx, cl.canID, frame.Bytes(), cl.defaultTimeout, 1)
 	defer x.close()
 	if err != nil {
 		return nil, fmt.Errorf("ReadDataByIdentifier[1]: %w", err)
@@ -293,7 +296,7 @@ func (cl *Client) ReadDataByIdentifierFrame(ctx context.Context, frame gocan.Fra
 		// How many consecutive frames we expect (7 data bytes per CF)
 		framesToReceive := (left + 6) / 7
 		// Send Flow Control: Continue to send (CTS), no block size, no separation time
-		if err := cl.send(ctx, []byte{0x30, 0x00, 0x00}, cl.defaultTimeout, framesToReceive); err != nil {
+		if err := cl.send(ctx, cl.canID, []byte{0x30, 0x00, 0x00}, cl.defaultTimeout, framesToReceive); err != nil {
 			return nil, fmt.Errorf("ReadDataByIdentifier[7]: %w", err)
 		}
 		// Expect consecutive frames starting at 0x21 .. 0x2F, then wrap to 0x20, etc.
@@ -353,7 +356,7 @@ service
 */
 
 func (cl *Client) ReadMemoryByAddress(ctx context.Context, address, length uint32) ([]byte, error) {
-	resp, x, err := cl.requestMulti(ctx, []byte{0x06, READ_MEMORY_BY_ADDRESS, byte(address >> 16), byte(address >> 8), byte(address), byte(length >> 8), byte(length)}, cl.defaultTimeout, 1)
+	resp, x, err := cl.requestMulti(ctx, cl.canID, []byte{0x06, READ_MEMORY_BY_ADDRESS, byte(address >> 16), byte(address >> 8), byte(address), byte(length >> 8), byte(length)}, cl.defaultTimeout, 1)
 	defer x.close()
 	if err != nil {
 		return nil, fmt.Errorf("ReadMemoryByAddress[1]: %w", err)
@@ -391,7 +394,7 @@ func (cl *Client) ReadMemoryByAddress(ctx context.Context, address, length uint3
 		framesToReceive := (left + 6) / 7 // ceil(left/7)
 
 		// FC: CTS, BS=0, STmin=0
-		if err := cl.send(ctx, []byte{0x30, 0x00, 0x00}, cl.defaultTimeout, framesToReceive); err != nil {
+		if err := cl.send(ctx, cl.canID, []byte{0x30, 0x00, 0x00}, cl.defaultTimeout, framesToReceive); err != nil {
 			return nil, fmt.Errorf("ReadMemoryByAddress[4]: %w", err)
 		}
 
@@ -518,9 +521,18 @@ func (cl *Client) DisableNormalCommunicationAllNodes() error {
 diagnostic data packets which are formatted as UUDT messages and can be requested via the
 ReadDataByPacketIdentifier ($AA) service. The use of dynamic data packets allows a test device to optimize
 its diagnostic routines and bus bandwidth utilization by packing
+
+ids are the PIDs packed, in order, into DPID $FE, the first dynamic DPID.
 */
 func (cl *Client) DynamicallyDefineMessage(ctx context.Context, ids ...uint16) error {
-	resp, err := cl.request(ctx, []byte{0x06, DYNAMICALLY_DEFINE_MESSAGE, 0xFE, 0x03, 0x8D, 0x01, 0x01}, cl.defaultTimeout)
+	if len(ids) == 0 {
+		return errors.New("DynamicallyDefineMessage: no PIDs")
+	}
+	req := []byte{DYNAMICALLY_DEFINE_MESSAGE, 0xFE}
+	for _, id := range ids {
+		req = binary.BigEndian.AppendUint16(req, id)
+	}
+	resp, err := cl.requestService(ctx, req, cl.defaultTimeout)
 	if err != nil {
 		return fmt.Errorf("DynamicallyDefineMessage[1]: %w", err)
 	}
@@ -628,181 +640,34 @@ func (cl *Client) WriteDataByIdentifierUint32(ctx context.Context, pid byte, val
 }
 
 func (cl *Client) WriteDataByIdentifier(ctx context.Context, pid byte, data []byte) error {
-	if len(data) > 6 {
-		return cl.writeDataByIdentifierMultiframe(ctx, pid, data)
-	}
-
-	payload := []byte{byte(len(data) + 2), WRITE_DATA_BY_IDENTIFIER, pid}
-	payload = append(payload, data...)
-	resp, err := cl.request(ctx, payload, cl.defaultTimeout)
+	resp, err := cl.requestService(ctx, append([]byte{WRITE_DATA_BY_IDENTIFIER, pid}, data...), cl.defaultTimeout)
 	if err != nil {
 		return fmt.Errorf("WriteDataByIdentifier: %w", err)
 	}
-	// Responce not ready!
-	if resp.Data[1] == 0x7F && resp.Data[2] == WRITE_DATA_BY_IDENTIFIER && resp.Data[3] == 0x78 {
-		resp, err = cl.recv(ctx, time.Second*5)
-	}
-	if err != nil {
-		return fmt.Errorf("WriteDataByIdentifier: %w", err)
-	}
-
-	if err := CheckErr(resp); err != nil {
-		return err
-	}
-
-	return nil
+	return CheckErr(resp)
 }
 
 // $15 - WDBA - Write Data By Address
 // This service is used to write data to a memory location in the ECU. All memory locations start with $15 so this is just a apptool call path inside the WriteDataBIdentifier
+//
+// The request goes out as a first frame and consecutive frames even when it
+// would fit a single frame: that is the form the apptool path is known to
+// accept.
 func (cl *Client) WriteDataByAddress(ctx context.Context, address uint32, data []byte) error {
-	const (
-		appToolPath         = 0x15
-		firstFramePCI       = 0x10
-		consecutiveFramePCI = 0x20
-		flowControlPCI      = 0x30
-		requiredBlockSize   = 0x01
-		chunkSize           = 7 // 7 data bytes per consecutive frame
-	)
-
-	sendAndCheck := func(payload []byte, where string) (gocan.Frame, error) {
-		resp, err := cl.request(ctx, payload, cl.defaultTimeout)
-		if err != nil {
-			return gocan.Frame{}, fmt.Errorf("%s: %w", where, err)
-		}
-		if err := CheckErr(resp); err != nil {
-			return gocan.Frame{}, fmt.Errorf("%s: %w", where, err)
-		}
-		return resp, nil
+	const appToolPath = 0x15
+	if len(data) == 0 {
+		return errors.New("WriteDataByAddress: no data")
 	}
-
-	// ---- First frame --------------------------------------------------------
-	resp, err := sendAndCheck([]byte{
-		firstFramePCI, byte(len(data)) + 6, WRITE_DATA_BY_IDENTIFIER, appToolPath,
-		byte(address >> 16), byte(address >> 8), byte(address), byte(len(data)),
-	}, "WriteDataByAddress[1]")
+	req := append([]byte{WRITE_DATA_BY_IDENTIFIER, appToolPath, byte(address >> 16), byte(address >> 8), byte(address), byte(len(data))}, data...)
+	resp, err := cl.transfer(ctx, req, cl.defaultTimeout)
 	if err != nil {
-		return err
+		return fmt.Errorf("WriteDataByAddress: %w", err)
 	}
-	if resp.Data[0] != flowControlPCI || resp.Data[1] != requiredBlockSize {
-		return errors.New("WriteDataByAddress[3]: invalid response to initial request")
-	}
-
-	// ---- Consecutive frames -------------------------------------------------
-	seq := byte(0x21)
-	for off := 0; off < len(data); {
-		n := min(len(data)-off, chunkSize)
-		pkt := make([]byte, 0, 1+n)
-		pkt = append(pkt, seq)
-		pkt = append(pkt, data[off:off+n]...)
-		off += n
-
-		if _, err := sendAndCheck(pkt, "WriteDataByAddress[4]"); err != nil {
-			return err
-		}
-
-		seq = consecutiveFramePCI | ((seq + 1) & 0x0F)
-	}
-
-	return nil
+	return CheckErr(resp)
 }
 
 func (cl *Client) WriteDataByAddress2(ctx context.Context, address uint32, data []byte) error {
-	resp, err := cl.request(ctx, []byte{0x10, byte(len(data)) + 6, WRITE_DATA_BY_IDENTIFIER, 0x15, byte(address >> 16), byte(address >> 8), byte(address), byte(len(data))}, cl.defaultTimeout)
-	if err != nil {
-		return fmt.Errorf("WriteDataByAddress[1]: %w", err)
-	}
-	if err := CheckErr(resp); err != nil {
-		return fmt.Errorf("WriteDataByAddress[2]: %w", err)
-	}
-	if resp.Data[0] != 0x30 || resp.Data[1] != 0x01 {
-		return errors.New("WriteDataByAddress[3]: invalid response to initial request")
-	}
-	seq := byte(0x21)
-	for offset := 0; offset < len(data); {
-		n := 7
-		remaining := len(data) - offset
-		if remaining < n {
-			n = remaining
-		}
-		pkg := make([]byte, 1+n)
-		pkg[0] = seq
-		copy(pkg[1:], data[offset:offset+n])
-		offset += n
-		resp, err := cl.request(ctx, pkg, cl.defaultTimeout)
-		if err != nil {
-			return fmt.Errorf("WriteDataByAddress[4]: %w", err)
-		}
-		if err := CheckErr(resp); err != nil {
-			return fmt.Errorf("WriteDataByAddress[5]: %w", err)
-		}
-		seq = 0x20 | ((seq + 1) & 0x0F)
-	}
-	return nil
-}
-
-func (cl *Client) writeDataByIdentifierMultiframe(ctx context.Context, pid byte, data []byte) error {
-	r := bytes.NewReader(data)
-	firstPart := make([]byte, 4)
-	_, err := r.Read(firstPart)
-	if err != nil {
-		if err == io.EOF {
-			// do nothing
-		} else {
-			return err
-		}
-	}
-	leng := byte(len(data)) + 2
-	payload := append([]byte{0x10, leng, WRITE_DATA_BY_IDENTIFIER, pid}, firstPart...)
-	resp, err := cl.request(ctx, payload, cl.defaultTimeout)
-	if err != nil {
-		return err
-	}
-	if err := CheckErr(resp); err != nil {
-		return err
-	}
-
-	if resp.Data[0] != 0x30 || resp.Data[1] > 0x01 {
-		log.Println(resp.String())
-		return errors.New("invalid response to initial writeDataByIdentifier")
-	}
-
-	delay := resp.Data[2]
-
-	var seq byte = 0x21
-	for r.Len() > 0 {
-		pkg := []byte{seq}
-	inner:
-		for i := 1; i < 8; i++ {
-			b, err := r.ReadByte()
-			if err != nil {
-				if err == io.EOF {
-					break inner
-				}
-				return err
-			}
-			pkg = append(pkg, b)
-		}
-
-		if r.Len() > 0 {
-			cl.c.Send(ctx, gocan.NewFrame(cl.canID, pkg))
-			time.Sleep(time.Duration(delay) * time.Millisecond)
-		} else {
-			resp, err := cl.request(ctx, pkg, cl.defaultTimeout)
-			if err != nil {
-				return err
-			}
-			if err := CheckErr(resp); err != nil {
-				return err
-			}
-		}
-
-		seq++
-		if seq == 0x30 {
-			seq = 0x20
-		}
-	}
-	return nil
+	return cl.WriteDataByAddress(ctx, address, data)
 }
 
 // 8.15 TesterPresent ($3E) Service

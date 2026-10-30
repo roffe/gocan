@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -345,9 +346,6 @@ func TestWriteDataByIdentifierHonoursSTmin(t *testing.T) {
 }
 
 func TestWriteDataByIdentifierSixBytes(t *testing.T) {
-	if os.Getenv("GOCAN_BUG_TESTS") == "" {
-		t.Skip("BUG: WriteDataByIdentifier sends 6 data bytes as a single frame, cut to 8 bytes with PCI 8")
-	}
 	data := []byte{1, 2, 3, 4, 5, 6}
 	e := &fakeECU{handle: func(req []byte) [][]byte { return [][]byte{{0x7B, req[1]}} }}
 	cl, _ := newECUClient(t, e)
@@ -357,27 +355,193 @@ func TestWriteDataByIdentifierSixBytes(t *testing.T) {
 	e.check(t, append([]byte{WRITE_DATA_BY_IDENTIFIER, 0x01}, data...))
 }
 
-// With block size 1 the ECU sends flow control after every consecutive
-// frame. A tester that does not wait for it finds that flow control in the
-// window for the write's answer, which the ECU takes longer to send.
-func TestWriteDataByIdentifierBlockSizeOne(t *testing.T) {
-	if os.Getenv("GOCAN_BUG_TESTS") == "" {
-		t.Skip("BUG: writeDataByIdentifierMultiframe accepts block size 1 but never waits for the flow control after each consecutive frame")
-	}
-	e := &fakeECU{bs: 1, handle: func([]byte) [][]byte { return [][]byte{negative(WRITE_DATA_BY_IDENTIFIER, 0x22)} }}
-	var node *gocantest.Node
+// slowECU is e answering flow control 5 ms after the frame that asks for it
+// and requests 20 ms after their last frame. A consecutive frame sent before
+// the flow control it waits for fails t.
+func slowECU(t *testing.T, e *fakeECU) *Client {
+	t.Helper()
+	var (
+		node *gocantest.Node
+		mu   sync.Mutex
+		owed bool
+	)
 	node = &gocantest.Node{Reply: func(f gocan.Frame) []gocan.Frame {
+		mu.Lock()
+		if f.Data[0]>>4 == 2 && owed {
+			t.Errorf("consecutive frame [% 02X] sent before the flow control", f.Bytes())
+		}
+		mu.Unlock()
 		for _, r := range e.reply(f) {
+			fc := r.Data[0]>>4 == 3
 			d := 20 * time.Millisecond
-			if r.Data[0]>>4 == 3 {
+			if fc {
 				d = 5 * time.Millisecond
+				mu.Lock()
+				owed = true
+				mu.Unlock()
 			}
-			time.AfterFunc(d, func() { node.Deliver(r) })
+			time.AfterFunc(d, func() {
+				if fc {
+					mu.Lock()
+					owed = false
+					mu.Unlock()
+				}
+				node.Deliver(r)
+			})
 		}
 		return nil
 	}}
-	if err := newTestClient(t, node).WriteDataByIdentifier(context.Background(), 0x90, vin); err == nil {
-		t.Fatal("write reported done; the ECU refused it")
+	return newTestClient(t, node)
+}
+
+// With a block size the tester waits for flow control after every block of
+// consecutive frames. A tester that does not finds that flow control in the
+// window for the write's answer.
+func TestTransferWaitsForFlowControl(t *testing.T) {
+	t.Parallel()
+	data := counting(40) // 4 bytes in the first frame, 6 consecutive frames
+	for _, bs := range []byte{1, 2, 4} {
+		t.Run(fmt.Sprint("block size ", bs), func(t *testing.T) {
+			t.Parallel()
+			e := &fakeECU{bs: bs, handle: func(req []byte) [][]byte { return [][]byte{{0x7B, req[1]}} }}
+			if err := slowECU(t, e).WriteDataByIdentifier(context.Background(), 0x90, data); err != nil {
+				t.Fatal(err)
+			}
+			e.check(t, append([]byte{WRITE_DATA_BY_IDENTIFIER, 0x90}, data...))
+		})
+	}
+	t.Run("refused", func(t *testing.T) {
+		t.Parallel()
+		e := &fakeECU{bs: 1, handle: func([]byte) [][]byte { return [][]byte{negative(WRITE_DATA_BY_IDENTIFIER, 0x22)} }}
+		wantNRC(t, slowECU(t, e).WriteDataByIdentifier(context.Background(), 0x90, vin), WRITE_DATA_BY_IDENTIFIER, 0x22)
+	})
+}
+
+func TestTransferFlowControl(t *testing.T) {
+	waitFC := gocan.NewFrame(0x7E8, []byte{0x31, 0x00, 0x00, 0, 0, 0, 0, 0})
+	for _, tc := range []struct {
+		name   string
+		before []gocan.Frame // sent ahead of the ECU's clear to send
+		ok     bool
+	}{
+		{"wait", slices.Repeat([]gocan.Frame{waitFC}, maxFlowControlWaits), true},
+		{"too many waits", slices.Repeat([]gocan.Frame{waitFC}, maxFlowControlWaits+1), false},
+		{"overflow", []gocan.Frame{gocan.NewFrame(0x7E8, []byte{0x32, 0x00, 0x00, 0, 0, 0, 0, 0})}, false},
+		{"short", []gocan.Frame{gocan.NewFrame(0x7E8, []byte{0x30, 0x00})}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := &fakeECU{handle: func(req []byte) [][]byte { return [][]byte{{0x7B, req[1]}} }}
+			node := &gocantest.Node{Reply: func(f gocan.Frame) []gocan.Frame {
+				out := e.reply(f)
+				if f.Data[0]>>4 == 1 {
+					out = append(slices.Clone(tc.before), out...)
+				}
+				return out
+			}}
+			err := newTestClient(t, node).WriteDataByIdentifier(context.Background(), 0x90, vin)
+			if tc.ok {
+				if err != nil {
+					t.Fatal(err)
+				}
+				e.check(t, vinWrite)
+				return
+			}
+			if err == nil {
+				t.Fatal("transfer went on")
+			}
+			if sent := node.Sent(); len(sent) != 1 {
+				t.Errorf("sent %d consecutive frames, want none", len(sent)-1)
+			}
+		})
+	}
+}
+
+func TestSeparationTime(t *testing.T) {
+	for b, want := range map[byte]time.Duration{
+		0x00: 0,
+		0x14: 20 * time.Millisecond,
+		0x7F: 127 * time.Millisecond,
+		0xF1: 100 * time.Microsecond,
+		0xF9: 900 * time.Microsecond,
+		0x80: 127 * time.Millisecond, // reserved
+		0xF0: 127 * time.Millisecond, // reserved
+		0xFA: 127 * time.Millisecond, // reserved
+	} {
+		if got := separationTime(b); got != want {
+			t.Errorf("separationTime(%#02x) = %v, want %v", b, got, want)
+		}
+	}
+}
+
+// STmin separates consecutive frames, not a flow control from the first
+// consecutive frame after it.
+func TestTransferPausesSTminBetweenConsecutiveFrames(t *testing.T) {
+	pauses := recordWaits(t)
+	data := counting(40) // 6 consecutive frames
+	e := &fakeECU{stmin: 0xF5, handle: func(req []byte) [][]byte { return [][]byte{{0x7B, req[1]}} }}
+	cl, _ := newECUClient(t, e)
+	if err := cl.WriteDataByIdentifier(context.Background(), 0x90, data); err != nil {
+		t.Fatal(err)
+	}
+	if want := slices.Repeat([]time.Duration{500 * time.Microsecond}, 5); !slices.Equal(*pauses, want) {
+		t.Errorf("paused %v, want %v", *pauses, want)
+	}
+	e.check(t, append([]byte{WRITE_DATA_BY_IDENTIFIER, 0x90}, data...))
+}
+
+func TestTransferStopsOnSendError(t *testing.T) {
+	pauses := recordWaits(t)
+	unplugged := errors.New("adapter unplugged")
+	node := &gocantest.Node{}
+	node.Reply = func(f gocan.Frame) []gocan.Frame {
+		if f.Data[0]>>4 == 1 {
+			node.Deliver(gocan.NewFrame(0x7E8, []byte{0x30, 0x00, 0x7F, 0, 0, 0, 0, 0}))
+			node.Unplug(unplugged)
+		}
+		return nil
+	}
+	if err := newTestClient(t, node).WriteDataByIdentifier(context.Background(), 0x90, counting(40)); !errors.Is(err, unplugged) {
+		t.Fatalf("err = %v, want %v", err, unplugged)
+	}
+	if len(*pauses) != 0 {
+		t.Errorf("paused %v after the failed send", *pauses)
+	}
+}
+
+// A first frame carries an 8-bit length.
+func TestRequestTooLongForOneTransfer(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		write func(context.Context, *Client) error
+		ok    bool
+	}{
+		{"WriteDataByIdentifier 253", func(ctx context.Context, cl *Client) error { return cl.WriteDataByIdentifier(ctx, 0x90, counting(253)) }, true},
+		{"WriteDataByIdentifier 254", func(ctx context.Context, cl *Client) error { return cl.WriteDataByIdentifier(ctx, 0x90, counting(254)) }, false},
+		{"WriteDataByAddress 249", func(ctx context.Context, cl *Client) error {
+			return cl.WriteDataByAddress(ctx, 0x102030, counting(249))
+		}, true},
+		{"WriteDataByAddress 250", func(ctx context.Context, cl *Client) error {
+			return cl.WriteDataByAddress(ctx, 0x102030, counting(250))
+		}, false},
+		{"DynamicallyDefineMessage 127", func(ctx context.Context, cl *Client) error {
+			return cl.DynamicallyDefineMessage(ctx, make([]uint16, 127)...)
+		}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := &fakeECU{handle: func(req []byte) [][]byte { return [][]byte{{req[0] + 0x40, req[1]}} }}
+			cl, node := newECUClient(t, e)
+			err := tc.write(context.Background(), cl)
+			switch {
+			case tc.ok && err != nil:
+				t.Fatal(err)
+			case tc.ok:
+				e.noViolations(t)
+			case err == nil:
+				t.Fatal("too long a request accepted")
+			case len(node.Sent()) != 0:
+				t.Errorf("sent %v", node.Sent())
+			}
+		})
 	}
 }
 
@@ -428,25 +592,66 @@ func TestWriteDataByAddressSequenceWraps(t *testing.T) {
 	}
 }
 
-// Busy after a multi-frame request asks for the request again: resending
-// only its last consecutive frame is not a request.
+// Busy after a multi-frame request asks for the whole request again,
+// whatever data it carries.
 func TestWriteDataByAddressBusy(t *testing.T) {
-	if os.Getenv("GOCAN_BUG_TESTS") == "" {
-		t.Skip("BUG: a busyRepeatRequest answer to a multi-frame request resends the last consecutive frame alone when its first data byte equals the service ID")
-	}
+	t.Parallel()
 	for _, w := range addressWrites {
 		for _, first := range []byte{0x01, WRITE_DATA_BY_IDENTIFIER} {
 			t.Run(fmt.Sprintf("%s/data %02X", w.name, first), func(t *testing.T) {
 				t.Parallel()
+				data := []byte{first, 1, 2, 3, 4, 5, 6}
 				e := &fakeECU{handle: func(req []byte) [][]byte { return [][]byte{negative(req[0], 0x21)} }}
 				cl, _ := newECUClient(t, e)
-				if err := w.write(cl, context.Background(), 0x102030, []byte{first, 1, 2, 3, 4, 5, 6}); err == nil {
-					t.Error("write reported done; the ECU stayed busy")
-				}
-				e.noViolations(t)
+				wantNRC(t, w.write(cl, context.Background(), 0x102030, data), WRITE_DATA_BY_IDENTIFIER, 0x21)
+				req := append([]byte{WRITE_DATA_BY_IDENTIFIER, 0x15, 0x10, 0x20, 0x30, byte(len(data))}, data...)
+				e.check(t, slices.Repeat([][]byte{req}, 1+busyRetries)...)
 			})
 		}
 	}
+	t.Run("then done", func(t *testing.T) {
+		t.Parallel()
+		replies := [][]byte{negative(WRITE_DATA_BY_IDENTIFIER, 0x21), {0x7B, 0x15}}
+		e := &fakeECU{handle: func([]byte) [][]byte {
+			r := replies[0]
+			replies = replies[1:]
+			return [][]byte{r}
+		}}
+		cl, _ := newECUClient(t, e)
+		if err := cl.WriteDataByAddress(context.Background(), 0x102030, ramData); err != nil {
+			t.Fatal(err)
+		}
+		e.check(t, ramWrite, ramWrite)
+	})
+}
+
+// The apptool write goes out as a first frame even when it would fit a
+// single frame, and refuses to write nothing.
+func TestWriteDataByAddressShort(t *testing.T) {
+	t.Run("one byte", func(t *testing.T) {
+		e := &fakeECU{handle: func(req []byte) [][]byte { return [][]byte{{0x7B, req[1]}} }}
+		cl, node := newECUClient(t, e)
+		if err := cl.WriteDataByAddress(context.Background(), 0x102030, []byte{0xAA}); err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, f := range node.Sent() {
+			got = append(got, fmt.Sprintf("% 02X", f.Bytes()))
+		}
+		if want := []string{"10 07 3B 15 10 20 30 01", "21 AA"}; !slices.Equal(got, want) {
+			t.Errorf("sent %q, want %q", got, want)
+		}
+		e.check(t, []byte{WRITE_DATA_BY_IDENTIFIER, 0x15, 0x10, 0x20, 0x30, 0x01, 0xAA})
+	})
+	t.Run("no data", func(t *testing.T) {
+		cl, node := newECUClient(t, &fakeECU{handle: silentECU})
+		if err := cl.WriteDataByAddress(context.Background(), 0x102030, nil); err == nil {
+			t.Fatal("empty write accepted")
+		}
+		if sent := node.Sent(); len(sent) != 0 {
+			t.Errorf("sent %v", sent)
+		}
+	})
 }
 
 // Every reply frame of a multi-frame write is dropped, duplicated and

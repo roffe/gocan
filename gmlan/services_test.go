@@ -296,9 +296,7 @@ func TestResponsePendingThenAnswer(t *testing.T) {
 }
 
 func TestResponsePendingExtendsTheWait(t *testing.T) {
-	if os.Getenv("GOCAN_BUG_TESTS") == "" {
-		t.Skip("BUG: request gives up defaultTimeout after the request even when the ECU answered $78 responsePending")
-	}
+	t.Parallel()
 	for _, s := range services {
 		t.Run(s.name, func(t *testing.T) {
 			t.Parallel()
@@ -355,9 +353,6 @@ func TestClearDiagnosticInformationResponsePending(t *testing.T) {
 
 // GMW3110 7.2.8: the ECU may repeat $78 until it sends the final response.
 func TestClearDiagnosticInformationRepeatedResponsePending(t *testing.T) {
-	if os.Getenv("GOCAN_BUG_TESTS") == "" {
-		t.Skip("BUG: ClearDiagnosticInformation returns a second $78 responsePending as the final answer")
-	}
 	var node *gocantest.Node
 	e := &fakeECU{handle: func([]byte) [][]byte {
 		later(node, 20*time.Millisecond, negative(0x04, 0x78)...)
@@ -373,9 +368,6 @@ func TestClearDiagnosticInformationRepeatedResponsePending(t *testing.T) {
 
 // A buffered adapter hands over the $78 and the final answer in one burst.
 func TestClearDiagnosticInformationPendingAndAnswerBackToBack(t *testing.T) {
-	if os.Getenv("GOCAN_BUG_TESTS") == "" {
-		t.Skip("BUG: ClearDiagnosticInformation loses a final answer that arrives before it re-subscribes after $78")
-	}
 	e := &fakeECU{handle: func([]byte) [][]byte { return [][]byte{negative(0x04, 0x78), {0x44}} }}
 	cl, _ := newECUClient(t, e)
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
@@ -386,9 +378,6 @@ func TestClearDiagnosticInformationPendingAndAnswerBackToBack(t *testing.T) {
 }
 
 func TestClearDiagnosticInformationIgnoresStaleFrames(t *testing.T) {
-	if os.Getenv("GOCAN_BUG_TESTS") == "" {
-		t.Skip("BUG: ClearDiagnosticInformation takes any frame on the reply ID as its answer, a late reply to an earlier request included")
-	}
 	e := &fakeECU{handle: func([]byte) [][]byte {
 		return [][]byte{{0x5A, 0x18, 0xAA, 0xBB, 0xCC}, negative(0x04, 0x22)}
 	}}
@@ -510,19 +499,33 @@ func TestReadDataByPacketIdentifierDataByte7F(t *testing.T) {
 	}
 }
 
-func TestDynamicallyDefineMessageSendsThePIDs(t *testing.T) {
-	if os.Getenv("GOCAN_BUG_TESTS") == "" {
-		t.Skip("BUG: DynamicallyDefineMessage ignores ids and always defines PIDs 038D and 0101")
+func TestDynamicallyDefineMessage(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		pids []uint16
+		req  []byte
+	}{
+		{"one frame", []uint16{0x1234, 0x5678}, []byte{DYNAMICALLY_DEFINE_MESSAGE, 0xFE, 0x12, 0x34, 0x56, 0x78}},
+		{"multi-frame", []uint16{0x1234, 0x5678, 0x9ABC, 0xDEF0}, []byte{DYNAMICALLY_DEFINE_MESSAGE, 0xFE, 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := &fakeECU{handle: func([]byte) [][]byte { return [][]byte{{0x6C, 0xFE}} }}
+			cl, _ := newECUClient(t, e)
+			if err := cl.DynamicallyDefineMessage(context.Background(), tc.pids...); err != nil {
+				t.Fatal(err)
+			}
+			e.check(t, tc.req)
+		})
 	}
-	e := &fakeECU{handle: func([]byte) [][]byte { return [][]byte{{0x6C, 0xFE}} }}
-	cl, _ := newECUClient(t, e)
-	if err := cl.DynamicallyDefineMessage(context.Background(), 0x1234, 0x5678); err != nil {
-		t.Fatal(err)
-	}
-	reqs := e.requests()
-	if len(reqs) != 1 || len(reqs[0]) < 2 || reqs[0][0] != DYNAMICALLY_DEFINE_MESSAGE || !bytes.Equal(reqs[0][2:], []byte{0x12, 0x34, 0x56, 0x78}) {
-		t.Errorf("ECU received % 02X, want $2C, a DPID, then PIDs 1234 5678", reqs)
-	}
+	t.Run("no PIDs", func(t *testing.T) {
+		cl, node := newECUClient(t, &fakeECU{handle: silentECU})
+		if err := cl.DynamicallyDefineMessage(context.Background()); err == nil {
+			t.Fatal("empty definition accepted")
+		}
+		if sent := node.Sent(); len(sent) != 0 {
+			t.Errorf("sent %v", sent)
+		}
+	})
 }
 
 func TestDeviceControlWithCodeTooLongForASingleFrame(t *testing.T) {
@@ -537,4 +540,22 @@ func TestDeviceControlWithCodeTooLongForASingleFrame(t *testing.T) {
 	if err == nil {
 		e.check(t, append([]byte{DEVICE_CONTROL, 0x60}, code...))
 	}
+}
+
+func TestResponsePendingLimit(t *testing.T) {
+	answer := func(t *testing.T, pending int) error {
+		e := &fakeECU{handle: func(req []byte) [][]byte {
+			return append(slices.Repeat([][]byte{negative(req[0], 0x78)}, pending), []byte{0x50})
+		}}
+		cl, _ := newECUClient(t, e)
+		return cl.InitiateDiagnosticOperation(context.Background(), LEV_DADTC)
+	}
+	t.Run("at the limit", func(t *testing.T) {
+		if err := answer(t, maxResponsePending); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("past it", func(t *testing.T) {
+		wantNRC(t, answer(t, maxResponsePending+1), INITIATE_DIAGNOSTIC_OPERATION, 0x78)
+	})
 }
