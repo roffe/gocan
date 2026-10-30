@@ -369,6 +369,16 @@ func TestRequestUploadRefused(t *testing.T) {
 	}
 }
 
+func TestRequestUploadOtherService(t *testing.T) {
+	e := &fakeT7{access: DEVELOPMENT_PRIORITY, mem: make([]byte, 0x1000), answer: map[byte]func([]byte) []byte{
+		REQUEST_UPLOAD: answerWith(REQUEST_DOWNLOAD|0x40, 0xFF),
+	}}
+	c, _ := newT7(t, e)
+	if err := c.RequestUpload(t.Context(), 0x100, 0x10); err == nil {
+		t.Fatal("RequestUpload accepted a 74 reply")
+	}
+}
+
 // The first row of requestUpload asks for a 0x270 confirmation; without one
 // the request fails.
 func TestRequestUploadUnconfirmedRow(t *testing.T) {
@@ -544,6 +554,16 @@ func TestWriteDataByAddressRefused(t *testing.T) {
 			c, _ := newT7(t, &fakeT7{access: tc.access, mem: make([]byte, 0x100)})
 			checkErrIs(t, c.WriteDataByAddress(t.Context(), tc.addr, testImage(10)), tc.wantErr)
 		})
+	}
+}
+
+func TestWriteDataByAddressOtherService(t *testing.T) {
+	e := &fakeT7{access: DEVELOPMENT_PRIORITY, mem: make([]byte, 0x100), answer: map[byte]func([]byte) []byte{
+		WRITE_DATA_BY_ADDRESS: answerWith(WRITE_DATA_BY_LOCAL_IDENTIFIER | 0x40),
+	}}
+	c, _ := newT7(t, e)
+	if err := c.WriteDataByAddress(t.Context(), 0x20, testImage(10)); err == nil {
+		t.Fatal("WriteDataByAddress accepted a 7B reply")
 	}
 }
 

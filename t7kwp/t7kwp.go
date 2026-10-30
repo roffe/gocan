@@ -248,7 +248,7 @@ func (t *Client) recvChunked(ctx context.Context, resp gocan.Frame, firstOffset 
 // ReadECUIdentification reads one ECU identification field (service 0x1A) — the
 // PI-area entries: VIN 0x90, part number 0x91, engine type 0x97 and friends.
 func (t *Client) ReadECUIdentification(ctx context.Context, id byte) ([]byte, error) {
-	resp, err := t.request(ctx, REQ_MSG_ID, []byte{0x40, 0xA1, 0x02, READ_ECU_IDENTIFICATION, id}, DefaultTimeout, t.responseID)
+	resp, err := t.requestReply(ctx, newFrame(REQ_MSG_ID, []byte{0x40, 0xA1, 0x02, READ_ECU_IDENTIFICATION, id}), READ_ECU_IDENTIFICATION, id)
 	if err != nil {
 		return nil, fmt.Errorf("ReadECUIdentification[1]: %w", err)
 	}
@@ -1003,7 +1003,9 @@ func (t *Client) RequestUpload(ctx context.Context, address, length uint32) erro
 			if err := checkErr(resp); err != nil {
 				return err
 			}
-
+			if resp.Data[3] != REQUEST_UPLOAD|0x40 {
+				return fmt.Errorf("RequestUpload: unexpected response: %s", resp.String())
+			}
 		} else {
 			rctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
 			resp, err := t.c.Request(rctx, msg.frame, REQ_CHUNK_CONF_ID)
@@ -1035,6 +1037,9 @@ func (t *Client) sendLong(ctx context.Context, data []byte) error {
 		}
 		if err := checkErr(resp); err != nil {
 			return err
+		}
+		if i == len(messages)-1 && resp.Data[3] != data[1]|0x40 {
+			return fmt.Errorf("%s: unexpected response: %s", getFunctionName(), resp.String())
 		}
 	}
 	return nil

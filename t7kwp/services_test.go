@@ -3,7 +3,6 @@ package t7kwp
 import (
 	"bytes"
 	"errors"
-	"os"
 	"testing"
 
 	"github.com/roffe/gocan/v2"
@@ -35,9 +34,6 @@ func TestReadECUIdentification(t *testing.T) {
 
 // A late reply to an earlier identification request is not this one's answer.
 func TestReadECUIdentificationSkipsOtherReplies(t *testing.T) {
-	if os.Getenv("GOCAN_BUG_TESTS") == "" {
-		t.Skip("BUG: ReadECUIdentification takes the first 0x258 frame without checking the 5A <id> echo")
-	}
 	c := newClient(t, &gocantest.Node{Reply: func(f gocan.Frame) []gocan.Frame {
 		if f.ID == REQ_MSG_ID && f.Data[3] == READ_ECU_IDENTIFICATION {
 			return []gocan.Frame{
@@ -227,6 +223,13 @@ func TestSendEU0DRegistrationKey(t *testing.T) {
 	c, node := newT7(t, &fakeT7{})
 	if err := c.SendEU0DRegistrationKey(t.Context(), key[:3]); err == nil || len(node.Sent()) != 0 {
 		t.Fatalf("3-byte key: err = %v after %d frames, want an error and nothing sent", err, len(node.Sent()))
+	}
+}
+
+func TestSendEU0DRegistrationKeyLongOtherService(t *testing.T) {
+	c, _ := newT7(t, &fakeT7{answer: map[byte]func([]byte) []byte{EU0D_SET_REGISTRATION_KEY: answerWith(TESTER_PRESENT | 0x40)}})
+	if err := c.SendEU0DRegistrationKeyLong(t.Context(), []byte{1, 2, 3, 4}); err == nil {
+		t.Fatal("accepted a 7E reply")
 	}
 }
 
