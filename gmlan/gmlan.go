@@ -45,6 +45,7 @@ const (
 	WRITE_DATA_BY_IDENTIFIER       = 0x3B
 	DYNAMICALLY_DEFINE_MESSAGE     = 0x2C
 	READ_MEMORY_BY_ADDRESS         = 0x23
+	WRITE_MEMORY_BY_ADDRESS        = 0x3D
 )
 
 func New(c *gocan.Bus, canID uint32, recvID ...uint32) *Client {
@@ -647,6 +648,27 @@ func (cl *Client) WriteDataByIdentifier(ctx context.Context, pid byte, data []by
 		return fmt.Errorf("WriteDataByIdentifier: %w", err)
 	}
 	return CheckErr(resp)
+}
+
+// WriteMemoryByAddress ($3D) writes data to the node's memory starting at
+// address, with the same 3-byte address as ReadMemoryByAddress. A request too
+// long for a single frame goes out as a first frame and consecutive frames.
+func (cl *Client) WriteMemoryByAddress(ctx context.Context, address uint32, data []byte) error {
+	if len(data) == 0 {
+		return errors.New("WriteMemoryByAddress: no data")
+	}
+	req := append([]byte{WRITE_MEMORY_BY_ADDRESS, byte(address >> 16), byte(address >> 8), byte(address)}, data...)
+	resp, err := cl.requestService(ctx, req, cl.defaultTimeout)
+	if err != nil {
+		return fmt.Errorf("WriteMemoryByAddress[1]: %w", err)
+	}
+	if err := CheckErr(resp); err != nil {
+		return fmt.Errorf("WriteMemoryByAddress[2]: %w", err)
+	}
+	if resp.Data[1] != WRITE_MEMORY_BY_ADDRESS+0x40 {
+		return fmt.Errorf("WriteMemoryByAddress[3]: unexpected response %X", resp.Data[:])
+	}
+	return nil
 }
 
 // $15 - WDBA - Write Data By Address

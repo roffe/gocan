@@ -117,6 +117,20 @@ var services = []service{
 		resp: []byte{0x76},
 	},
 	{
+		name: "WriteMemoryByAddress",
+		call: func(ctx context.Context, cl *Client) error {
+			return cl.WriteMemoryByAddress(ctx, 0x000123, []byte{0xA1, 0xA2, 0xA3})
+		},
+		req:  []byte{WRITE_MEMORY_BY_ADDRESS, 0x00, 0x01, 0x23, 0xA1, 0xA2, 0xA3},
+		resp: []byte{0x7D, 0x00, 0x01, 0x23},
+	},
+	{
+		name: "WriteMemoryByAddress multi-frame",
+		call: func(ctx context.Context, cl *Client) error { return cl.WriteMemoryByAddress(ctx, 0x0C0010, ramData) },
+		req:  append([]byte{WRITE_MEMORY_BY_ADDRESS, 0x0C, 0x00, 0x10}, ramData...),
+		resp: []byte{0x7D, 0x0C, 0x00, 0x10},
+	},
+	{
 		name: "WriteDataByIdentifier empty",
 		call: func(ctx context.Context, cl *Client) error { return cl.WriteDataByIdentifier(ctx, 0x63, nil) },
 		req:  []byte{WRITE_DATA_BY_IDENTIFIER, 0x63},
