@@ -88,11 +88,12 @@ type Combi struct {
 	cfg gocan.Config
 	bus *gocan.Bus
 
-	usbCtx *libusb.Context
-	dev    *libusb.Device
-	handle *libusb.DeviceHandle
-	useEP2 bool // device exposes OUT on EP2 instead of EP5
-	inMPS  int  // IN endpoint wMaxPacketSize; readLoop reads exactly this much
+	usbCtx   *libusb.Context
+	dev      *libusb.Device
+	handle   *libusb.DeviceHandle
+	useEP2   bool // device exposes OUT on EP2 instead of EP5
+	inMPS    int  // IN endpoint wMaxPacketSize; readLoop reads exactly this much
+	hwFilter bool // Open installed a non-empty firmware filter
 
 	closeOnce sync.Once
 	readDone  chan struct{} // closed when readLoop returns
@@ -182,12 +183,22 @@ func (ca *Combi) Open(ctx context.Context, bus *gocan.Bus) error {
 
 	// Install the firmware acceptance filter only AFTER the read loop is
 	// running (it delivers the ack) and only on firmware >= 1.2; older
-	// firmware has no cmdCanFilter and the Bus filters host-side.
-	if n := len(ca.cfg.CANFilter); n > 0 && verErr == nil && (major > 1 || (major == 1 && minor >= 2)) {
-		if major == 1 && minor == 2 && n > maxHWFilterIDs12 {
-			ca.emit(gocan.EventTypeInfo, fmt.Sprintf("%d CAN filter ids, firmware 1.2 takes %d: filtering host-side", n, maxHWFilterIDs12))
-		} else if err := ca.setHardwareFilter(ca.cfg.CANFilter); err != nil {
+	// firmware has no cmdCanFilter and the Bus filters host-side. The
+	// firmware keeps a filter until it loses power, so it is always set:
+	// no ids clears one another program left behind.
+	if verErr == nil && (major > 1 || (major == 1 && minor >= 2)) {
+		ids, limit := ca.cfg.CANFilter, maxHWFilterIDs
+		if major == 1 && minor == 2 {
+			limit = maxHWFilterIDs12
+		}
+		if len(ids) > limit {
+			ca.emit(gocan.EventTypeInfo, fmt.Sprintf("%d CAN filter ids, firmware %d.%d takes %d: filtering host-side", len(ids), major, minor, limit))
+			ids = nil
+		}
+		if err := ca.setHardwareFilter(ids); err != nil {
 			ca.emit(gocan.EventTypeWarning, fmt.Sprintf("failed to set CAN filter: %v", err))
+		} else {
+			ca.hwFilter = len(ids) > 0
 		}
 	}
 	return nil
@@ -196,6 +207,12 @@ func (ca *Combi) Open(ctx context.Context, bus *gocan.Bus) error {
 func (ca *Combi) Close() error {
 	ca.closeOnce.Do(func() {
 		_ = ca.canCtrl(0) // best-effort close CAN
+		if ca.hwFilter {
+			// the next program may expect every id (TrionicCANLib before
+			// it cleared the filter itself); the read loop may be gone, so
+			// the ack is left for the next open's drain
+			_, _ = ca.bulkOut([]byte{cmdCanFilter, 0x00, 0x00, termAck}, 200)
+		}
 		time.Sleep(20 * time.Millisecond)
 		ca.mu.Lock()
 		ca.closed = true
